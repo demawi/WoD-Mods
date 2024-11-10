@@ -1399,17 +1399,26 @@
 
                 tableEntry.push(center(dmgStat.result[1]+" / "+dmgStat.result[2]+" / "+dmgStat.result[3]));
                 const gesamtDamage = dmgStat.value + dmgStat.ruestung + dmgStat.resistenz;
-                const avgDamage = gesamtDamage / gesamtErfolge;
 
                 // Ausgehender Schaden
                 const dmgFn = function (a) {
                     return a.value + a.ruestung + a.resistenz;
                 };
                 const damageAverage = "(" + util.arrayMin(dmgStat.actions, dmgFn) + " - " + util.arrayMax(dmgStat.actions, dmgFn) + ")";
-                tableEntry.push(center((dmgStat.value + dmgStat.ruestung + dmgStat.resistenz) + "<br>" + "(" + util.round(avgDamage, 2) + ")"));
+
+                if (gesamtErfolge > 0 && gesamtDamage > 0) {
+                    const avgDamage = gesamtDamage / gesamtErfolge;
+                    tableEntry.push(center((gesamtDamage) + "<br>" + "(" + util.round(avgDamage, 2) + ")"));
+                } else {
+                    tableEntry.push(center((gesamtDamage)));
+                }
 
                 // Direkter Schaden
-                tableEntry.push(center(dmgStat.value + "<br>" + "(" + util.round(dmgStat.value / gesamtErfolge, 2) + ")"));
+                if (gesamtErfolge > 0 && dmgStat.value > 0) {
+                    tableEntry.push(center(dmgStat.value + "<br>" + "(" + util.round(dmgStat.value / gesamtErfolge, 2) + ")"));
+                } else {
+                    tableEntry.push(center(dmgStat.value));
+                }
                 tableEntry.push(center(mitVorzeichen(-dmgStat.ruestung)));
                 tableEntry.push(center(mitVorzeichen(-dmgStat.resistenz)));
                 var aw = Array(); // Angriffswerte
