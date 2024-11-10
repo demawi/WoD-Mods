@@ -3,7 +3,7 @@
 // @namespace      demawi
 // @description    erweiterte die Kampfstatistiken
 // @version        0.1
-// @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.js
+// @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.user.js
 // @grant   	   GM.getValue
 // @grant  		   GM.setValue
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
