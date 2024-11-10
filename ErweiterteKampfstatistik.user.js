@@ -2,7 +2,7 @@
 // @name           WoD-Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    erweiterte die Kampfstatistiken
-// @version        0.1
+// @version        0.11
 // @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.user.js
 // @grant   	   GM.getValue
 // @grant  		   GM.setValue
