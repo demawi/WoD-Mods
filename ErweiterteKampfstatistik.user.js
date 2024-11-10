@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name           WoD-Erweiterte Kampfstatistik
 // @namespace      demawi
-// @description    erweiterte die Kampfstatistiken
+// @description    Erweitert die World of Dungeons Kampfstatistiken
 // @version        0.11
 // @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.user.js
-// @grant   	   GM.getValue
-// @grant  		   GM.setValue
+// @grant          GM.getValue
+// @grant          GM.setValue
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
