@@ -19,68 +19,126 @@
 // *************************************************************
 (function() {
     'use strict';
-    const version = "0.12";
-    const stand = "01.11.2024";
-    const reportDataVersion = 1;
+    const version = "0.13";
+    const stand = "10.11.2024";
+    const currentReportDataVersion = 1;
     var thisReport;
 
     // Einstiegspunkt
-    function startMod() {
+    async function startMod() {
         if(WOD_istSeite_Kampfbericht()) {
             const reportId = document.getElementsByName("report_id[0]")[0].value;
-            loadReportStorage(reportId, () => {
-                var levelData = readAndStoreKampfbericht(reportId);
-                if (levelData) {
-                    levelData.dataVersion = reportDataVersion;
-                    var roundCount = levelData.roundCount;
+            await storage.loadThisReport(reportId);
 
-                    var hinweisText = ": " + roundCount + " Runden";
-                    const reportProgress = getReportProgress();
-                    if (reportProgress.missingReports.length > 0) {
-                        hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
-                    }
-                    statistikAusgabe_Level([levelData], hinweisText);
-                    saveReportStorage();
+            var levelData = readAndStoreKampfbericht(reportId);
+            if (levelData) {
+                levelData.dataVersion = currentReportDataVersion;
+                var roundCount = levelData.roundCount;
+
+                var hinweisText = ": " + roundCount + " Runden";
+                const reportProgress = getReportProgress();
+                if (reportProgress.missingReports.length > 0) {
+                    hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                 }
-            });
+                statistikAusgabe_Level([levelData], hinweisText);
+                await storage.saveThisReport();
+            }
+
         }
         if(WOD_istSeite_Kampfstatistik()) {
             const reportId = document.getElementsByName("report_id[0]")[0].value;
-            loadReportStorage(reportId, () => {
-                if (thisReport) {
-                    const reportProgress = getReportProgress();
+            await storage.loadThisReport(reportId);
+            if (thisReport) {
+                const reportProgress = getReportProgress();
 
-                    var hinweisText = ": "+reportProgress.roundCount+" Runden ("+reportProgress.allRoundNumbers.join(", ")+")";
-                    if(reportProgress.foundReportCount < reportProgress.levelCount) {
-                        hinweisText += ". Es fehlen noch die Reports für folgende Level: "+reportProgress.missingReports.join(", ")+" (Bitte entsprechende Level aufrufen)";
-                    }
-                    // console.log(foundReportCount+" "+reportData.levelCount);
-                    statistikAusgabe_Level(reportProgress.levelDatas, hinweisText);
-                } else {
-                    statistikAusgabe_Level(null, ": Es fehlen noch alle Level-Reports!"+" (Bitte entsprechende Level aufrufen)");
+                var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
+                if (reportProgress.foundReportCount < reportProgress.levelCount) {
+                    hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                 }
-            });
+                // console.log(foundReportCount+" "+reportData.levelCount);
+                statistikAusgabe_Level(reportProgress.levelDatas, hinweisText);
+            } else {
+                statistikAusgabe_Level(null, ": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)");
+            }
+
         }
     }
 
-    function loadReportStorage(reportId, callback) {
-        const start = Date.now();
-        const storeId = "report_" + reportId;
-        GM.getValue(storeId, {}).then(function (value) {
-            console.log("Loaded report", value);
-            thisReport = value;
-            callback();
-        });
-    }
+    const storage = (function () {
+        var storage = {};
 
-    function saveReportStorage(callback) {
-        const storeId = "report_" + thisReport.id;
-        const promise = GM.setValue(storeId, thisReport);
-        console.log("Save report", thisReport);
-        if(callback) {
-            promise.then(callback);
+        var thisData;
+        storage.gmSetValue = async function (id, data) {
+            if (!thisData) thisData = await GM.getValue("data", {});
+            if (data) {
+                if (!thisData[id]) {
+                    thisData[id] = true;
+                    await GM.setValue("data", thisData);
+                }
+            } else { // delete
+                if (thisData[id]) {
+                    delete thisData[id];
+                    await GM.setValue("data", thisData);
+                }
+            }
+            await GM.setValue(id, data);
         }
-    }
+
+        var allReports; // reportId -> dataVersion - Registration
+        storage.gmSetReport = async function (id, report) {
+            if (!allReports) allReports = await GM.getValue("reportIds", {});
+            if (report) {
+                if (!allReports[id]) {
+                    allReports[id] = currentReportDataVersion;
+                    await GM.setValue("reportIds", allReports);
+                }
+                report.dataVersion = currentReportDataVersion;
+            } else { // delete
+                if (allReports[id]) {
+                    delete allReports[id];
+                    await GM.setValue("reportIds", allReports);
+                }
+            }
+            await storage.gmSetValue(id, report);
+        }
+
+        storage.gmGetReport = async function (id) {
+            const result = await GM.getValue(id, {});
+            // Alte Report-Veresion entdeckt => Der Report wird neu angelegt.
+            if (result.dataVersion < currentReportDataVersion) {
+                await gmSetReport(id); // delete
+                return {};
+            }
+            return result;
+        }
+
+        storage.validateAllReports = async function () {
+            if (!allReports) allReports = await GM.getValue("reportIds", {});
+            var somethingDeleted = false;
+            for (const [reportId, dataVersion] of Object.entries(allReports)) {
+                if (dataVersion < currentReportDataVersion) {
+                    delete allReports[reportId];
+                    somethingDeleted = true;
+                }
+            }
+            if (somethingDeleted) await gmSetValue("reportIds", allReports);
+        }
+
+        storage.loadThisReport = async function (reportId) {
+            const storeId = "report_" + reportId;
+            const result = await storage.gmGetReport(storeId);
+            thisReport = result;
+            console.log("Loaded report", result);
+        }
+
+        storage.saveThisReport = async function () {
+            const storeId = "report_" + thisReport.id;
+            await storage.gmSetReport(storeId, thisReport);
+            console.log("Stored report", thisReport);
+        }
+
+        return storage;
+    })();
 
     function getReportProgress() {
         var foundReportCount = 0;
