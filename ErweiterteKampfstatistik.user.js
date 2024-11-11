@@ -105,7 +105,7 @@
         storage.gmGetReport = async function (id) {
             const result = await GM.getValue(id, {});
             // Alte Report-Veresion entdeckt => Der Report wird neu angelegt.
-            if (result.dataVersion < currentReportDataVersion) {
+            if (!result.dataVersion || result.dataVersion < currentReportDataVersion) {
                 await gmSetReport(id); // delete
                 return {};
             }
