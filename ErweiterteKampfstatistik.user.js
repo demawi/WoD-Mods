@@ -353,6 +353,14 @@
                                         if (!subStats) return false;
                                         subStats.unit = actionTarget.unit;
                                         subStats.title = actionTarget.unit.typeRef;
+                                        if (actionTarget.unit.id.index) {
+                                            var unitCount = subStats.unitCount;
+                                            if (!unitCount) {
+                                                unitCount = {};
+                                                subStats.unitCount = unitCount;
+                                            }
+                                            unitCount[actionTarget.unit.id.index] = true;
+                                        }
                                     } else if (curFilter.endsWith("attackType")) {
                                         subStats = getStat(curStats, queryFilter, actionTarget.fertigkeit.type, "sub", "attackType");
                                         if (!subStats) return false;
@@ -1353,7 +1361,13 @@
                         filler+="<td style='border-right-style: hidden;'>&nbsp;</td>";
                     }
                 }
-                prefix = dmgStat.title ? dmgStat.title : prefixSplit[prefixSplit.length-1];
+                var unitCount = dmgStat.unitCount;
+                if (unitCount) {
+                    unitCount = " (" + Object.keys(unitCount).length + ")";
+                } else {
+                    unitCount = "";
+                }
+                prefix = dmgStat.title ? (dmgStat.title + unitCount) : prefixSplit[prefixSplit.length - 1];
                 return filler+"<td colspan="+(11-prefixSplit.length)+" style='text-align:left;vertical-align:middle;'>"+prefix+"</td>";
             }
 
@@ -1435,16 +1449,8 @@
                 dmgStat.targets.forEach(target => {
                     pw.push(Number(target.fertigkeit.wurf));
                 });
-                var awAvg = util.round(aw.reduce((sum, currentValue) => sum + currentValue, 0) / aw.length, 2);
-                var awMin = aw.reduce((a, b) => (a<b)? a : b, 4000);
-                var awMax = aw.reduce((a, b) => (a>b)? a : b, 0);
-
-                var pwAvg = util.round(pw.reduce((sum, currentValue) => sum + currentValue, 0) / pw.length, 2);
-                var pwMin = pw.reduce((a, b) => (a < b)? a : b, 4000);
-                var pwMax = pw.reduce((a, b) => (a > b)? a : b, 0);
-
-                tableEntry.push(center(awAvg+"<br>("+awMin+" - "+awMax+")"));
-                tableEntry.push(center(pwAvg+"<br>("+pwMin+" - "+pwMax+")"));
+                tableEntry.push(center(util.arrayAvg(aw, null, 2) + "<br>(" + util.arrayMin(aw) + " - " + util.arrayMax(pw) + ")"));
+                tableEntry.push(center(util.arrayAvg(pw, null, 2) + "<br>(" + util.arrayMin(pw) + " - " + util.arrayMax(pw) + ")"));
                 if(specificArray) {
                     tableEntry.push(getDmgTypeTable(specificArray));
                 } else {
@@ -1551,8 +1557,10 @@
             const correction = Math.pow(10, digits);
             return Math.round((num + Number.EPSILON) * correction) / correction;
         },
+
         arrayMin: function (array, fn) {
-            var result = 10000000;
+            if (!fn) fn = a => a;
+            var result = Number.MAX_SAFE_INTEGER;
             array.forEach(action => {
                 const cur = Number(fn(action));
                 if (cur < result) {
@@ -1562,7 +1570,8 @@
             return result;
         },
         arrayMax: function (array, fn) {
-            var result = -10000000;
+            if (!fn) fn = a => a;
+            var result = Number.MIN_SAFE_INTEGER;
             array.forEach(action => {
                 const cur = Number(fn(action));
                 if (cur > result) {
@@ -1571,18 +1580,23 @@
             });
             return result;
         },
-        arrayAvg: function (array, fn) {
-            var result = -10000000;
+        arrayAvg: function (array, fn, roundingDigits) {
+            if (!fn) fn = a => a;
+            var result = 0;
             array.forEach(action => {
                 result += Number(fn(action));
             });
-            return result / array.length;
+            result = result / array.length;
+            if (roundingDigits) {
+                result = this.round(result, roundingDigits);
+            }
+            return result;
         },
         searchHref: function(parentElement, name) {
             const hrefs = parentElement.getElementsByTagName("a");
             for(var i=0,l=hrefs.length;i<l;i++) {
                 const href = hrefs[i];
-                if(href.innerText == name) {
+                if (href.innerText === name) {
                     return href;
                 }
             }
@@ -1592,7 +1606,7 @@
             const hrefs = parentElement.getElementsByTagName("a");
             for(var i=0,l=hrefs.length;i<l;i++) {
                 const href = hrefs[i];
-                if(href.innerText == name) {
+                if (href.innerText === name) {
                     if(href.onmouseover) {
                         result = href.onmouseover.toString();
                         result = result.substring(result.indexOf("'")+1, result.lastIndexOf("'"));
