@@ -2,7 +2,7 @@
 // @name           WoD-Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.11
+// @version        0.13
 // @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.user.js
 // @grant          GM.getValue
 // @grant          GM.setValue
@@ -19,14 +19,16 @@
 // *************************************************************
 (function() {
     'use strict';
+    return;
     const version = "0.13";
     const stand = "10.11.2024";
     const currentReportDataVersion = 1;
     var thisReport;
+    console.log("Kampstatistik+ active");
 
     // Einstiegspunkt
     async function startMod() {
-        if(WOD_istSeite_Kampfbericht()) {
+        if (WOD_istSeite_Kampfbericht()) { // Einzelseite
             const reportId = document.getElementsByName("report_id[0]")[0].value;
             await storage.loadThisReport(reportId);
 
@@ -45,10 +47,10 @@
             }
 
         }
-        if(WOD_istSeite_Kampfstatistik()) {
+        if (WOD_istSeite_Kampfstatistik()) { // Übersichtsseite
             const reportId = document.getElementsByName("report_id[0]")[0].value;
             await storage.loadThisReport(reportId);
-            if (thisReport) {
+            if (thisReport.levelCount) {
                 const reportProgress = getReportProgress();
 
                 var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
