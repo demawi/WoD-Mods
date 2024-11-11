@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name           WoD-Erweiterte Kampfstatistik
+// @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
 // @version        0.13
@@ -21,7 +21,7 @@
     'use strict';
     const version = "0.13";
     const stand = "10.11.2024";
-    const currentReportDataVersion = 1;
+    const currentReportDataVersion = 2;
     var thisReport;
 
     // Einstiegspunkt
@@ -64,82 +64,6 @@
         }
     }
 
-    const storage = (function () {
-        var storage = {};
-
-        var thisData;
-        storage.gmSetValue = async function (id, data) {
-            if (!thisData) thisData = await GM.getValue("data", {});
-            if (data) {
-                if (!thisData[id]) {
-                    thisData[id] = true;
-                    await GM.setValue("data", thisData);
-                }
-            } else { // delete
-                if (thisData[id]) {
-                    delete thisData[id];
-                    await GM.setValue("data", thisData);
-                }
-            }
-            await GM.setValue(id, data);
-        }
-
-        var allReports; // reportId -> dataVersion - Registration
-        storage.gmSetReport = async function (id, report) {
-            if (!allReports) allReports = await GM.getValue("reportIds", {});
-            if (report) {
-                if (!allReports[id]) {
-                    allReports[id] = currentReportDataVersion;
-                    await GM.setValue("reportIds", allReports);
-                }
-                report.dataVersion = currentReportDataVersion;
-            } else { // delete
-                if (allReports[id]) {
-                    delete allReports[id];
-                    await GM.setValue("reportIds", allReports);
-                }
-            }
-            await storage.gmSetValue(id, report);
-        }
-
-        storage.gmGetReport = async function (id) {
-            const result = await GM.getValue(id, {});
-            // Alte Report-Veresion entdeckt => Der Report wird neu angelegt.
-            if (!result.dataVersion || result.dataVersion < currentReportDataVersion) {
-                await gmSetReport(id); // delete
-                return {};
-            }
-            return result;
-        }
-
-        storage.validateAllReports = async function () {
-            if (!allReports) allReports = await GM.getValue("reportIds", {});
-            var somethingDeleted = false;
-            for (const [reportId, dataVersion] of Object.entries(allReports)) {
-                if (dataVersion < currentReportDataVersion) {
-                    delete allReports[reportId];
-                    somethingDeleted = true;
-                }
-            }
-            if (somethingDeleted) await gmSetValue("reportIds", allReports);
-        }
-
-        storage.loadThisReport = async function (reportId) {
-            const storeId = "report_" + reportId;
-            const result = await storage.gmGetReport(storeId);
-            thisReport = result;
-            console.log("Loaded report", result);
-        }
-
-        storage.saveThisReport = async function () {
-            const storeId = "report_" + thisReport.id;
-            await storage.gmSetReport(storeId, thisReport);
-            console.log("Stored report", thisReport);
-        }
-
-        return storage;
-    })();
-
     function getReportProgress() {
         var foundReportCount = 0;
         var missingReports = Array();
@@ -178,6 +102,86 @@
             roundCount: roundCount,
         }
     }
+
+    const storage = {
+        // feste Punkte im Storage die auf andere IDs im Storage verweisen
+        data: null,
+        reportIds: null,
+
+        // Die einzige Methode mit GM.setValue, merkt sich die Ids in einem festen Ankerpunkt im Storage
+        // id => data wird direkt auf den Root des GM-Storages geschrieben.
+        // Die id wird sich unter einer Map unter der referenceMapId gespeichert.
+        // So können Daten direkt und schnell ohne großen Overhead direkt abgerufen werden, aber wir haben
+        // dennoch weiterhin einen Überblick über alle IDs über die entsprechenden Anker-Kontexte.
+        // wenn 'data' undefined ist, wird das Objekt unter der zugehörigen ID gelöscht.
+        storeData: async function (referenceMapId, id, data) {
+            var thisData = this[referenceMapId];
+            if (!thisData) {
+                thisData = await GM.getValue(referenceMapId, {});
+                this[referenceMapId] = thisData;
+            }
+            console.log("Storage Current", referenceMapId, thisData);
+            if (data) {
+                if (!thisData[id]) {
+                    thisData[id] = true;
+                    await GM.setValue(referenceMapId, thisData);
+                }
+            } else { // delete
+                if (thisData[id]) {
+                    delete thisData[id];
+                    await GM.setValue(referenceMapId, thisData);
+                }
+            }
+            await GM.setValue(id, data);
+        },
+
+        gmSetValue: async function (id, data) {
+            await this.storeData("data", id, data);
+        },
+
+        gmSetReport: async function (id, report) {
+            await this.storeData("reportIds", id, report);
+        },
+
+        gmGetReport: async function (id) {
+            const result = await GM.getValue(id);
+            if (!result) return {};
+            // Nicht die aktuell verwendete Report-Version entdeckt => Der Report wird verworfen.
+            if (!result.dataVersion || result.dataVersion !== currentReportDataVersion) {
+                console.log("Report enthält alte Daten und wird verworfen", result);
+                await this.gmSetReport(id); // delete
+                return {};
+            }
+            return result;
+        },
+
+        validateAllReports: async function () {
+            if (!allReports) this.allReports = await GM.getValue("reportIds", {});
+            var somethingDeleted = false;
+            for (const [reportId, dataVersion] of Object.entries(allReports)) {
+                if (dataVersion < currentReportDataVersion) {
+                    delete allReports[reportId];
+                    somethingDeleted = true;
+                }
+            }
+            if (somethingDeleted) await gmSetValue("reportIds", allReports);
+        },
+
+        loadThisReport: async function (reportId) {
+            const storeId = "report_" + reportId;
+            const result = await this.gmGetReport(storeId);
+            thisReport = result;
+            console.log("Loaded report", result);
+        },
+
+        saveThisReport: async function () {
+            const storeId = "report_" + thisReport.id;
+            thisReport.dataVersion = currentReportDataVersion;
+            await this.gmSetReport(storeId, thisReport);
+            console.log("Stored report", thisReport);
+        },
+
+    };
 
     function readAndStoreKampfbericht(reportId) {
         const levelNr = document.getElementsByName("current_level")[0].value;
@@ -1377,12 +1381,12 @@
                 }
 
                 tableEntry.push(center("normal/gut/krit"));
-                tableEntry.push(center("Ausgehender<br>Schaden<br>(Avg)"));
-                tableEntry.push(center("Direkter<br>Schaden<br>(Avg)"));
+                tableEntry.push(center("Ausgehender<br>Schaden<br>(Ø)"));
+                tableEntry.push(center("Direkter<br>Schaden<br>(Ø)"));
                 tableEntry.push(center("Rüstung"));
                 tableEntry.push(center("Resistenz"));
-                tableEntry.push(center("AW Avg<br>(Min-Max)"));
-                tableEntry.push(center("PW Avg<br>(Min-Max)"));
+                tableEntry.push(center("AW Ø<br>(Min-Max)"));
+                tableEntry.push(center("PW Ø<br>(Min-Max)"));
                 tableEntry.push(center("Schadensarten<br>Schaden / Rüstung / Anfälligkeit"));
                 writeHeader(tableEntry.join(""));
             }
