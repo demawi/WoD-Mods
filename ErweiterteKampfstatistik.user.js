@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.13
+// @version        0.14
 // @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.user.js
 // @grant          GM.getValue
 // @grant          GM.setValue
@@ -20,7 +20,7 @@
 
 (function() {
     'use strict';
-    const version = "0.13";
+    const version = "0.14";
     const stand = "11.11.2024";
     const currentReportDataVersion = 2;
     var thisReport;
