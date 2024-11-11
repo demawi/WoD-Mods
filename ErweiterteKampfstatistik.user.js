@@ -17,10 +17,11 @@
 // *** nicht meinen Namen entfernen.                         ***
 // *** Danke! demawi                                         ***
 // *************************************************************
+
 (function() {
     'use strict';
     const version = "0.13";
-    const stand = "10.11.2024";
+    const stand = "11.11.2024";
     const currentReportDataVersion = 2;
     var thisReport;
 
@@ -32,7 +33,6 @@
 
             var levelData = readAndStoreKampfbericht(reportId);
             if (levelData) {
-                levelData.dataVersion = currentReportDataVersion;
                 var roundCount = levelData.roundCount;
 
                 var hinweisText = ": " + roundCount + " Runden";
@@ -60,7 +60,7 @@
             } else {
                 statistikAusgabe_Level(null, ": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)");
             }
-
+            storage.validateAllReports();
         }
     }
 
@@ -114,7 +114,8 @@
         // So können Daten direkt und schnell ohne großen Overhead direkt abgerufen werden, aber wir haben
         // dennoch weiterhin einen Überblick über alle IDs über die entsprechenden Anker-Kontexte.
         // wenn 'data' undefined ist, wird das Objekt unter der zugehörigen ID gelöscht.
-        storeData: async function (referenceMapId, id, data) {
+        storeData: async function (referenceMapId, id, data, metaData) {
+            if (!metaData) metaData = true;
             var thisData = this[referenceMapId];
             if (!thisData) {
                 thisData = await GM.getValue(referenceMapId, {});
@@ -123,7 +124,7 @@
             console.log("Storage Current", referenceMapId, thisData);
             if (data) {
                 if (!thisData[id]) {
-                    thisData[id] = true;
+                    thisData[id] = metaData;
                     await GM.setValue(referenceMapId, thisData);
                 }
             } else { // delete
@@ -140,14 +141,14 @@
         },
 
         gmSetReport: async function (id, report) {
-            await this.storeData("reportIds", id, report);
+            await this.storeData("reportIds", id, report, report ? report.metaData : null);
         },
 
         gmGetReport: async function (id) {
             const result = await GM.getValue(id);
             if (!result) return {};
             // Nicht die aktuell verwendete Report-Version entdeckt => Der Report wird verworfen.
-            if (!result.dataVersion || result.dataVersion !== currentReportDataVersion) {
+            if (!result.metaData || !result.metaData.dataVersion || result.metaData.dataVersion !== currentReportDataVersion) {
                 console.log("Report enthält alte Daten und wird verworfen", result);
                 await this.gmSetReport(id); // delete
                 return {};
@@ -156,15 +157,19 @@
         },
 
         validateAllReports: async function () {
-            if (!allReports) this.allReports = await GM.getValue("reportIds", {});
+            if (!this.allReports) this.allReports = await GM.getValue("reportIds", {});
             var somethingDeleted = false;
-            for (const [reportId, dataVersion] of Object.entries(allReports)) {
-                if (dataVersion < currentReportDataVersion) {
-                    delete allReports[reportId];
+            var compareDate = new Date();
+            compareDate.setDate(compareDate.getDate() - 30);
+            for (const [reportId, metaData] of Object.entries(this.allReports)) {
+                if (metaData.dataVersion !== currentReportDataVersion || metaData.time && metaData.time < compareDate.getTime()) {
+                    console.log("Report veraltet und wird verworfen", reportId);
+                    delete this.allReports[reportId];
+                    await this.gmSetReport(reportId);
                     somethingDeleted = true;
                 }
             }
-            if (somethingDeleted) await gmSetValue("reportIds", allReports);
+            if (somethingDeleted) await this.gmSetValue("reportIds", this.allReports);
         },
 
         loadThisReport: async function (reportId) {
@@ -176,7 +181,10 @@
 
         saveThisReport: async function () {
             const storeId = "report_" + thisReport.id;
-            thisReport.dataVersion = currentReportDataVersion;
+            thisReport.metaData = {
+                dataVersion: currentReportDataVersion,
+                time: new Date().getTime()
+            };
             await this.gmSetReport(storeId, thisReport);
             console.log("Stored report", thisReport);
         },
@@ -1128,13 +1136,13 @@
             // Helden - Monster
             const sideElement = document.createElement("span");
             sideElement.style.cursor = "pointer";
-            if(query.side == "heroes") {
+            if (query.side === "heroes") {
                 sideElement.innerHTML = "Helden";
             } else {
                 sideElement.innerHTML = "Monster";
             }
             sideElement.onclick = function() {
-                if(query.side == "heroes") {
+                if (query.side === "heroes") {
                     query.side = "monster";
                 } else {
                     query.side = "heroes";
@@ -1148,12 +1156,12 @@
             switchElement.innerHTML = " - ";
             switchElement.style.cursor = "pointer";
             switchElement.onclick = function() {
-                if(query.side == "heroes") {
+                if (query.side === "heroes") {
                     query.side = "monster";
                 } else {
                     query.side = "heroes";
                 }
-                if(query.type == "attack") {
+                if (query.type === "attack") {
                     query.type = "defense";
                 } else {
                     query.type = "attack";
@@ -1165,13 +1173,13 @@
             // Attack - Verteidigung
             const typeElement = document.createElement("span");
             typeElement.style.cursor = "pointer";
-            if(query.type == "attack") {
+            if (query.type === "attack") {
                 typeElement.innerHTML = "Angriff";
             } else {
                 typeElement.innerHTML = "Verteidigung";
             }
             typeElement.onclick = function() {
-                if(query.type == "attack") {
+                if (query.type === "attack") {
                     query.type = "defense";
                 } else {
                     query.type = "attack";
@@ -1197,7 +1205,7 @@
 
                     var selectOptions = "<option value=''></option>";
                     for (const [filterSpec, filterName] of Object.entries(filterTypes)) {
-                        if(filterSpec == curQueryFilter.spec || !util.arraySearch(query.filter, qFilter => qFilter.spec == filterSpec)) {
+                        if (filterSpec === curQueryFilter.spec || !util.arraySearch(query.filter, qFilter => qFilter.spec === filterSpec)) {
                             selectOptions+="<option value='"+filterSpec+"'>"+filterName+"</option>"
                         }
                     }
@@ -1206,9 +1214,9 @@
                     }
                     selectInput.innerHTML = selectOptions;
                     selectInput.onchange = function(a) {
-                        if(selectInput.value == filterEinschraenken) {
+                        if (selectInput.value === filterEinschraenken) {
                             containerElement.append(thisObject.createMultiSelectionFor(curQueryFilter, function(values) {
-                                if(values.length == 0) {
+                                if (values.length === 0) {
                                     delete curQueryFilter.selection;
                                 } else {
                                     curQueryFilter.selection = values;
@@ -1217,7 +1225,7 @@
                             }));
                         }
                         else {
-                            if(selectInput.value == "") {
+                            if (selectInput.value === "") {
                                 query.filter.splice(finalI, 1);
                             } else {
                                 query.filter[finalI] = new QueryFilter(selectInput.value);
@@ -1256,7 +1264,6 @@
             th.append(util.span(" "));
 
             // Add-Filter-Bar
-            var addStatus = false;
             const addAnchor = document.createElement("span");
             addAnchor.style.position = "relative";
             const addElement = document.createElement("img");
