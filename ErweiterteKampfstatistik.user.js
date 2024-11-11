@@ -19,12 +19,10 @@
 // *************************************************************
 (function() {
     'use strict';
-    return;
     const version = "0.13";
     const stand = "10.11.2024";
     const currentReportDataVersion = 1;
     var thisReport;
-    console.log("Kampstatistik+ active");
 
     // Einstiegspunkt
     async function startMod() {
@@ -868,7 +866,7 @@
                 }
                 else { // Fähigkeit in Klammern
 
-                    var matcher = actionText.match(/(greift per Fernkampf an|greift im Nahkampf an|greift magisch an|greift sozial an|greift hinterhältig an|verseucht|entschärft|wirkt als Naturgewalt auf|wird ausgelöst auf) \(/);
+                    var matcher = actionText.match(/(greift per Fernkampf an|greift im Nahkampf an|greift magisch an|greift sozial an|greift hinterhältig an|verseucht|entschärft|wirkt als Naturgewalt auf|wird ausgelöst auf|erwirkt eine Explosion gegen) \(/);
                     if(!matcher) {
                         console.error("Unbekannter fertigkeit.type gefunden! "+actionText);
                     } else {
@@ -895,6 +893,8 @@
                             fertigkeit.type = "Naturgewalt";
                         } else if(matchingPattern.includes("ausgelöst")) {
                             fertigkeit.type = "Falle";
+                        } else if (matchingPattern.includes("Explosion")) {
+                            fertigkeit.type = "Explosion";
                         } else {
                             console.error("Unbekannter fertigkeit.type gefunden! "+actionText);
                         }
