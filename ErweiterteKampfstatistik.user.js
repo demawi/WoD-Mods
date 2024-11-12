@@ -446,7 +446,7 @@
             content.hidden = hide;
             if (foundError) {
                 const zeileUndSpalte = foundError.stack.match(/:(\d+:\d+)/)[1]
-                content.innerHTML = foundError + " v" + version + " -> " + zeileUndSpalte + "Forum <a href='" + forumsLink + "'>Link ins Forum</a>"
+                content.innerHTML = foundError + " v" + version + " -> " + zeileUndSpalte + "Forum <a target='_blank' href='" + forumsLink + "'>Link ins Forum</a>"
                     + "<br>Wer selber nachschauen möchte: der Error inklusive Link wurde auch in die Entwicklerkonsole geschrieben";
             } else if (firstClick) {
                 firstClick = false;
@@ -1082,7 +1082,7 @@
             infoHeader.style.position = "absolute";
             infoHeader.style.right = "7px";
             infoHeader.style.top = "7px";
-            infoHeader.innerHTML += "<a href='" + forumsLink + "' style='font-size:10px;color:darkgrey;'>" + version + " </a>";
+            infoHeader.innerHTML += "<a target='_blank' href='" + forumsLink + "' style='font-size:10px;color:darkgrey;'>" + version + " </a>";
 
             // 🔗📌📍
             const info = document.createElement("span");
