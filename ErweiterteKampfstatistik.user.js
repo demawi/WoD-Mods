@@ -26,7 +26,7 @@
     const currentReportDataVersion = 4;
     var thisReport;
     var outputAnchor;
-    var forumsLink = "/wod/spiel/forum/viewtopic.php?pid=16424394";
+    var forumsLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
 
     // Einstiegspunkt
     async function startMod() {
