@@ -1120,9 +1120,6 @@
                 }
             })
             return Object.keys(resultMap).sort();
-            if(queryFilter.spec.includes("position")) {
-                return ["Vorne", "Linke Seite", "Rechte Seite", "Zentrum", "Hinten", "Im Rücken"];
-            }
         }
 
         createMultiSelectionFor(queryFilter, options, fnCallbackOnYes, fnCallbackOnNo) {
