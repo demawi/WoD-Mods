@@ -136,14 +136,14 @@
                 thisData = await GM.getValue(referenceMapId, {});
                 this[referenceMapId] = thisData;
             }
-            console.log("Storage Current", referenceMapId, thisData);
+            //console.log("Storage Current", referenceMapId, thisData);
             if (data) {
                 thisData[id] = metaData;
                 await GM.setValue(referenceMapId, thisData);
             } else { // delete
                 if (thisData[id]) {
                     delete thisData[id];
-                    console.log("delete value");
+                    //console.log("delete value");
                     await GM.deleteValue(referenceMapId);
                 }
             }
@@ -190,7 +190,7 @@
             const storeId = "report_" + reportId;
             const result = await this.gmGetReport(storeId);
             thisReport = result;
-            console.log("Loaded report", result);
+            //console.log("Loaded report", result);
         },
 
         saveThisReport: async function () {
@@ -200,7 +200,7 @@
                 time: new Date().getTime()
             };
             await this.gmSetReport(storeId, thisReport);
-            console.log("Stored report", thisReport);
+            //console.log("Stored report", thisReport);
         },
 
     };
@@ -249,7 +249,6 @@
                 curArea.rounds.push(neueRunde);
             }
         }
-        console.log("Result", areas);
         return {
             roundCount: roundCount,
             areas: areas,
@@ -883,7 +882,7 @@
             } else {
                 if(lineNr > 1) { // Nachfolgende DamageLines direkt auswerten
                     //console.log("here: "+currentTarget+" "+lineNr+" => "+curElement.textContent);
-                    if(curElement.tagName == "A") { // Schaden an einem Gegenstand
+                    if (curElement.tagName === "A") { // Schaden an einem Gegenstand
                         lineNr = -1; // solange ignorieren bis eine neue Entität kommt
                     } else {
                         currentTarget.damage.push(new Damage(curElement));
@@ -893,7 +892,7 @@
                 }
             }
         }
-        if(lineNr==1) {
+        if (lineNr === 1) {
             addTarget();
         }
 
@@ -1573,7 +1572,7 @@
             }
 
             const statView = this.statView;
-            console.log("StatView", statView, this.levelDatas);
+            console.log("StatView", statView, thisLevelDatas);
             if(!statView.result) {
                 curTable.innerHTML = "<td>Es konnte kein Ergebnis ermittelt werden!";
                 return;
