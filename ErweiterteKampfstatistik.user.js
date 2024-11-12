@@ -25,6 +25,7 @@
     const stand = "12.11.2024";
     const currentReportDataVersion = 4;
     var thisReport;
+    var thisLevelDatas;
     var outputAnchor;
     var forumsLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
 
@@ -46,6 +47,7 @@
                         hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                     }
                     outputAnchor.setTitle(hinweisText);
+                    thisLevelDatas = [levelData];
                     await storage.saveThisReport();
                 }
             });
@@ -64,6 +66,7 @@
                         hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                     }
                     outputAnchor.setTitle(hinweisText);
+                    thisLevelDatas = thisReport.levelDatas;
                 } else {
                     outputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
                 }
@@ -453,7 +456,7 @@
                 const anchor = document.createElement("div");
                 content.appendChild(anchor);
                 const initialStatView = new StatView(new StatQuery("heroes", "attack", []), true, false);
-                new StatTable(initialStatView, thisReport.levelDatas, anchor);
+                new StatTable(initialStatView, thisLevelDatas, anchor);
                 content.append(document.createElement("br"));
             }
         });
