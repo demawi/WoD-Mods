@@ -1113,9 +1113,11 @@
         getSelectionsFor(queryFilter, curStatResult) {
             const resultMap = {};
             curStatResult.forEach(a => {
-                Object.keys(a.subIds).forEach(b => {
-                    resultMap[b] = true;
-                });
+                if (a.subIds) {
+                    Object.keys(a.subIds).forEach(b => {
+                        resultMap[b] = true;
+                    });
+                }
             })
             return Object.keys(resultMap).sort();
             if(queryFilter.spec.includes("position")) {
