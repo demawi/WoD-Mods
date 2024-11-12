@@ -2,10 +2,11 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.14
+// @version        0.15
 // @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.user.js
 // @grant          GM.getValue
 // @grant          GM.setValue
+// @grant          GM.deleteValue
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
@@ -20,47 +21,54 @@
 
 (function() {
     'use strict';
-    const version = "0.14";
-    const stand = "11.11.2024";
-    const currentReportDataVersion = 2;
+    const version = "0.15";
+    const stand = "12.11.2024";
+    const currentReportDataVersion = 4;
     var thisReport;
+    var outputAnchor;
+    var forumsLink = "/wod/spiel/forum/viewtopic.php?pid=16424394";
 
     // Einstiegspunkt
     async function startMod() {
         if (WOD_istSeite_Kampfbericht()) { // Einzelseite
-            const reportId = document.getElementsByName("report_id[0]")[0].value;
-            await storage.loadThisReport(reportId);
+            outputAnchor = createOutputAnchor();
+            outputAnchor.execute(async function () {
+                const reportId = document.getElementsByName("report_id[0]")[0].value;
+                await storage.loadThisReport(reportId);
 
-            var levelData = readAndStoreKampfbericht(reportId);
-            if (levelData) {
-                var roundCount = levelData.roundCount;
+                var levelData = readAndStoreKampfbericht(reportId);
+                if (levelData) {
+                    var roundCount = levelData.roundCount;
 
-                var hinweisText = ": " + roundCount + " Runden";
-                const reportProgress = getReportProgress();
-                if (reportProgress.missingReports.length > 0) {
-                    hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
+                    var hinweisText = ": " + roundCount + " Runden";
+                    const reportProgress = getReportProgress();
+                    if (reportProgress.missingReports.length > 0) {
+                        hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
+                    }
+                    outputAnchor.setTitle(hinweisText);
+                    await storage.saveThisReport();
                 }
-                statistikAusgabe_Level([levelData], hinweisText);
-                await storage.saveThisReport();
-            }
-
+            });
         }
         if (WOD_istSeite_Kampfstatistik()) { // Übersichtsseite
-            const reportId = document.getElementsByName("report_id[0]")[0].value;
-            await storage.loadThisReport(reportId);
-            if (thisReport.levelCount) {
-                const reportProgress = getReportProgress();
+            outputAnchor = createOutputAnchor();
+            outputAnchor.execute(async function () {
+                const reportId = document.getElementsByName("report_id[0]")[0].value;
+                await storage.loadThisReport(reportId);
 
-                var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
-                if (reportProgress.foundReportCount < reportProgress.levelCount) {
-                    hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
+                if (thisReport.levelCount) {
+                    const reportProgress = getReportProgress();
+
+                    var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
+                    if (reportProgress.foundReportCount < reportProgress.levelCount) {
+                        hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
+                    }
+                    outputAnchor.setTitle(hinweisText);
+                } else {
+                    outputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
                 }
-                // console.log(foundReportCount+" "+reportData.levelCount);
-                statistikAusgabe_Level(reportProgress.levelDatas, hinweisText);
-            } else {
-                statistikAusgabe_Level(null, ": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)");
-            }
-            storage.validateAllReports();
+                storage.validateAllReports();
+            });
         }
     }
 
@@ -69,6 +77,7 @@
         var missingReports = Array();
         var allRoundNumbers = Array();
         var roundCount = 0;
+        var areaCount = 0;
         var levelCount = 0;
         var levelDatas;
 
@@ -79,10 +88,13 @@
             for(var i=0,l=levelCount;i<l;i++) {
                 if(levelDatas.length > i) {
                     const levelData = levelDatas[i];
-                    console.log("LevelData, ", levelData);
                     if(levelData) {
-                        allRoundNumbers[i] = levelData.roundCount;
+                        const curAreaCount = Object.keys(levelData.areas).length;
+                        const areaRoundCounts = Array();
+                        levelData.areas.forEach(area => areaRoundCounts.push(area.rounds.length));
+                        allRoundNumbers[i] = (curAreaCount > 1 ? "[" + areaRoundCounts.join(", ") + "]" : "" + levelData.roundCount);
                         roundCount += levelData.roundCount;
+                        areaCount += curAreaCount;
                         foundReportCount++;
                         continue;
                     }
@@ -123,14 +135,13 @@
             }
             console.log("Storage Current", referenceMapId, thisData);
             if (data) {
-                if (!thisData[id]) {
-                    thisData[id] = metaData;
-                    await GM.setValue(referenceMapId, thisData);
-                }
+                thisData[id] = metaData;
+                await GM.setValue(referenceMapId, thisData);
             } else { // delete
                 if (thisData[id]) {
                     delete thisData[id];
-                    await GM.setValue(referenceMapId, thisData);
+                    console.log("delete value");
+                    await GM.deleteValue(referenceMapId);
                 }
             }
             await GM.setValue(id, data);
@@ -157,14 +168,14 @@
         },
 
         validateAllReports: async function () {
-            if (!this.allReports) this.allReports = await GM.getValue("reportIds", {});
+            if (!this.reportIds) this.reportIds = await GM.getValue("reportIds", {});
             var somethingDeleted = false;
             var compareDate = new Date();
             compareDate.setDate(compareDate.getDate() - 30);
-            for (const [reportId, metaData] of Object.entries(this.allReports)) {
+            for (const [reportId, metaData] of Object.entries(this.reportIds)) {
                 if (metaData.dataVersion !== currentReportDataVersion || metaData.time && metaData.time < compareDate.getTime()) {
                     console.log("Report veraltet und wird verworfen", reportId);
-                    delete this.allReports[reportId];
+                    delete this.reportIds[reportId];
                     await this.gmSetReport(reportId);
                     somethingDeleted = true;
                 }
@@ -235,6 +246,7 @@
                 curArea.rounds.push(neueRunde);
             }
         }
+        console.log("Result", areas);
         return {
             roundCount: roundCount,
             areas: areas,
@@ -262,13 +274,22 @@
             toStat.ruestung += from.ruestung;
             toStat.resistenz += from.resistenz;
         };
-        var getStat = function(object, queryFilter, id, subDomain, typeInitialize) {
+        var getStat = function (previousStats, queryFilter, id, subDomain, typeInitialize) {
+            if (subDomain === "sub") {
+                var subIds = previousStats.subIds;
+                if (!subIds) {
+                    subIds = {};
+                    previousStats.subIds = subIds;
+                }
+                subIds[id] = true;
+            }
             if(queryFilter && queryFilter.selection && !queryFilter.selection.includes(id)) return;
-            var curObject = object;
+            var curObject = previousStats;
             if(subDomain) {
-                var subDomainEntry = object[subDomain];
+                var subDomainEntry = previousStats[subDomain];
                 if(!subDomainEntry) {
                     subDomainEntry = {};
+                    // Um immer die gleichen Reihenfolge anzulegen
                     if (typeInitialize === "herounit") {
                         levelDataArray[0].areas[0].rounds[0].helden.forEach(held => {
                             subDomainEntry[held.id.name] = createStat();
@@ -286,8 +307,9 @@
                         subDomainEntry["Fernkampf"] = createStat();
                         subDomainEntry["Sozial"] = createStat();
                         subDomainEntry["Hinterhalt"] = createStat();
+                        subDomainEntry["Explosion"] = createStat();
                     }
-                    object[subDomain] = subDomainEntry;
+                    previousStats[subDomain] = subDomainEntry;
                 }
                 curObject = subDomainEntry;
             }
@@ -315,12 +337,13 @@
         const wantOffense = statQuery.type === "attack";
         var filter = statQuery.filter; // position, attackType, fertigkeit, units
         for(var levelNr=1,levelCount=levelDataArray.length;levelNr<=levelCount;levelNr++) {
-            const levelNrFinal = levelNr;
+            const finalLevelNr = levelNr;
             const levelData = levelDataArray[levelNr-1];
             if(!levelData) continue;
             const areas = levelData.areas;
             for (var areaNr = 1, areaCount = areas.length; areaNr <= areaCount; areaNr++) {
                 const area = areas[areaNr - 1];
+                const finalAreaNr = areaNr;
 
                 const rounds = area.rounds;
                 for (var i = 0, l = rounds.length; i < l; i++) {
@@ -343,7 +366,6 @@
                                     }
                                     const queryFilter = filters[0];
                                     const curFilter = queryFilter.spec;
-                                    const curFilterSelection = queryFilter.selection;
                                     var actionTarget;
                                     if (curFilter.startsWith("attackType")) { // attackType ist immer auf der aktiven Unit
                                         actionTarget = action;
@@ -378,9 +400,13 @@
                                         subStats.title = actionTarget.fertigkeit.typeRef;
                                     } else if (curFilter.endsWith("level")) {
                                         if (levelDataArray.length === 1) return; // Wenn es nur einen Level gibt, wird dieses Kriterium ignoriert
-                                        subStats = getStat(curStats, queryFilter, levelNrFinal, "sub", "level");
+                                        subStats = getStat(curStats, queryFilter, "Level " + finalLevelNr, "sub", "level");
                                         if (!subStats) return false;
-                                        subStats.title = "Level " + levelNrFinal + "<br>(" + levelData.roundCount + " Runden)";
+                                        subStats.title = "Level " + finalLevelNr + "<br>(" + levelData.roundCount + " Runden)" + (finalAreaNr === 1 ? "" : "<br>(" + areas.length + " Kämpfe)");
+                                    } else if (curFilter.endsWith("fight")) {
+                                        subStats = getStat(curStats, queryFilter, "Kampf " + finalLevelNr + "." + finalAreaNr, "sub", "fight");
+                                        if (!subStats) return false;
+                                        subStats.title = "Kampf " + finalLevelNr + "." + finalAreaNr + "<br>(" + area.rounds.length + " Runden)";
                                     } else if (curFilter.endsWith("items")) {
                                         subStats = getStat(curStats, queryFilter, util.arrayMap(actionTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
                                         if (!subStats) return false;
@@ -407,32 +433,44 @@
         return stats;
     }
 
-    function createStatisticAnchor(hinweisText) {
+    function createOutputAnchor(saveFunction) {
         // Ausgabe
         var headings = document.getElementsByTagName("h2");
-        var statistic = document.createElement("div");
-        statistic.hidden = true;
+        var content = document.createElement("div");
+        content.hidden = true;
         var header = document.createElement("div");
         header.innerHTML = "Erweiterte Kampfstatistiken";
-        if(hinweisText) {
-            header.innerHTML+=""+hinweisText+"";
-        }
         var firstClick = true;
+        var foundError;
         const collapsible = util.createCollapsible("20px", true, function(hide) {
-            statistic.hidden = hide;
-            if (firstClick) {
+            content.hidden = hide;
+            if (foundError) {
+                const zeileUndSpalte = foundError.stack.match(/:(\d+:\d+)/)[1]
+                content.innerHTML = foundError + " v" + version + " -> " + zeileUndSpalte + "Forum <a href='" + forumsLink + "'>Link ins Forum</a>"
+                    + "<br>Wer selber nachschauen möchte: der Error inklusive Link wurde auch in die Entwicklerkonsole geschrieben";
+            } else if (firstClick) {
                 firstClick = false;
                 const anchor = document.createElement("div");
-                statistic.appendChild(anchor);
+                content.appendChild(anchor);
                 const initialStatView = new StatView(new StatQuery("heroes", "attack", []), true, false);
                 new StatTable(initialStatView, thisReport.levelDatas, anchor);
-                statistic.append(document.createElement("br"));
+                content.append(document.createElement("br"));
             }
         });
-        header.append(collapsible);
         headings[0].parentNode.insertBefore(header, headings[0].nextSibling);
-        headings[0].parentNode.insertBefore(statistic, header.nextSibling);
-        return statistic;
+        headings[0].parentNode.insertBefore(content, header.nextSibling);
+        return {
+            execute: function (asyncFunction) {
+                asyncFunction().catch(error => {
+                    this.setTitle("<span title='" + error + "'>⚠️ Ein Fehler ist aufgetreten, es konnten diesmal leider keine Statistiken erstellt werden!</span>");
+                    foundError = error;
+                    console.error("Ein Fehler wurde abgefangen!", error);
+                });
+            }, setTitle: function (titleMessage) {
+                header.innerHTML = "Erweiterte Kampfstatistiken" + titleMessage;
+                header.append(collapsible);
+            }
+        };
     }
 
     const Position = [
@@ -457,7 +495,7 @@
             if (!currentRound) {
                 this.area = 1;
             } else {
-                if (roundTD.getElementsByClassName("rep_round_headline")[0] === "Runde 1") {
+                if (roundTD.getElementsByClassName("rep_round_headline")[0].innerText === "Runde 1") {
                     this.area = currentRound.area + 1;
                 } else {
                     this.area = currentRound.area;
@@ -579,7 +617,7 @@
     }
 
     function isUnitClass(className) {
-        return className && (className == "rep_hero" || className == "rep_monster" || className == "rep_myhero" || className == "rep_myotherheros");
+        return className && (className === "rep_hero" || className === "rep_monster" || className === "rep_myhero" || className === "rep_myotherheros");
     }
 
     //Einen Lookup ausführen, damit die Unit auch immer alle möglichen Information (z.B. Position) trägt.
@@ -600,7 +638,7 @@
     function unitSearch(unitId, unitArray) {
         for(var i=0,l=unitArray.length;i<l;i++) {
             const curUnit = unitArray[i];
-            if(curUnit.id.name == unitId.name && curUnit.id.index == unitId.index) {
+            if (curUnit.id.name === unitId.name && curUnit.id.index === unitId.index) {
                 return curUnit;
             }
         }
@@ -616,12 +654,12 @@
             }
         }
         if(!element.tagName) {
-            if(element.innerText == "sich" || element.textContent == "sich") {
+            if (element.innerText === "sich" || element.textContent === "sich") {
                 return unitId;
             }
             return;
         }
-        if(element.tagName != "A") {
+        if (element.tagName !== "A") {
             const findElements = element.getElementsByTagName("A");
             if(findElements.length > 0) {
                 element = findElements[0];
@@ -634,8 +672,8 @@
 
         var unitIndex;
         var sibling = element.nextSibling;
-        var isHero = element.className != "rep_monster";
-        if(sibling && sibling.tagName == "SPAN") {
+        var isHero = element.className !== "rep_monster";
+        if (sibling && sibling.tagName === "SPAN") {
             unitIndex = sibling.innerText;
         }
         return {
@@ -676,7 +714,7 @@
 
     function Damage(damageLineElement) {
         var resistenz = 0;
-        if(damageLineElement.tagName == "SPAN") { // hat Anfälligkeit
+        if (damageLineElement.tagName === "SPAN") { // hat Anfälligkeit
             //console.log("Anfälligkeit gefunden "+damageLineElement.textContent);
             const dmgVorher = damageLineElement.onmouseover.toString().match(/verursacht: <b>(\d*)<\/b>/)[1];
             const dmgNachher = damageLineElement.onmouseover.toString().match(/Anfälligkeit.* <b>(\d*)<\/b>/)[1];
@@ -724,13 +762,13 @@
 
         for(var i=0,l=elem.childNodes.length;i<l;i++) {
             const curNode = elem.childNodes[i];
-            if(currentMode == 0) {
+            if (currentMode === 0) {
                 name = curNode.textContent;
                 currentMode = 1;
-            } else if(curNode.tagName == "BR") {
+            } else if (curNode.tagName === "BR") {
                 addWirkung();
                 currentMode = 0;
-            } else if(curNode.textContent == " ") {
+            } else if (curNode.textContent === " ") {
                 // ignorieren
             } else {
                 const curText = curNode.textContent;
@@ -939,7 +977,7 @@
     }
 
     const filterTypes = {
-        level: "Level",
+        level: "Level", fight: "Kampf",
 
         attackType: "AngriffsTyp",
 
@@ -997,11 +1035,6 @@
         }
     }
 
-    function statistikAusgabe_Level(levelDatas, hinweisText) {
-        const statistic = createStatisticAnchor(hinweisText);
-
-    }
-
     class StatTable {
         statView;
         anchor;
@@ -1017,6 +1050,22 @@
 
         // Löscht den alten Table und erstellt den neuen
         refresh() {
+            this.statView.result = StatSearch(this.statView.query, this.levelDatas);
+
+            //Löscht die vorangelegten Einträge, welche keine Treffer hatten
+            function resultClearance(subResult) {
+                if (!subResult) return;
+                for (const [id, entry] of Object.entries(subResult)) {
+                    if (!entry.filterType) {
+                        delete subResult[id];
+                    } else {
+                        resultClearance(entry.sub);
+                    }
+                }
+            }
+
+            resultClearance(this.statView.result.sub);
+
             const child = this.anchor.children[0];
             if(child) this.anchor.removeChild(child);
 
@@ -1029,6 +1078,13 @@
             const headerTr = this.createHeader(tbody);
             headerTr.style.position = "relative";
 
+            const infoHeader = document.createElement("span");
+            infoHeader.style.position = "absolute";
+            infoHeader.style.right = "7px";
+            infoHeader.style.top = "7px";
+            infoHeader.innerHTML += "<a href='" + forumsLink + "' style='font-size:10px;color:darkgrey;'>" + version + " </a>";
+
+            // 🔗📌📍
             const info = document.createElement("span");
             var infoTipp = "Über die Elemente im Header lässt sich die Ausgabe der Statistiken steuern. Mit jeder Änderung wird dabei die Ausgabe direkt aktualisiert.<br><ul>";
             infoTipp += "<li>Mit einem Klick auf 'Helden' lässt sich dieses auf 'Monster' ändern.</li>";
@@ -1041,10 +1097,9 @@
             infoTipp += "<li>Das Eingabe-Element welches sich dort öffnet ist eine übliche Multiple Auswahlliste. Zusammen mit der Strg-Taste lassen sich hier mehrere Werte auswählen.</li>";
             infoTipp += "</ul>";
             info.innerHTML = "<span onmouseover=\"return wodToolTip(this,'"+infoTipp.replaceAll("'", "\\'").replaceAll('"', '\\"')+"');\"><img alt='' height='14px' border='0' src='/wod/css/skins/skin-8/images/icons/inf.gif'></span>";
-            info.style.position = "absolute";
-            info.style.right = "7px";
-            info.style.top = "7px";
-            headerTr.append(info);
+            infoHeader.append(info);
+
+            headerTr.append(infoHeader);
 
             this.anchor.appendChild(table);
             if(this.statView.query.side && this.statView.query.type) {
@@ -1052,14 +1107,20 @@
             }
         }
 
-        getSelectionsFor(queryFilter) {
+        getSelectionsFor(queryFilter, curStatResult) {
+            const resultMap = {};
+            curStatResult.forEach(a => {
+                Object.keys(a.subIds).forEach(b => {
+                    resultMap[b] = true;
+                });
+            })
+            return Object.keys(resultMap).sort();
             if(queryFilter.spec.includes("position")) {
                 return ["Vorne", "Linke Seite", "Rechte Seite", "Zentrum", "Hinten", "Im Rücken"];
             }
         }
 
-        createMultiSelectionFor(queryFilter, fnCallbackOnYes) {
-            var options = this.getSelectionsFor(queryFilter);
+        createMultiSelectionFor(queryFilter, options, fnCallbackOnYes, fnCallbackOnNo) {
             const multiSelectionContainer = document.createElement("div");
             const multiSelection = document.createElement("select");
             multiSelectionContainer.append(multiSelection);
@@ -1088,7 +1149,6 @@
                         result.push(opt.value || opt.text);
                     }
                 }
-                console.log("Selected", result);
                 fnCallbackOnYes(result);
             });
             yesButton.style.margin = "auto";
@@ -1098,6 +1158,7 @@
             noButtonDiv.style.display = "inline-block";
             const noButton = util.createImgButton("20px", "/wod/css/img/smiley/no.png", function() {
                 multiSelectionContainer.parentElement.removeChild(multiSelectionContainer);
+                fnCallbackOnNo();
             });
             noButton.style.margin = "auto";
             noButton.style.display = "block";
@@ -1189,38 +1250,54 @@
             th.append(typeElement);
             th.append(util.span(" "));
 
-
             // Filter-Bar
             const filterEinschraenken = "+Einschränken";
             const filterBar = document.createElement("span");
             filterBar.style.fontSize = "12px";
             th.append(filterBar);
             if(query.filter.length > 0) {
+                var nextStatResult = Array();
+                nextStatResult.push(this.statView.result);
+                var curStatResult
                 for(var i=0,l=query.filter.length;i<l;i++) {
+                    curStatResult = nextStatResult;
+                    nextStatResult = Array();
                     const curQueryFilter = query.filter[i];
                     const finalI = i;
                     const containerElement = document.createElement("span");
                     const labelElement = document.createElement("a");
                     const selectInput = document.createElement("select");
-
+                    const allPossibleSelections = thisObject.getSelectionsFor(curQueryFilter, curStatResult);
+                    curStatResult.forEach(stat => {
+                        if (stat.sub) {
+                            Object.values(stat.sub).forEach(nextSub => {
+                                nextStatResult.push(nextSub);
+                            });
+                        }
+                    });
                     var selectOptions = "<option value=''></option>";
+                    if (allPossibleSelections && allPossibleSelections.length > 0) {
+                        selectOptions += "<option value='" + filterEinschraenken + "'>" + filterEinschraenken + "</option>";
+                    }
                     for (const [filterSpec, filterName] of Object.entries(filterTypes)) {
                         if (filterSpec === curQueryFilter.spec || !util.arraySearch(query.filter, qFilter => qFilter.spec === filterSpec)) {
                             selectOptions+="<option value='"+filterSpec+"'>"+filterName+"</option>"
                         }
                     }
-                    if(thisObject.getSelectionsFor(curQueryFilter)) {
-                        selectOptions += "<option value='"+filterEinschraenken+"'>"+filterEinschraenken+"</option>";
-                    }
+
                     selectInput.innerHTML = selectOptions;
-                    selectInput.onchange = function(a) {
+                    selectInput.onchange = function (a) {
                         if (selectInput.value === filterEinschraenken) {
-                            containerElement.append(thisObject.createMultiSelectionFor(curQueryFilter, function(values) {
+                            containerElement.append(thisObject.createMultiSelectionFor(curQueryFilter, allPossibleSelections, function (values) {
                                 if (values.length === 0) {
                                     delete curQueryFilter.selection;
                                 } else {
                                     curQueryFilter.selection = values;
                                 }
+                                thisObject.refresh();
+                            }, function () { // Filter Löschen
+                                //selectInput.value = curQueryFilter.spec;
+                                delete curQueryFilter.selection;
                                 thisObject.refresh();
                             }));
                         }
@@ -1307,6 +1384,7 @@
                     }
                 }
             });
+            collapsible.style.paddingLeft = "10px";
             th.append(collapsible);
 
             return th;
@@ -1391,7 +1469,7 @@
                 return table.outerHTML;
             }
 
-            function printHeader(statView) {
+            function printDamageHeader(statView) {
                 const tableEntry = Array();
                 tableEntry.push("<th colspan=10 style='text-align:left;'>" + "" + "</th>");
                 tableEntry.push(center("Aktionen"));
@@ -1412,7 +1490,7 @@
                 writeHeader(tableEntry.join(""));
             }
 
-            function statOutput(statView, prefix, dmgStat, specificArray) {
+            function printDamageLine(statView, prefix, dmgStat, specificArray) {
                 if(dmgStat.result[1]+dmgStat.result[2]+dmgStat.result[3]+dmgStat.result[0] <= 0) return;
                 var gesamtErfolge = dmgStat.result[1] + dmgStat.result[2] + dmgStat.result[3];
                 var tableEntry = Array();
@@ -1466,62 +1544,42 @@
                 writeTR(tableEntry);
             }
 
-
-            function printOut2(statView, id, statResult) {
-                if (id === "") id = "Gesamt";
-                statOutput(statView, id === "" ? "" : (id + ""), statResult, statResult.byDmgType);
-            }
-
             function connect(a, b, isDefense) {
                 if (a === "") return b;
                 return a+" -> "+b;
             }
 
-            function titleConvert(title) {
-                if (title === "Gegner-AngriffsTyp") {
-                    return "Alle Angriffstypen";
-                }
-                return title;
-            }
-
-            function printOut(statView, title, curResult) {
+            function printDamage(statView, title, curResult) {
                 if(curResult.sub) {
                     if (title !== "" || statView.showRootStat) {
                         if(curResult.ruestung > -1) {
-                            printOut2(statView, title, curResult);
+                            printDamage2(statView, title, curResult);
                         }
                     }
                     for (const [id, dmg] of Object.entries(curResult.sub)) {
-                        printOut(statView, connect(title, id), dmg);
+                        printDamage(statView, connect(title, id), dmg);
                     }
 
                 } else {
-                    printOut2(statView, title, curResult);
+                    printDamage2(statView, title, curResult);
                 }
             }
 
-            //Löscht die vorangelegten Einträge, welche keine Treffer hatten
-            function resultClearance(subResult) {
-                if(!subResult) return;
-                for (const [id, entry] of Object.entries(subResult)) {
-                    if(!entry.filterType) {
-                        delete subResult[id];
-                    } else {
-                        resultClearance(entry.sub);
-                    }
-                }
+            function printDamage2(statView, id, statResult) {
+                if (id === "") id = "Gesamt";
+                printDamageLine(statView, id === "" ? "" : (id + ""), statResult, statResult.byDmgType);
             }
+
             const statView = this.statView;
-            statView.result = StatSearch(statView.query, this.levelDatas);
             console.log("StatView", statView, this.levelDatas);
             if(!statView.result) {
                 curTable.innerHTML = "<td>Es konnte kein Ergebnis ermittelt werden!";
                 return;
             }
-            resultClearance(statView.result.sub);
 
-            printHeader(statView);
-            printOut(statView, "", statView.result);
+
+            printDamageHeader(statView);
+            printDamage(statView, "", statView.result);
 
             const myTable = curTable;
             if(this.collapsed) {
