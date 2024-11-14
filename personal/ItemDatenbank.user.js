@@ -18,6 +18,7 @@
 (function() {
     'use strict';
     const currentDataVersion = 1;
+    const currentItemDataVersion = 1;
 
     var pathname = window.location.pathname.split("/");
     var pageSection = pathname[pathname.length-2];
@@ -25,9 +26,6 @@
 
     const queryString = window.location.search;
     const urlParams = new URLSearchParams(queryString);
-
-    const ALL_ITEMS_STORE = "allItems";
-    const ITEM_ID_STORE = "itemIds";
 
     function getItemNameFromUrl() {
         return decodeURI(urlParams.get("name"));
@@ -37,8 +35,8 @@
         // Links zu Items finden und markieren. Nahezu überall.
         if(page !== "item.php") {
             async function checkSiteForItems() {
-                await storage.ensureItemsIdMap(true);
                 console.log("checkSiteForItems");
+                await storage.ensureItemSources();
                 const allHrefs = document.getElementsByTagName("a");
                 for(var i=0,l=allHrefs.length;i<l;i++) {
                     const itemLinkElement = allHrefs[i];
@@ -54,15 +52,50 @@
                         }
                     }
                     if(!itemName) continue;
-                    itemName = decodeURI(nameMatch[1]).replaceAll("+", " ").replaceAll("%3A", ":").replaceAll("%2C", ",");
+                    itemName = decodeURIComponent(itemName[1]).replaceAll("+", " ");
 
                     if(index > 0) {
                         await storage.indexItem(itemName, itemLinkElement);
                     }
                 }
             }
-            checkSiteForItems();
-            setInterval(checkSiteForItems, 10000);
+
+            await checkSiteForItems();
+            setInterval(async function () {
+                await storage.ensureItemSources(true);
+                checkSiteForItems();
+            }, 10000);
+        }
+
+        // Gegenstandsseite
+        if (page === "item.php") {
+            var link = document.getElementById("link");
+            if (hasSetOrGemBonus(link)) {
+                console.log("Set oder gem-boni entdeckt! Item wird nicht für die Datenbank verwendet!");
+                return;
+            }
+            link = link.innerHTML;
+            const details = document.getElementById("details").innerHTML;
+
+            const all = document.getElementsByTagName("h1")[0];
+            var itemName = all.getElementsByTagName("a")[0].textContent.trim();
+            if (itemName[itemName.length - 1] === "!") itemName = itemName.substring(0, itemName.length - 1);
+            const sourceItem = {
+                name: itemName,
+                details: details,
+                link: link,
+            }
+            await storage.gmSetSourceItem(itemName, sourceItem);
+            const item = {
+                name: itemName,
+                details: details,
+                link: link,
+            }
+            await writeItemData(item);
+            delete item.details;
+            delete item.link;
+            await storage.gmSetItem(itemName, item);
+            console.log("Gegenstandsseite", sourceItem, item);
         }
 
         // Erweiterung für die Suche
@@ -73,16 +106,15 @@
 
                 const [itemDBSearch] = util.createCheckbox(searchContainerTitle, "itemDB", "Item-Datenbank anfragen");
 
-                const allItems = await storage.getAllItems();
                 var itemsToLoad = 0;
-                for (const [itemName, item] of Object.entries(allItems)) {
+                for (const [itemName, item] of Object.entries(await storage.ensureItemSources())) {
                     if(!item.details || item.irregular) {
                         itemsToLoad++;
                     }
                 }
                 const [missingSearch, missingSearchLabel] = util.createCheckbox(searchContainerTitle, "missingSearch", "Fehlende Einträge ["+itemsToLoad+"]");
                 async function updateMissingButton() {
-                    const allItems = await storage.getAllItems();
+                    const allItems = await storage.ensureItemSources();
                     var itemsToLoad = 0;
                     for (const [itemName, item] of Object.entries(allItems)) {
                         if(!item.details || item.irregular) {
@@ -113,7 +145,7 @@
 
                 getSuchfeld().onkeydown = function(event) {
                     // Enter abfangen und den aktuellen Such-Button auslösen
-                    if(event.keyCode == 13) {
+                    if (event.keyCode === 13) {
                         event.preventDefault();
                         buttonContainer.children[0].click();
                     }
@@ -156,20 +188,33 @@
                         resultContainer.removeChild(resultContainer.children[0]);
                     }
 
-                    const allItems = await storage.getAllItems(true);
                     updateMissingButton();
                     const table = document.createElement("table");
                     table.className = "content_table";
+                    const thead = document.createElement("thead");
+                    table.append(thead);
+                    const headTR = document.createElement("tr");
+                    thead.append(headTR);
+                    headTR.className = "header";
                     const tbody = document.createElement("tbody");
                     table.append(tbody);
                     resultContainer.append(table);
+                    headTR.innerHTML += "<th></th><th>Gegenstand</th>";
 
-                    const columns = getAutoColumns();
+                    var columns;
+                    if (itemDBSearch.checked) {
+                        columns = getAutoColumns();
+                        for (const column of Object.keys(columns)) {
+                            headTR.innerHTML += "<th>" + column + "</th>";
+                        }
+                    } else {
+                        columns = Array();
+                    }
 
                     function getItemValue(obj, pfadArray, lastHeader) {
                         //console.log("getItemValue", obj, pfadArray);
                         if(!obj) return "";
-                        if(pfadArray.length == 0) {
+                        if (pfadArray.length === 0) {
                             if(lastHeader === "schaden") {
                                 var result = "";
                                 obj.forEach(dmg => {
@@ -200,12 +245,14 @@
                     }
 
                     var i = 1;
-                    var switcher = true;
-                    for (const [itemName, item] of Object.entries(allItems)) {
-                        if(itemDBSearch.checked && item.details) {
-                            writeItemData(item); // rewrite item.data
-                        }
-
+                    var switcher = false;
+                    var items;
+                    if (itemDBSearch.checked) {
+                        items = await storage.getAllItems(true);
+                    } else {
+                        items = await storage.ensureItemSources(true);
+                    }
+                    for (const [itemName, item] of Object.entries(items)) {
                         if(!itemDBSearch.checked && !item.details || !itemDBSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && matches(item, searchContainer)) {
                             switcher = !switcher;
                             const tr = document.createElement("tr");
@@ -249,40 +296,18 @@
 
             }
         }
-        else if(page === "item.php") {
-            var link = document.getElementById("link");
-            if(hasSetOrGemBonus(link)) {
-                console.log("Set oder gem-boni entdeckt! Item wird nicht für die Datenbank verwendet!");
-                return;
-            }
-            link = link.innerHTML;
-            const details = document.getElementById("details").innerHTML;
 
-            const all = document.getElementsByTagName("h1")[0];
-            var itemName = all.getElementsByTagName("a")[0].textContent.trim();
-            if(itemName[itemName.length-1] == "!") itemName = itemName.substring(0, itemName.length-1);
-            const item = {
-                name: itemName,
-                details: details,
-                link: link,
-            }
-            await storage.gmSetItem(itemName, item);
-            await writeItemData(item);
-            console.log("Gegenstandsseite", item);
-        }
-
-        await storage.ensureAllItems();
-        const allItems = storage.allItems;
-        console.log("ALL_ITEMS", allItems);
+        await storage.ensureItemSources();
+        const allItemSources = storage.itemSources;
         var countRetrieved = 0;
         var all = 0;
-        for (const [itemName, item] of Object.entries(allItems)) {
+        for (const [itemName, item] of Object.entries(allItemSources)) {
             all++;
             if(item.details) {
                 countRetrieved++;
             }
         }
-        console.log("ItemDB "+countRetrieved+"/"+all, allItems);
+        console.log("ItemSources: " + countRetrieved + "/" + all);
         await storage.validateItems();
     }
 
@@ -296,7 +321,7 @@
         table.append(tbody);
 
         function checkRemove(i) {
-            if(i==0) return false;
+            if (tbody.children.length === 1) return false;
             console.log("checkRemove", validatorTypes[i], tbody.children.length, i);
             if(!validatorTypes[i]) {
                 validatorTypes.splice(i,i);
@@ -319,17 +344,21 @@
                 console.log("set checked", checkbox.checked);
                 negators[myCurIndex] = checkbox.checked;
             }
+            checkbox.parentElement.hidden = true;
+
             select.onchange = function() {
                 const myCurIndex = [...tbody.children].indexOf(tr);
                 if(select.value === "") {
                     searchFieldsTD.removeChild(searchFieldsTD.children[0]);
                     delete validators[myCurIndex];
                     delete validatorTypes[myCurIndex];
+                    checkbox.parentElement.hidden = true;
                     checkRemove(myCurIndex);
                 } else {
                     const suche = SuchKriterien[select.value]();
                     if(searchFieldsTD.children.length > 0) searchFieldsTD.removeChild(searchFieldsTD.children[0]);
                     searchFieldsTD.append(suche.get());
+                    checkbox.parentElement.hidden = false;
                     validators[myCurIndex] = suche.matches;
                     validatorTypes[myCurIndex] = select.value;
                     console.log("test", tbody.children.length, myCurIndex);
@@ -347,6 +376,12 @@
 
     var debug = false;
     function matches(item) {
+        const result = matches2(item);
+        if (debug) console.log("Matches", result);
+        return result;
+    }
+
+    function matches2(item) {
         debug = item.name.includes("Thanat");
         if(debug) console.log(item);
         const suchfeldWert = getSuchfeld().value.trim();
@@ -356,7 +391,10 @@
         for(var i=0,l=validators.length;i<l;i++) {
             const currentValidator = validators[i];
             if(!currentValidator) continue;
-            if((currentValidator(item)||false) === (negators[i]||false)) return false;
+            const currentValidatorResult = currentValidator(item) || false;
+            const negatorWish = negators[i] || false;
+            if (debug) console.log("Matches2", currentValidatorResult, negatorWish);
+            if (currentValidatorResult === negatorWish) return false;
         }
         return true;
     }
@@ -400,10 +438,17 @@
         return document.getElementsByName("item_10name")[0] || document.getElementsByName("item_3name")[0] || document.getElementsByName("item_6name")[0];
     }
 
+    function whenBedingung(when) {
+        var validatorIndex = validatorTypes.indexOf(when);
+        var negator = negators[validatorIndex] || false;
+        var validator = validatorIndex > -1;
+        return negator !== validator;
+    }
+
     function getAutoColumns() {
         const result = {};
         for(const [title, def] of Object.entries(AutoColumns)) {
-            if(!def.notWhen && !def.when || def.notWhen && !validatorTypes.includes(def.notWhen) || def.when && validatorTypes.includes(def.when)) {
+            if (!def.notWhen && !def.when || def.notWhen && !whenBedingung(def.notWhen) || def.when && whenBedingung(def.when)) {
                 result[title] = def.pfad.split(".");
             }
         }
@@ -414,20 +459,20 @@
     const KLASSEN = {
         "Barbar": "Bb",
         "Barde": "Bd",
-        "Dieb": "D",
+        "Dieb": "Di",
         "Gaukler": "Ga",
         "Gelehrter": "Ge",
         "Gestaltwandler": "Gw",
         "Gladiator": "Gl",
-        "Hasardeur": "H",
-        "Jäger": "J",
-        "Klingenmagier": "K",
+        "Hasardeur": "Ha",
+        "Jäger": "Jä",
+        "Klingenmagier": "Km",
         "Magier": "Ma",
         "Mönch": "Mo",
         "Paladin": "Pa",
         "Priester": "Pr",
-        "Quacksalber": "Q",
-        "Ritter": "R",
+        "Quacksalber": "Qu",
+        "Ritter": "Ri",
         "Schamane": "Sm",
         "Schütze": "Sü",
     }
@@ -442,6 +487,8 @@
         "Wahrnehmung": "Wa",
         "Willenskraft": "Wi",
     }
+
+    const TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
 
     const SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Psychologischer Schaden"];
 
@@ -464,14 +511,15 @@
             return {
                 matches: function(item) {
                     var result = Array();
-                    if(select2.value=="Besitzer" || select2.value == "") {
-                        const cur = item.effects?.owner?.result;
+                    if (select2.value === "Besitzer" || select2.value === "") {
+                        const cur = item.effects?.owner?.schaden;
                         if(cur) result.push(...cur);
                     }
-                    if(select2.value=="Betroffener" || select2.value == "") {
-                        const cur = item.effects?.target?.result;
+                    if (select2.value === "Betroffener" || select2.value === "") {
+                        const cur = item.effects?.target?.schaden;
                         if(cur) result.push(...cur);
                     }
+                    if (debug) console.log("likhsdf", item, result);
                     var next = Array();
                     if(select1.value !== "") {
                         result.forEach(cur => {
@@ -505,13 +553,26 @@
             return {
                 matches: function(item) {
                     const klasse = item?.data?.klasse;
-                    if(!klasse || klasse.typ == "alle") return true;
-                    if(klasse.typ == "nur") {
+                    if (!klasse || klasse.typ === "alle") return true;
+                    if (klasse.typ === "nur") {
                         return klasse.def.includes(select1.value);
                     }
                     return !klasse.def.includes(select1.value);
                 },
                 get: function() {
+                    return span;
+                }
+            }
+        },
+        Trageort: function () {
+            const span = document.createElement("span");
+            const select1 = createSelect(["<Klasse>", ...TRAGEORT]);
+            span.append(select1);
+            return {
+                matches: function (item) {
+                    return item?.data?.trageort === select1.value;
+                },
+                get: function () {
                     return span;
                 }
             }
@@ -559,11 +620,11 @@
             return {
                 matches: function(item) {
                     var result = Array();
-                    if(select2.value=="Besitzer" || select2.value == "") {
+                    if (select2.value === "Besitzer" || select2.value === "") {
                         const cur = item.effects?.owner?.parade;
                         if(cur) result.push(...cur);
                     }
-                    if(select2.value=="Betroffener" || select2.value == "") {
+                    if (select2.value === "Betroffener" || select2.value === "") {
                         const cur = item.effects?.target?.parade;
                         if(cur) result.push(...cur);
                     }
@@ -584,6 +645,7 @@
                 }
             }
         },
+
     }
 
     function td(txtOrElement) {
@@ -610,25 +672,17 @@
         return linkElement.getElementsByClassName("gem_bonus_also_by_gem").length > 0 || linkElement.getElementsByClassName("gem_bonus_only_by_gem").length > 0;
     }
 
-    async function writeAllItemData() {
-        await storage.ensureAllItems();
-        for (const [itemName, item] of Object.entries(storage.allItems)) {
-            await writeItemData(item);
-        }
-        await GM.setValue(ALL_ITEMS_STORE, this.allItems);
-    }
-
     async function writeItemData(item) {
         try {
             const itemData = {};
             writeItemDataLink(item);
             writeItemDataDetails(item);
+            item.dataVersion = currentItemDataVersion;
         } catch(error) {
             console.log(error);
             //alert(error);
             throw error;
         }
-        await GM.setValue("item_"+item.name, item);
     }
 
     function writeItemDataDetails(item) {
@@ -791,22 +845,38 @@
         }
     }
 
+    const ITEM_SOURCES = "itemSources"; // Speicherung der Sourcen
+    //const ALL_ITEMS_STORE = "allItems";
+    const ITEM_ID_STORE = "itemIds";
+    const ITEM_DB_STORE = "itemDB";
     const storage = {
         // feste Punkte im Storage die auf andere IDs im Storage verweisen
         data: null,
-        itemIds: null,
-        allItems: null,
+        itemIds: null, // Enthält Referenzen für einzelne Einträge im Storage sowie noch Metadaten über das Item
+        itemSources: null,
+        itemDB: null,
+        count: 0,
 
         getAllItems: async function(force) {
-            await this.ensureAllItems(force);
-            return this.allItems;
+            await this.ensureItemDB(force);
+            return this.itemDB;
         },
 
-        ensureAllItems: async function(force) {
-            if(!this.allItems || force) {
-                this.allItems = await GM.getValue(ALL_ITEMS_STORE, {});
-                if(!force) console.log("Loaded allItems", this.allItems);
+        ensureItemSources: async function (force) {
+            if (!this.itemSources || force) {
+                this.count++;
+                this.itemSources = await GM.getValue(ITEM_SOURCES, {});
+                if (!force) console.log("Loaded ItemSources", this.itemSources);
             }
+            return this.itemSources;
+        },
+
+        ensureItemDB: async function (force) {
+            if (!this.itemDB || force) {
+                this.itemDB = await GM.getValue(ITEM_DB_STORE, {});
+                if (!force) console.log("Loaded ItemDB", this.itemDB);
+            }
+            return this.itemDB;
         },
 
         ensureItemsIdMap: async function(force) {
@@ -814,33 +884,52 @@
                 this.itemIds = await GM.getValue(ITEM_ID_STORE, {});
                 if(!force) console.log("Loaded ItemIdStore", this.itemIds);
             }
+            return this.itemIds;
+        },
+
+        gmSetIndexItem: async function (itemName, item) {
+            await this.ensureItemSources();
+            if (!this.itemSources[itemName]) {
+                this.itemSources[itemName] = item;
+            }
+        },
+
+        gmSetSourceItem: async function (itemName, item) {
+            if (item.data || item.effects) throw new Error("Item enthält bereits abgeleitete Daten!");
+            if (!item.details || !item.link) throw new Error("Item enthält keine Source-Daten");
+            await this.ensureItemSources();
+            this.itemSources[itemName] = item;
+            await GM.setValue(ITEM_SOURCES, this.itemSources);
         },
 
         gmSetItem: async function (itemName, item) {
-            await this.ensureAllItems();
+            if (!item.data || !item.effects) throw new Error("Item wurde noch nicht eingelesen!");
+            if (item.details || item.link) throw new Error("Item enthält noch Source-Daten");
             await this.ensureItemsIdMap();
-            const id = "item_"+itemName;
+            await this.ensureItemDB();
+            const itemRootId = "item_" + itemName;
             if(item) {
-                this.allItems[itemName] = item;
-                this.itemIds[id] = {
+                this.itemDB[itemName] = item;
+                this.itemIds[itemRootId] = {
                     dataVersion: currentDataVersion,
                     time: new Date().getTime(),
-                    loaded: item.details? true:false,
+                    loaded: !!item.details,
                 };
-                await GM.setValue(id, item);
+                await GM.setValue(itemRootId, item);
             } else {
-                delete this.allItems[itemName];
-                delete this.itemIds[id];
-                await GM.deleteValue(id);
+                delete this.itemDB[itemName];
+                delete this.itemIds[itemRootId];
+                await GM.deleteValue(itemRootId);
             }
             await GM.setValue(ITEM_ID_STORE, this.itemIds);
-            await GM.setValue(ALL_ITEMS_STORE, this.allItems);
+            await GM.setValue(ITEM_DB_STORE, this.itemDB);
         },
 
         indexItem: async function(itemName, element) {
-            const metaInfo = this.itemIds["item_"+itemName];
+            await this.ensureItemSources();
+            const sourceItem = this.itemSources[itemName];
             const missingElement = element.parentElement.className === "missingWrapper" && element.parentElement.children.length > 1 && element.parentElement.children[1];
-            if(!metaInfo || !metaInfo.loaded) {
+            if (!sourceItem || !sourceItem.details) {
                 if(!missingElement) {
                     if(element.parentElement.className !== "missingWrapper") {
                         const missingWrapper = document.createElement("span");
@@ -868,25 +957,54 @@
                     element.parentElement.removeChild(missingElement);
                 }
             }
-            if(!metaInfo || metaInfo.dataVersion !== currentDataVersion) {
+            if (!sourceItem || sourceItem.dataVersion !== currentDataVersion) {
                 const newItem = {
                     name: itemName,
                 }
-                //console.log("added item: "+itemName, metaInfo, this.itemIds);
-                await this.gmSetItem(itemName, newItem);
+                // console.log("added item: "+itemName, metaInfo, this.itemIds);
+                await this.gmSetIndexItem(itemName, newItem);
             } else {
-                metaInfo.time = new Date().getTime();
+                sourceItem.time = new Date().getTime();
             }
         },
 
         validateItems: async function() {
+            //await GM.setValue(ITEM_DB_STORE, {}); // delete and rewrite all ItemDB-Objects
+            //this.itemDB = {};
+
+            // await this.ensureAllItems();
+            // await GM.setValue(ITEM_SOURCES, this.allItems);
+            // prüft und aktualisiert bei Bedarf die Item DB anhand der Sourcen
+            async function updateItemDB() {
+                await storage.ensureItemSources();
+                await storage.ensureItemDB();
+                for (const [itemName, sourceItem] of Object.entries(storage.itemSources)) {
+                    var item = storage.itemDB[itemName];
+                    if (!item || item.dataVersion !== currentItemDataVersion) {
+                        if (sourceItem.details) {
+                            console.log("Update Item to ItemDB", sourceItem);
+                            item = {
+                                name: itemName,
+                                details: sourceItem.details,
+                                link: sourceItem.link,
+                            }
+                            writeItemData(item);
+                            delete item.details;
+                            delete item.link;
+                            storage.gmSetItem(itemName, item);
+                        }
+                    }
+                }
+            }
+
+            await updateItemDB();
             return;
             await this.ensureItemsIdMap();
-            await this.ensureAllItems();
+            await this.ensureItemSources();
             Object.keys(this.itemIds).forEach(async a => {
                 if(a.includes("%3A") || a.includes("%2C")) {
                     console.log("falsches Item: "+a);
-                    await this.gmSetItem(a.substring(a.indexOf("_")+1));
+                    await this.gmSetSourceItem(a.substring(a.indexOf("_") + 1));
                 }
             });
         },
@@ -903,12 +1021,10 @@
             const result = document.createElement("input");
             result.type = "checkbox";
             result.id = id;
-
             var td = document.createElement("td");
             td.append(result);
-
             const label = document.createElement("label");
-            label.for = "itemDB";
+            label.for = id;
             label.innerText = labelTitle;
             td.append(label);
             parent.append(td);
