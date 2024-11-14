@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.16.1
+// @version        0.17
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -20,7 +20,7 @@
 
 (function() {
     'use strict';
-    const version = "0.16.1";
+    const version = "0.17";
     const stand = "14.11.2024";
     const currentReportDataVersion = 4;
     var thisReport;
@@ -33,7 +33,8 @@
         if (WOD_istSeite_Kampfbericht()) { // Einzelseite
             outputAnchor = createOutputAnchor();
             outputAnchor.execute(async function () {
-                const reportId = document.getElementsByName("report_id[0]")[0].value;
+                // cur_rep_id für Dungeons, report bei Schlachten
+                const reportId = getReportId();
                 await storage.loadThisReport(reportId);
 
                 var levelData = readAndStoreKampfbericht(reportId);
@@ -54,7 +55,7 @@
         if (WOD_istSeite_Kampfstatistik()) { // Übersichtsseite
             outputAnchor = createOutputAnchor();
             outputAnchor.execute(async function () {
-                const reportId = document.getElementsByName("report_id[0]")[0].value;
+                const reportId = getReportId();
                 await storage.loadThisReport(reportId);
 
                 if (thisReport.levelCount) {
@@ -71,6 +72,17 @@
                 }
                 storage.validateAllReports();
             });
+        }
+    }
+
+    function getReportId() {
+        var reportId = document.getElementsByName("report_id[0]")[0];
+        if (reportId) {
+            return "dungeon_" + reportId.value;
+        }
+        reportId = document.getElementsByName("report")[0];
+        if (reportId) {
+            return "schlacht_" + reportId.value;
         }
     }
 
@@ -198,6 +210,7 @@
                 dataVersion: currentReportDataVersion,
                 time: new Date().getTime()
             };
+            console.log("Saved report: ", storeId, thisReport);
             await this.gmSetReport(storeId, thisReport);
             //console.log("Stored report", thisReport);
         },
@@ -205,10 +218,18 @@
     };
 
     function readAndStoreKampfbericht(reportId) {
-        const levelNr = document.getElementsByName("current_level")[0].value;
+        var levelNr;
+        var levelCount;
+        if (reportId.startsWith("schlacht_")) {
+            levelNr = 1;
+            levelCount = 1;
+        } else { // Dungeon
+            levelNr = document.getElementsByName("current_level")[0].value;
+            levelCount = document.getElementsByClassName("navigation levels")[0].children.length - 1;
+        }
         const levelData = readKampfbericht();
         thisReport.id = reportId;
-        thisReport.levelCount = document.getElementsByClassName("navigation levels")[0].children.length - 1;
+        thisReport.levelCount = levelCount;
         if (!thisReport.levelDatas) {
             thisReport.levelDatas = [];
         }
