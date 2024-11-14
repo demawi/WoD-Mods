@@ -321,10 +321,12 @@
             }
             return result;
         }
-        var addTargetDmgStats = function (target, toStat, fromAction, damage, hadDmgType, damageIndexFinal) {
-            if (hadDmgType || damageIndexFinal == 0) {
-                toStat.result[target.result]++;
-                toStat.targets.push(target);
+        var addTargetDmgStats = function (target, toStat, fromAction, damage, hadDmgType, damageIndexFinal, inBetweenCalc) {
+            if (hadDmgType || damageIndexFinal === 0) {
+                if (!toStat.targets.includes(target)) {
+                    toStat.result[target.result]++;
+                    toStat.targets.push(target);
+                }
                 if (!toStat.actions.includes(fromAction)) {
                     toStat.actions.push(fromAction);
                 }
@@ -432,7 +434,7 @@
                                         subStats.filterType = curFilter;
                                         const tail = filters.slice(1);
                                         if (execFilter(subStats, tail)) {
-                                            addTargetDmgStats(target, curStats, action, damage, hadDmgType, damageIndexFinal);
+                                            addTargetDmgStats(target, curStats, action, damage, hadDmgType, damageIndexFinal, true);
                                             return true;
                                         }
                                         return false;
