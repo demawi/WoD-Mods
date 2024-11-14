@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.15
+// @version        0.16
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -20,8 +20,8 @@
 
 (function() {
     'use strict';
-    const version = "0.15";
-    const stand = "12.11.2024";
+    const version = "0.16";
+    const stand = "14.11.2024";
     const currentReportDataVersion = 4;
     var thisReport;
     var thisLevelDatas;
@@ -321,16 +321,18 @@
             }
             return result;
         }
-        var addTargetDmgStats = function(target, toStat, fromAction) {
-            toStat.result[target.result]++;
-            toStat.targets.push(target);
-            if(!toStat.actions.includes(fromAction)) {
-                toStat.actions.push(fromAction);
+        var addTargetDmgStats = function (target, toStat, fromAction, damage, hadDmgType, damageIndexFinal) {
+            if (hadDmgType || damageIndexFinal == 0) {
+                toStat.result[target.result]++;
+                toStat.targets.push(target);
+                if (!toStat.actions.includes(fromAction)) {
+                    toStat.actions.push(fromAction);
+                }
             }
-            target.damage.forEach(damage => {
+            if (damage !== true) {
                 addDmgStats(damage, toStat); // gesamtschaden
                 addDmgStats(damage, getStat(toStat, null, damage.type, "byDmgType"));
-            });
+            }
         }
         var stats = createStat();
 
@@ -360,71 +362,84 @@
                             action.targets.forEach(target => {
                                 if (target.type !== "Angriff") return;
 
-                                const execFilter = function (curStats, filters) {
-                                    if (!filters || filters.length === 0) {
-                                        addTargetDmgStats(target, curStats, action);
-                                        return true;
-                                    }
-                                    const queryFilter = filters[0];
-                                    const curFilter = queryFilter.spec;
-                                    var actionTarget;
-                                    if (curFilter.startsWith("attackType")) { // attackType ist immer auf der aktiven Unit
-                                        actionTarget = action;
-                                    } else if (curFilter.startsWith("enemy_")) {
-                                        actionTarget = wantOffense ? target : action;
-                                    } else {
-                                        actionTarget = wantOffense ? action : target;
-                                    }
-                                    var subStats;
-                                    if (curFilter.endsWith("position")) {
-                                        subStats = getStat(curStats, queryFilter, actionTarget.unit.position, "sub", "position");
-                                        if (!subStats) return false;
-                                    } else if (curFilter.endsWith("unit")) {
-                                        subStats = getStat(curStats, queryFilter, actionTarget.unit.id.name, "sub", actionTarget.unit.id.isHero ? "herounit" : null);
-                                        if (!subStats) return false;
-                                        subStats.unit = actionTarget.unit;
-                                        subStats.title = actionTarget.unit.typeRef;
-                                        if (actionTarget.unit.id.index) {
-                                            var unitCount = subStats.unitCount;
-                                            if (!unitCount) {
-                                                unitCount = {};
-                                                subStats.unitCount = unitCount;
-                                            }
-                                            unitCount[actionTarget.unit.id.index] = true;
-                                        }
-                                    } else if (curFilter.endsWith("attackType")) {
-                                        subStats = getStat(curStats, queryFilter, actionTarget.fertigkeit.type, "sub", "attackType");
-                                        if (!subStats) return false;
-                                    } else if (curFilter.endsWith("skill")) {
-                                        subStats = getStat(curStats, queryFilter, actionTarget.fertigkeit.name, "sub", "skill");
-                                        if (!subStats) return false;
-                                        subStats.title = actionTarget.fertigkeit.typeRef;
-                                    } else if (curFilter.endsWith("level")) {
-                                        if (levelDataArray.length === 1) return; // Wenn es nur einen Level gibt, wird dieses Kriterium ignoriert
-                                        subStats = getStat(curStats, queryFilter, "Level " + finalLevelNr, "sub", "level");
-                                        if (!subStats) return false;
-                                        subStats.title = "Level " + finalLevelNr + "<br>(" + levelData.roundCount + " Runden)" + (finalAreaNr === 1 ? "" : "<br>(" + areas.length + " Kämpfe)");
-                                    } else if (curFilter.endsWith("fight")) {
-                                        subStats = getStat(curStats, queryFilter, "Kampf " + finalLevelNr + "." + finalAreaNr, "sub", "fight");
-                                        if (!subStats) return false;
-                                        subStats.title = "Kampf " + finalLevelNr + "." + finalAreaNr + "<br>(" + area.rounds.length + " Runden)";
-                                    } else if (curFilter.endsWith("items")) {
-                                        subStats = getStat(curStats, queryFilter, util.arrayMap(actionTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
-                                        if (!subStats) return false;
-                                        subStats.title = util.arrayMap(actionTarget.fertigkeit.items, a => a.srcRef).join(", ");
-                                    } else {
-                                        console.error("StatQuery-Filter ist nicht valide: '" + curFilter + "'");
-                                    }
-                                    subStats.filterType = curFilter;
-                                    const tail = filters.slice(1);
-                                    if (execFilter(subStats, tail)) {
-                                        addTargetDmgStats(target, curStats, action);
-                                        return true;
-                                    }
-                                    return false;
-                                }
-                                execFilter(stats, filter);
+                                var damages = target.damage; // nur bei "true" wird die action auch gezählt
+                                if (damages.length === 0) damages = [true];
+                                var firstDamage = true;
+                                for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
+                                    const damage = damages[damageIndex];
+                                    const damageIndexFinal = damageIndex;
 
+                                    var hadDmgType = false;
+                                    const execFilter = function (curStats, filters) {
+                                        if (!filters || filters.length === 0) {
+                                            addTargetDmgStats(target, curStats, action, damage, hadDmgType, damageIndexFinal);
+                                            return true;
+                                        }
+                                        const queryFilter = filters[0];
+                                        const curFilter = queryFilter.spec;
+                                        var actionTarget;
+                                        if (curFilter.startsWith("attackType") || curFilter.startsWith("skill")) { // attackType ist immer auf der aktiven Unit
+                                            actionTarget = action;
+                                        } else if (curFilter.startsWith("enemy_")) {
+                                            actionTarget = wantOffense ? target : action;
+                                        } else {
+                                            actionTarget = wantOffense ? action : target;
+                                        }
+                                        var subStats;
+                                        if (curFilter.endsWith("position")) {
+                                            subStats = getStat(curStats, queryFilter, actionTarget.unit.position, "sub", "position");
+                                            if (!subStats) return false;
+                                        } else if (curFilter.endsWith("unit")) {
+                                            subStats = getStat(curStats, queryFilter, actionTarget.unit.id.name, "sub", actionTarget.unit.id.isHero ? "herounit" : null);
+                                            if (!subStats) return false;
+                                            subStats.unit = actionTarget.unit;
+                                            subStats.title = actionTarget.unit.typeRef;
+                                            if (actionTarget.unit.id.index) {
+                                                var unitCount = subStats.unitCount;
+                                                if (!unitCount) {
+                                                    unitCount = {};
+                                                    subStats.unitCount = unitCount;
+                                                }
+                                                unitCount[actionTarget.unit.id.index] = true;
+                                            }
+                                        } else if (curFilter.endsWith("attackType")) {
+                                            subStats = getStat(curStats, queryFilter, actionTarget.fertigkeit.type, "sub", "attackType");
+                                            if (!subStats) return false;
+                                        } else if (curFilter.endsWith("skill")) {
+                                            subStats = getStat(curStats, queryFilter, actionTarget.fertigkeit.name, "sub", "skill");
+                                            if (!subStats) return false;
+                                            subStats.title = actionTarget.fertigkeit.typeRef;
+                                        } else if (curFilter.endsWith("level")) {
+                                            if (levelDataArray.length === 1) return; // Wenn es nur einen Level gibt, wird dieses Kriterium ignoriert
+                                            subStats = getStat(curStats, queryFilter, "Level " + finalLevelNr, "sub", "level");
+                                            if (!subStats) return false;
+                                            subStats.title = "Level " + finalLevelNr + "<br>(" + levelData.roundCount + " Runden)" + (finalAreaNr === 1 ? "" : "<br>(" + areas.length + " Kämpfe)");
+                                        } else if (curFilter.endsWith("fight")) {
+                                            subStats = getStat(curStats, queryFilter, "Kampf " + finalLevelNr + "." + finalAreaNr, "sub", "fight");
+                                            if (!subStats) return false;
+                                            subStats.title = "Kampf " + finalLevelNr + "." + finalAreaNr + "<br>(" + area.rounds.length + " Runden)";
+                                        } else if (curFilter.endsWith("items")) {
+                                            subStats = getStat(curStats, queryFilter, util.arrayMap(actionTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
+                                            if (!subStats) return false;
+                                            subStats.title = util.arrayMap(actionTarget.fertigkeit.items, a => a.srcRef).join(", ");
+                                        } else if (curFilter.endsWith("dmgType")) {
+                                            hadDmgType = true;
+                                            subStats = getStat(curStats, queryFilter, damage === true ? "Ohne Schaden" : damage.type, "sub", "dmgType");
+                                            if (!subStats) return false;
+                                        } else {
+                                            console.error("StatQuery-Filter ist nicht valide: '" + curFilter + "'");
+                                        }
+                                        subStats.filterType = curFilter;
+                                        const tail = filters.slice(1);
+                                        if (execFilter(subStats, tail)) {
+                                            addTargetDmgStats(target, curStats, action, damage, hadDmgType, damageIndexFinal);
+                                            return true;
+                                        }
+                                        return false;
+                                    }
+                                    execFilter(stats, filter);
+                                    firstDamage = false;
+                                }
                             });
                         }
                     });
@@ -986,6 +1001,7 @@
         unit: "Einheit",
         skill: "Fertigkeit",
         items: "Gegenstände",
+        dmgType: "Schadensart",
 
         enemy_unit: "Gegner-Einheit",
         enemy_position: "Gegner-Position",
