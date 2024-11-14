@@ -3,7 +3,6 @@
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
 // @version        0.15
-// @downloadURL    https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/ErweiterteKampfstatistik.user.js
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -1485,8 +1484,13 @@
                 tableEntry.push(center("Direkter<br>Schaden<br>(Ø)"));
                 tableEntry.push(center("Rüstung"));
                 tableEntry.push(center("Resistenz"));
-                tableEntry.push(center("AW Ø<br>(Min-Max)"));
-                tableEntry.push(center("PW Ø<br>(Min-Max)"));
+                if (statView.query.type === "defense") {
+                    tableEntry.push(center("PW Ø<br>(Min-Max)"));
+                    tableEntry.push(center("AW Ø<br>(Min-Max)"));
+                } else {
+                    tableEntry.push(center("AW Ø<br>(Min-Max)"));
+                    tableEntry.push(center("PW Ø<br>(Min-Max)"));
+                }
                 tableEntry.push(center("Schadensarten<br>Schaden / Rüstung / Anfälligkeit"));
                 writeHeader(tableEntry.join(""));
             }
@@ -1535,8 +1539,15 @@
                 dmgStat.targets.forEach(target => {
                     pw.push(Number(target.fertigkeit.wurf));
                 });
-                tableEntry.push(center(util.arrayAvg(aw, null, 2) + "<br>(" + util.arrayMin(aw) + " - " + util.arrayMax(pw) + ")"));
-                tableEntry.push(center(util.arrayAvg(pw, null, 2) + "<br>(" + util.arrayMin(pw) + " - " + util.arrayMax(pw) + ")"));
+                const awValue = center(util.arrayAvg(aw, null, 2) + "<br>(" + util.arrayMin(aw) + " - " + util.arrayMax(pw) + ")");
+                const pwValue = center(util.arrayAvg(pw, null, 2) + "<br>(" + util.arrayMin(pw) + " - " + util.arrayMax(pw) + ")");
+                if (statView.query.type === "defense") {
+                    tableEntry.push(pwValue);
+                    tableEntry.push(awValue);
+                } else {
+                    tableEntry.push(awValue);
+                    tableEntry.push(pwValue);
+                }
                 if(specificArray) {
                     tableEntry.push(getDmgTypeTable(specificArray));
                 } else {
