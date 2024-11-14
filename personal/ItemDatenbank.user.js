@@ -18,7 +18,7 @@
 (function() {
     'use strict';
     const currentDataVersion = 1;
-    const currentItemDataVersion = 1;
+    const currentItemDataVersion = 3; // durch eine Veränderung werden die Items neu aus den Sourcen beschrieben
 
     var pathname = window.location.pathname.split("/");
     var pageSection = pathname[pathname.length-2];
@@ -104,25 +104,23 @@
             if(searchContainer) {
                 const searchContainerTitle = searchContainer.children[0].children[0].children[0];
 
-                const [itemDBSearch] = util.createCheckbox(searchContainerTitle, "itemDB", "Item-Datenbank anfragen");
+                const [itemDBSearch] = util.createCheckbox(searchContainerTitle, "itemDB", "Item-DB");
 
-                var itemsToLoad = 0;
-                for (const [itemName, item] of Object.entries(await storage.ensureItemSources())) {
-                    if(!item.details || item.irregular) {
-                        itemsToLoad++;
-                    }
-                }
-                const [missingSearch, missingSearchLabel] = util.createCheckbox(searchContainerTitle, "missingSearch", "Fehlende Einträge ["+itemsToLoad+"]");
+                const [missingSearch, missingSearchLabel] = util.createCheckbox(searchContainerTitle, "missingSearch", "");
                 async function updateMissingButton() {
                     const allItems = await storage.ensureItemSources();
                     var itemsToLoad = 0;
+                    var allItemCount = 0;
                     for (const [itemName, item] of Object.entries(allItems)) {
                         if(!item.details || item.irregular) {
                             itemsToLoad++;
                         }
+                        allItemCount++;
                     }
-                    missingSearchLabel.innerText = "Fehlende Einträge ["+itemsToLoad+"]";
+                    missingSearchLabel.innerText = "Fehlend [" + itemsToLoad + "/" + allItemCount + "]";
                 }
+
+                updateMissingButton(); // kein await benötigt
 
                 const mySearchTable = createSearchTable();
                 const theirSearchTable = searchContainer.children[1];
@@ -171,6 +169,7 @@
 
                 itemDBSearch.onclick = async function() {
                     if(itemDBSearch.checked) {
+                        fetchDataForAuswahllisten();
                         missingSearch.checked = false;
                     }
                     changeContainer();
@@ -211,11 +210,12 @@
                         columns = Array();
                     }
 
-                    function getItemValue(obj, pfadArray, lastHeader) {
+                    function getItemValue(obj, pfadArray, toHTML, lastHeader) {
                         //console.log("getItemValue", obj, pfadArray);
                         if(!obj) return "";
                         if (pfadArray.length === 0) {
-                            if(lastHeader === "schaden") {
+                            if (toHTML) return toHTML(obj);
+                            if (lastHeader === "schaden") {
                                 var result = "";
                                 obj.forEach(dmg => {
                                     if(result.length > 0) result+="<br>";
@@ -241,7 +241,7 @@
                             if(typeof obj === "string") return obj;
                             return JSON.stringify(obj);
                         }
-                        return getItemValue(obj[pfadArray[0]], pfadArray.slice(1), pfadArray[0]);
+                        return getItemValue(obj[pfadArray[0]], pfadArray.slice(1), toHTML, pfadArray[0]);
                     }
 
                     var i = 1;
@@ -264,9 +264,9 @@
                             td = document.createElement("td");
                             tr.append(td);
 
-                            for(const [title, pfadArray] of Object.entries(columns)) {
+                            for (const [title, columnDef] of Object.entries(columns)) {
                                 const td = document.createElement("td");
-                                td.innerHTML = getItemValue(item, pfadArray);
+                                td.innerHTML = getItemValue(item, columnDef.pfadArray, columnDef.toHTML);
                                 tr.append(td);
                             }
 
@@ -386,7 +386,8 @@
         if(debug) console.log(item);
         const suchfeldWert = getSuchfeld().value.trim();
         if(suchfeldWert !== "") {
-            if(!item.name.match("^"+suchfeldWert.replace("*", ".*")+"$")) return false;
+            const matching = "^" + suchfeldWert.replaceAll("*", ".*") + "$";
+            if (!item.name.match(matching)) return false;
         }
         for(var i=0,l=validators.length;i<l;i++) {
             const currentValidator = validators[i];
@@ -407,6 +408,19 @@
         Klasse: {
             pfad: "data.klasse",
             notWhen: "Klasse",
+        },
+        Stufe: {
+            pfad: "data.bedingungen.Stufe",
+            toHTML: function (obj) {
+                return obj.comp + " " + obj.value;
+            }
+        },
+        Gegenstandsklasse: {
+            pfad: "data.gegenstandsklassen",
+            toHTML: function (obj) {
+                return obj.join("<br>");
+            },
+            notWhen: "Gegenstandsklasse",
         },
         "Schaden (Besitzer)": {
             pfad: "effects.owner.schaden",
@@ -438,6 +452,25 @@
         return document.getElementsByName("item_10name")[0] || document.getElementsByName("item_3name")[0] || document.getElementsByName("item_6name")[0];
     }
 
+    var GEGENSTANDSKLASSEN;
+
+    // müssen vorab geholt werden bevor der eigentliche Such-Container ausgebettet wird.
+    function fetchDataForAuswahllisten() {
+        if (!GEGENSTANDSKLASSEN) {
+            GEGENSTANDSKLASSEN = getGegenstandsklassen();
+        }
+    }
+
+    function getGegenstandsklassen() {
+        const selectInput = document.getElementsByName("item_3item_class")[0];
+        const result = Array();
+        util.forEach(selectInput.options, a => {
+            const curText = a.text.trim();
+            if (curText !== "") result.push(a.text);
+        })
+        return result;
+    }
+
     function whenBedingung(when) {
         var validatorIndex = validatorTypes.indexOf(when);
         var negator = negators[validatorIndex] || false;
@@ -449,7 +482,10 @@
         const result = {};
         for(const [title, def] of Object.entries(AutoColumns)) {
             if (!def.notWhen && !def.when || def.notWhen && !whenBedingung(def.notWhen) || def.when && whenBedingung(def.when)) {
-                result[title] = def.pfad.split(".");
+                result[title] = {
+                    pfadArray: def.pfad.split("."),
+                    toHTML: def.toHTML,
+                };
             }
         }
         console.log("AutoColumns", result);
@@ -577,6 +613,60 @@
                 }
             }
         },
+        Gegenstandsklasse: function () {
+            const span = document.createElement("span");
+            const select1 = createSelect(["<Gegenstandsklasse>", ...GEGENSTANDSKLASSEN]); // GEGENSTANDSKLASSEN
+            span.append(select1);
+            return {
+                matches: function (item) {
+                    if (select1.value === "") return true;
+                    const klassen = item.data?.gegenstandsklassen;
+                    console.log("Search for '" + select1.value + "'", item, klassen);
+                    if (klassen) {
+                        return klassen.includes(select1.value);
+                    }
+                    return false;
+                },
+                get: function () {
+                    return span;
+                }
+            }
+        },
+        Stufe: function () {
+            const span = document.createElement("span");
+            const textFrom = createText();
+            textFrom.style.width = "50px";
+            const textTo = createText();
+            textTo.style.width = "50px";
+            span.append(textFrom);
+            span.append(util.span(" - "));
+            span.append(textTo);
+            return {
+                matches: function (item) {
+                    var from = textFrom.value.trim();
+                    var to = textTo.value.trim();
+                    if (from === "") from = null;
+                    if (to === "") to = null;
+                    if (!from && !to) return true;
+                    if (from && to && to < from) return false; // keine Klassen eingeschlossen
+                    const stufenBedingung = item.data?.bedingungen?.Stufe;
+                    if (!stufenBedingung) return true;
+                    const value = stufenBedingung.value;
+                    if (stufenBedingung.comp === "ab") {
+                        console.log(">>>ab", value, from, to, Number(value) >= Number(from));
+                        if (to) return Number(value) <= Number(to);
+                        return Number(value) <= Number(from);
+                    } else { // bis
+                        console.log(">>>bis", value, from, to, !!to);
+                        if (from) return Number(value) >= Number(from);
+                        return Number(value) >= Number(to);
+                    }
+                },
+                get: function () {
+                    return span;
+                }
+            }
+        },
         Eigenschaft: function() {
             const span = document.createElement("span");
             const select1 = createSelect(["<Eigenschaft>", ...Object.keys(EIGENSCHAFT)]);
@@ -586,11 +676,11 @@
             return {
                 matches: function(item) {
                     var result = Array();
-                    if(select2.value=="Besitzer" || select2.value == "") {
+                    if (select2.value === "Besitzer" || select2.value === "") {
                         const cur = item.effects?.owner?.eigenschaft;
                         if(cur) result.push(...cur);
                     }
-                    if(select2.value=="Betroffener" || select2.value == "") {
+                    if (select2.value === "Betroffener" || select2.value === "") {
                         const cur = item.effects?.target?.eigenschaft;
                         if(cur) result.push(...cur);
                     }
@@ -668,6 +758,12 @@
         return result;
     }
 
+    function createText() {
+        const result = document.createElement("input");
+        result.type = "text";
+        return result;
+    }
+
     function hasSetOrGemBonus(linkElement) {
         return linkElement.getElementsByClassName("gem_bonus_also_by_gem").length > 0 || linkElement.getElementsByClassName("gem_bonus_only_by_gem").length > 0;
     }
@@ -693,7 +789,8 @@
         const tableTRs = div.querySelectorAll('tr.row0, tr.row1');
         for(var i=0,l=tableTRs.length;i<l;i++) {
             const tr = tableTRs[i];
-            switch(tr.children[0].textContent.trim()) {
+            const kategorie = util.html2Text(tr.children[0].innerHTML.split("<br>")[0]);
+            switch (kategorie) {
                 case "Heldenklassen":
                     var heldenklassen = tr.children[1].textContent.trim();
                     var typ;
@@ -718,6 +815,30 @@
                         def: def,
                     }
                     break;
+                case "Voraussetzungen":
+                    var bedingungen = {};
+                    var freieBedingungen = Array();
+                    tr.children[1].innerHTML.split("<br>").forEach(line => {
+                        const matches = line.trim().match(/^(.*) (ab|bis) (\d*)$/);
+                        if (matches) {
+                            bedingungen[matches[1]] = {
+                                comp: matches[2],
+                                value: matches[3],
+                            };
+                        } else {
+                            freieBedingungen.push(line);
+                        }
+                    });
+                    data.bedingungen = bedingungen;
+                    data.bedingungen2 = freieBedingungen;
+                    break;
+                case "Gegenstandsklasse":
+                    const gegenstandsklassen = Array();
+                    tr.children[1].innerHTML.split("<br>").forEach(line => {
+                        gegenstandsklassen.push(util.html2Text(line).trim());
+                    });
+                    data.gegenstandsklassen = gegenstandsklassen;
+                    break;
                 case "Wo getragen?":
                     data.trageort = tr.children[1].textContent.trim();
                     break;
@@ -740,15 +861,14 @@
         var ownerType;
         for(var i=0,l=div.children.length;i<l;i++) {
             const cur = div.children[i];
-            if(cur.tagName == "H2") {
+            if (cur.tagName === "H2") {
                 ownerType = getOwnerType(cur.textContent.trim());
                 currentOwnerContext = item.effects[ownerType];
                 if(!currentOwnerContext) {
                     currentOwnerContext = {};
                     item.effects[ownerType] = currentOwnerContext;
                 }
-            }
-            else if(cur.tagName == "H3") {
+            } else if (cur.tagName === "H3") {
                 tableType = getType(cur.textContent.trim());
                 var newContext = currentOwnerContext[tableType];
                 if(!newContext) {
@@ -762,7 +882,7 @@
                 switch (tableType) {
                     case "schaden":
                     case "ruestung":
-                    case "anfaelligkeit":
+                    case "anfaelligkeit": // 3-Spalten Standard
                         addBoni(currentBoniContext, tableTRs, b => {return {
                             damageType: b.children[0].textContent.trim(),
                             attackType: b.children[1].textContent.trim(),
@@ -776,6 +896,7 @@
                     case "fertigkeit":
                     case "parade":
                     case "wirkung":
+                    case "beute": // 2-Spalten-Standard
                         addBoni(currentBoniContext, tableTRs, b => {return {
                             type: b.children[0].textContent.trim(),
                             bonus: b.children[1].textContent.trim(),
@@ -816,6 +937,8 @@
                 return "wirkung";
             case 'Boni auf die Anfälligkeit gegen Schäden':
                 return "anfaelligkeit";
+            case 'Boni auf Beute aus Dungeonkämpfen':
+                return "beute";
             default:
                 console.error("Unbekannte H3-Item Überschrift: '"+text+"'");
                 alert("Unbekannte H3-Item Überschrift: '"+text+"'");
@@ -969,12 +1092,26 @@
         },
 
         validateItems: async function() {
-            //await GM.setValue(ITEM_DB_STORE, {}); // delete and rewrite all ItemDB-Objects
-            //this.itemDB = {};
+            if (true) {
+                await storage.ensureItemSources();
+                var changedSomething = false;
+                for (const [itemName, sourceItem] of Object.entries(storage.itemSources)) {
+                    if (itemName.includes("%3F")) {
+                        delete storage.itemSources[itemName];
+                        const itemNameNew = decodeURIComponent(itemName);
+                        console.log("Change name", itemName, itemNameNew);
+                        sourceItem.name = itemNameNew;
+                        this.gmSetIndexItem(itemNameNew, sourceItem);
+                        changedSomething = true;
+                    }
+                }
+                if (changedSomething) await GM.setValue(ITEM_SOURCES, this.itemSources);
+            }
 
             // await this.ensureAllItems();
             // await GM.setValue(ITEM_SOURCES, this.allItems);
             // prüft und aktualisiert bei Bedarf die Item DB anhand der Sourcen
+            //await GM.setValue(ITEM_DB_STORE, {}); // delete and rewrite all ItemDB-Objects
             async function updateItemDB() {
                 await storage.ensureItemSources();
                 await storage.ensureItemDB();
@@ -982,7 +1119,7 @@
                     var item = storage.itemDB[itemName];
                     if (!item || item.dataVersion !== currentItemDataVersion) {
                         if (sourceItem.details) {
-                            console.log("Update Item to ItemDB", sourceItem);
+                            //console.log("Update Item to ItemDB", sourceItem);
                             item = {
                                 name: itemName,
                                 details: sourceItem.details,
@@ -991,7 +1128,7 @@
                             writeItemData(item);
                             delete item.details;
                             delete item.link;
-                            storage.gmSetItem(itemName, item);
+                            await storage.gmSetItem(itemName, item);
                         }
                     }
                 }
@@ -1008,7 +1145,6 @@
                 }
             });
         },
-
     };
 
     const util = {
@@ -1016,6 +1152,16 @@
             for(var i=0,l=array.length;i<l;i++) {
                 fn(array[i]);
             }
+        },
+        span: function (text) {
+            const result = document.createElement("span");
+            result.innerHTML = text;
+            return result;
+        },
+        html2Text: function (html) {
+            const span = document.createElement("span");
+            span.innerHTML = html;
+            return span.textContent.trim();
         },
         createCheckbox: function(parent, id, labelTitle) {
             const result = document.createElement("input");
