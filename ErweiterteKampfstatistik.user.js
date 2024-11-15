@@ -1275,6 +1275,7 @@
                 toBBCodeButton.style.marginLeft = "2px";
                 toBBCodeButton.style.color = "darkgrey";
                 toBBCodeButton.classList.add("bbignore");
+                toBBCodeButton.title = "Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren."
                 toBBCodeButton.onclick = function () {
                     console.log(table);
                     navigator.clipboard.writeText(util.toBBCode(table));
