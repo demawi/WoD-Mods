@@ -1250,7 +1250,7 @@
                 infoHeader.style.position = "absolute";
                 infoHeader.style.right = "7px";
                 infoHeader.style.top = "7px";
-                infoHeader.innerHTML += "<a target='_blank' href='" + forumLink + "' style='font-size:10px;color:darkgrey;'>" + version + " </a>";
+                infoHeader.innerHTML += "<a target='_blank' href='" + forumLink + "' style='font-size:10px;color:darkgrey;' class='bbignoreColor'>" + version + " </a>";
 
                 // 🔗📌📍
                 const info = document.createElement("span");
@@ -1854,56 +1854,62 @@
             }
         }
 
+        static hatClassName(node, className) {
+            return node.classList && node.classList.contains(className);
+        }
+
         static toBBCode(node) {
             if (node.classList && node.classList.contains("bbignore")) return "";
             var result = this.toBBCodeRaw(node);
+            if (result.length !== 3) {
+                console.log("Keine Array-Länge von 3 zurückgegeben", node);
+            }
             if (node.style && node.style.textAlign === "center") {
-                //result += "[center]" + result + "[/center]";
+                result[0] = result[0] + "[center]";
+                result[2] = "[/center]" + result[2];
             }
-            if (node.style && node.style.color) {
-                result += "[color=" + node.style.color + "]" + result + "[/color]";
+            if (node.style && node.style.color && !this.hatClassName(node, "bbignoreColor")) {
+                result[0] = result[0] + "[color=" + node.style.color + "]";
+                result[2] = "[/color]" + result[2];
             }
-            return result;
+            return result.join("");
         }
 
         static toBBCodeRaw(node) {
             switch (node.tagName) {
                 case "TABLE":
-                    return "[table" + (node.border ? " border=" + node.border : "") + "]" + this.toBBCodeArray(node.childNodes) + "[/table]";
+                    return ["[table" + (node.border ? " border=" + node.border : "") + "]", this.toBBCodeArray(node.childNodes), "[/table]"];
                 case "TR":
-                    return "[tr]" + this.toBBCodeArray(node.childNodes) + "[/tr]";
+                    return ["[tr]", this.toBBCodeArray(node.childNodes), "[/tr]"];
                 case "TD":
                     if (node.colSpan > 1) {
-                        return "[td colspan=" + node.colSpan + "]" + this.toBBCodeArray(node.childNodes) + "[/td]";
+                        return ["[td colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes), "[/td]"];
                     }
-                    return "[td]" + this.toBBCodeArray(node.childNodes) + "[/td]";
+                    return ["[td]", this.toBBCodeArray(node.childNodes), "[/td]"];
                 case "TH":
                     if (node.colSpan > 1) {
-                        return "[th colspan=" + node.colSpan + "]" + this.toBBCodeArray(node.childNodes) + "[/th]";
+                        return ["[th colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes), "[/th]"];
                     }
-                    return "[th]" + this.toBBCodeArray(node.childNodes) + "[/th]";
+                    return ["[th]", this.toBBCodeArray(node.childNodes), "[/th]"];
                 case "SPAN":
-                    if (node.style && node.style.color) {
-                        return "[color=" + node.style.color + "]" + this.toBBCodeArray(node.childNodes) + "[/color]";
-                    }
-                    return this.toBBCodeArray(node.childNodes);
+                    return ["", this.toBBCodeArray(node.childNodes), ""];
                 case "IMG":
-                    return "[img]" + node.src + "[/img]"
+                    return ["[img]", node.src, "[/img]"];
                 case "SELECT":
-                    return "";
+                    return ["", "", ""];
                 case "A":
                     if (node.href.startsWith("http")) {
-                        return "[url=" + node.href + "]" + this.toBBCodeArray(node.childNodes) + "[/url]";
+                        return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes), "[/url]"];
                     }
-                    return this.toBBCodeArray(node.childNodes);
+                    return ["", this.toBBCodeArray(node.childNodes), ""];
                 case "THEAD":
                 case "TBODY": // ignore it
-                    return this.toBBCodeArray(node.childNodes);
+                    return ["", this.toBBCodeArray(node.childNodes), ""];
                 case "BR":
-                    return "\n";
+                    return ["", "\n", ""];
                 default:
                     if (typeof node.tagName === 'undefined') {
-                        return node.textContent;
+                        return ["", node.textContent, ""];
                     } else {
                         console.error("Unbekannter TagName gefunden: '" + node.tagName + "'");
                     }
