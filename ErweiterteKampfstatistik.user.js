@@ -990,7 +990,7 @@
         static StatView = class StatView {
             query; // type StatQuery
             result; // type StatSearch, enthält auch den StatQuery
-            spalten; // type Array TODO: zum Ein-/Ausblenden von Spalten
+            spalten; // type Array
             showRootStat; // type Boolean soll auch alles zusammen gezählt werden
             initialFolded;
 
