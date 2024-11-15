@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.17
+// @version        0.18
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -20,8 +20,8 @@
 
 (function() {
     'use strict';
-    const version = "0.17.1";
-    const stand = "14.11.2024";
+    const version = "0.18";
+    const stand = "15.11.2024";
     const currentReportDataVersion = 4;
     const forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
 
@@ -431,7 +431,7 @@
     class DataModel {
         static currentRound;
 
-        readAndStoreKampfbericht(reportId) {
+        static readAndStoreKampfbericht(reportId) {
             var levelNr;
             var levelCount;
             if (reportId.startsWith("schlacht_")) {
@@ -1246,6 +1246,7 @@
                 headerTr.style.position = "relative";
 
                 const infoHeader = document.createElement("span");
+                headerTr.append(infoHeader);
                 infoHeader.style.position = "absolute";
                 infoHeader.style.right = "7px";
                 infoHeader.style.top = "7px";
@@ -1263,10 +1264,25 @@
                 infoTipp += "<li>Einige Aufschlüsselungen (z.B. 'Position', leider aber noch nicht alle) erlauben durch einen Klick darauf und der folgenden Auswahl '+Einschränken' diese weiter einzuschränken (z.B. nur 'Vorne' und 'Zentrum')</li>";
                 infoTipp += "<li>Das Eingabe-Element welches sich dort öffnet ist eine übliche Multiple Auswahlliste. Zusammen mit der Strg-Taste lassen sich hier mehrere Werte auswählen.</li>";
                 infoTipp += "</ul>";
-                info.innerHTML = "<span onmouseover=\"return wodToolTip(this,'" + infoTipp.replaceAll("'", "\\'").replaceAll('"', '\\"') + "');\"><img alt='' height='14px' border='0' src='/wod/css/skins/skin-8/images/icons/inf.gif'></span>";
+                info.innerHTML = "<span class='bbignore' onmouseover=\"return wodToolTip(this,'" + infoTipp.replaceAll("'", "\\'").replaceAll('"', '\\"') + "');\"><img alt='' height='14px' border='0' src='/wod/css/skins/skin-8/images/icons/inf.gif'></span>";
                 infoHeader.append(info);
 
-                headerTr.append(infoHeader);
+                const toBBCodeButton = document.createElement("span");
+                infoHeader.append(toBBCodeButton);
+                toBBCodeButton.style.fontSize = "11px";
+                toBBCodeButton.style.cursor = "pointer";
+                toBBCodeButton.innerHTML = "[bb]";
+                toBBCodeButton.style.marginLeft = "2px";
+                toBBCodeButton.style.color = "darkgrey";
+                toBBCodeButton.classList.add("bbignore");
+                toBBCodeButton.onclick = function () {
+                    console.log(table);
+                    navigator.clipboard.writeText(util.toBBCode(table));
+                }
+
+
+
+
 
                 this.anchor.appendChild(table);
                 if (this.statView.query.side && this.statView.query.type) {
@@ -1551,6 +1567,7 @@
                 addElement.src = "/wod/css//skins/skin-8/images/icons/steigern_enabled.gif";
                 addElement.style.height = "16px";
                 addElement.style.cursor = "pointer";
+                addElement.classList.add("bbignore");
 
                 th.append(addAnchor);
 
@@ -1811,6 +1828,7 @@
             const collapsible = document.createElement("img");
             collapsible.style.height = height;
             collapsible.style.cursor = "pointer";
+            collapsible.classList.add("bbignore");
             var collapsed = initialCollapsed;
             function updateCollapserSrc() {
                 if(collapsed) {
@@ -1828,6 +1846,72 @@
                 })
             }
             return collapsible;
+        }
+
+        static forEach(array, fn) {
+            for (var i = 0, l = array.length; i < l; i++) {
+                fn(array[i]);
+            }
+        }
+
+        static toBBCode(node) {
+            if (node.classList && node.classList.contains("bbignore")) return "";
+            var result = this.toBBCodeRaw(node);
+            if (node.style && node.style.textAlign === "center") {
+                //result += "[center]" + result + "[/center]";
+            }
+            if (node.style && node.style.color) {
+                result += "[color=" + node.style.color + "]" + result + "[/color]";
+            }
+            return result;
+        }
+
+        static toBBCodeRaw(node) {
+            switch (node.tagName) {
+                case "TABLE":
+                    return "[table" + (node.border ? " border=" + node.border : "") + "]" + this.toBBCodeArray(node.childNodes) + "[/table]";
+                case "TR":
+                    return "[tr]" + this.toBBCodeArray(node.childNodes) + "[/tr]";
+                case "TD":
+                    if (node.colSpan > 1) {
+                        return "[td colspan=" + node.colSpan + "]" + this.toBBCodeArray(node.childNodes) + "[/td]";
+                    }
+                    return "[td]" + this.toBBCodeArray(node.childNodes) + "[/td]";
+                case "TH":
+                    if (node.colSpan > 1) {
+                        return "[th colspan=" + node.colSpan + "]" + this.toBBCodeArray(node.childNodes) + "[/th]";
+                    }
+                    return "[th]" + this.toBBCodeArray(node.childNodes) + "[/th]";
+                case "SPAN":
+                    if (node.style && node.style.color) {
+                        return "[color=" + node.style.color + "]" + this.toBBCodeArray(node.childNodes) + "[/color]";
+                    }
+                    return this.toBBCodeArray(node.childNodes);
+                case "IMG":
+                    return "[img]" + node.src + "[/img]"
+                case "SELECT":
+                    return "";
+                case "A":
+                    if (node.href.startsWith("http")) {
+                        return "[url=" + node.href + "]" + this.toBBCodeArray(node.childNodes) + "[/url]";
+                    }
+                    return this.toBBCodeArray(node.childNodes);
+                case "THEAD":
+                case "TBODY": // ignore it
+                    return this.toBBCodeArray(node.childNodes);
+                case "BR":
+                    return "\n";
+                default:
+                    if (typeof node.tagName === 'undefined') {
+                        return node.textContent;
+                    } else {
+                        console.error("Unbekannter TagName gefunden: '" + node.tagName + "'");
+                    }
+            }
+        }
+
+        static toBBCodeArray(childNodes) {
+            return this.arrayMap(childNodes, a => this.toBBCode(a)).join("");
         }
     }
 
