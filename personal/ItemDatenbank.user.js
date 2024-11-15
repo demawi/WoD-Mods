@@ -31,13 +31,21 @@
         return decodeURI(urlParams.get("name"));
     }
 
+    const missingSpanOverall = document.createElement("span");
+    missingSpanOverall.style.color = "red";
+    missingSpanOverall.className = "missingMeOverall";
+    missingSpanOverall.style.position = "fixed";
+    missingSpanOverall.style.top = "0px";
+    missingSpanOverall.style.right = "0px";
+
     async function startMod() {
         // Links zu Items finden und markieren. Nahezu überall.
         if(page !== "item.php") {
             async function checkSiteForItems() {
                 console.log("checkSiteForItems");
-                await storage.ensureItemSources();
                 const allHrefs = document.getElementsByTagName("a");
+                var missingItemsFound = 0;
+                var addedItems = 0;
                 for(var i=0,l=allHrefs.length;i<l;i++) {
                     const itemLinkElement = allHrefs[i];
                     const curHref = itemLinkElement.href;
@@ -49,17 +57,31 @@
                         index = curHref.indexOf("/item/");
                         if(index > 0) {
                             itemName = curHref.match(/item\/(.*?)&/);
-                        }
+                        } else continue;
                     }
                     if(!itemName) continue;
-                    itemName = decodeURIComponent(itemName[1]).replaceAll("+", " ");
+                    itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
 
                     if(index > 0) {
-                        await storage.indexItem(itemName, itemLinkElement);
+                        await storage.ensureItemSources();
+                        const sourceItem = storage.itemSources[itemName];
+                        if (!sourceItem || !sourceItem.details) missingItemsFound++;
+                        if (!sourceItem) addedItems++;
+                        await storage.indexItem(itemName, itemLinkElement, sourceItem);
+                    }
+                }
+                if (addedItems) await storage.saveItemSources();
+                missingSpanOverall.innerHTML = missingItemsFound + "�";
+                if (missingItemsFound === 0) {
+                    if (document.body.contains(missingSpanOverall)) {
+                        document.body.removeChild(missingSpanOverall);
+                    }
+                } else {
+                    if (!document.body.contains(missingSpanOverall)) {
+                        document.body.append(missingSpanOverall);
                     }
                 }
             }
-
             await checkSiteForItems();
             setInterval(async function () {
                 await storage.ensureItemSources(true);
@@ -150,6 +172,7 @@
                 };
 
                 function changeContainer() {
+                    fetchDataForAuswahllisten();
                     if(itemDBSearch.checked || missingSearch.checked) {
                         buttonContainer.removeChild(buttonContainer.children[0]);
                         buttonContainer.append(mySearchButton);
@@ -169,7 +192,6 @@
 
                 itemDBSearch.onclick = async function() {
                     if(itemDBSearch.checked) {
-                        fetchDataForAuswahllisten();
                         missingSearch.checked = false;
                     }
                     changeContainer();
@@ -215,21 +237,7 @@
                         if(!obj) return "";
                         if (pfadArray.length === 0) {
                             if (toHTML) return toHTML(obj);
-                            if (lastHeader === "schaden") {
-                                var result = "";
-                                obj.forEach(dmg => {
-                                    if(result.length > 0) result+="<br>";
-                                    result+= dmg.damageType+"("+dmg.attackType+"): "+dmg.bonus;
-                                });
-                                return result.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
-                            } else if(lastHeader === "parade" || lastHeader === "eigenschaft") {
-                                var result = "";
-                                obj.forEach(parade => {
-                                    if(result.length > 0) result+="<br>";
-                                    result+= parade.type + ": " + parade.bonus;
-                                });
-                                return result.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
-                            } else if(lastHeader === "klasse") {
+                            if (lastHeader === "klasse") {
                                 if(obj.typ === "alle") return "alle";
                                 if(obj.typ === "nur") {
                                     return obj.def.map(a => KLASSEN[a]).join(", ");
@@ -248,12 +256,13 @@
                     var switcher = false;
                     var items;
                     if (itemDBSearch.checked) {
-                        items = await storage.getAllItems(true);
+                        items = await storage.ensureItemDB(true);
                     } else {
                         items = await storage.ensureItemSources(true);
                     }
                     for (const [itemName, item] of Object.entries(items)) {
-                        if(!itemDBSearch.checked && !item.details || !itemDBSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && matches(item, searchContainer)) {
+                        if (missingSearch.checked && !item.details || missingSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && matches(item, searchContainer)) {
+                            console.log("find item in search", item);
                             switcher = !switcher;
                             const tr = document.createElement("tr");
                             tr.className = "row"+(switcher?"0":"1");
@@ -400,6 +409,28 @@
         return true;
     }
 
+    function replaceHSFR(text) {
+        return text.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
+    }
+
+    function spalten2Output(obj) {
+        var result = "";
+        obj.forEach(parade => {
+            if (result.length > 0) result += "<br>";
+            result += parade.type + ": " + parade.bonus;
+        });
+        return replaceHSFR(result);
+    }
+
+    function spalten3Output(obj) {
+        var result = "";
+        obj.forEach(dmg => {
+            if (result.length > 0) result += "<br>";
+            result += dmg.damageType + "(" + dmg.attackType + "): " + dmg.bonus;
+        });
+        return replaceHSFR(result);
+    }
+
     const AutoColumns = {
         Trageort: {
             pfad: "data.trageort",
@@ -415,54 +446,85 @@
                 return obj.comp + " " + obj.value;
             }
         },
-        Gegenstandsklasse: {
-            pfad: "data.gegenstandsklassen",
-            toHTML: function (obj) {
-                return obj.join("<br>");
-            },
-            notWhen: "Gegenstandsklasse",
-        },
         "Schaden (Besitzer)": {
             pfad: "effects.owner.schaden",
             when: "Schaden",
+            toHTML: spalten3Output
         },
         "Schaden (Betroffener)": {
             pfad: "effects.target.schaden",
             when: "Schaden",
+            toHTML: spalten3Output
         },
         "Parade (Besitzer)": {
             pfad: "effects.owner.parade",
-            when: "Parade",
+            when: "Bonus - Parade",
+            toHTML: spalten2Output
         },
         "Parade (Betroffener)": {
             pfad: "effects.target.parade",
-            when: "Parade",
+            when: "Bonus - Parade",
+            toHTML: spalten2Output
         },
         "Eigenschaft (Besitzer)": {
             pfad: "effects.owner.eigenschaft",
-            when: "Eigenschaft",
+            when: "Bonus - Eigenschaft",
+            toHTML: spalten2Output
         },
         "Eigenschaft (Betroffener)": {
             pfad: "effects.target.eigenschaft",
-            when: "Eigenschaft",
+            when: "Bonus - Eigenschaft",
+            toHTML: spalten2Output
+        },
+        "Fertigkeit (Besitzer)": {
+            pfad: "effects.owner.fertigkeit",
+            when: "Bonus - Fertigkeit",
+            toHTML: spalten2Output
+        },
+        "Fertigkeit (Betroffener)": {
+            pfad: "effects.target.fertigkeit",
+            when: "Bonus - Fertigkeit",
+            toHTML: spalten2Output
+        },
+        Gegenstandsklasse: {
+            pfad: "data.gegenstandsklassen",
+            notWhen: "Gegenstandsklasse",
+            toHTML: function (obj) {
+                return obj.join("<br>");
+            },
         },
     }
 
     function getSuchfeld() {
-        return document.getElementsByName("item_10name")[0] || document.getElementsByName("item_3name")[0] || document.getElementsByName("item_6name")[0];
+        return getSuchInput("item_?name");
     }
 
     var GEGENSTANDSKLASSEN;
+    var FERTIGKEITEN;
+    var EIGENSCHAFTEN;
 
     // müssen vorab geholt werden bevor der eigentliche Such-Container ausgebettet wird.
     function fetchDataForAuswahllisten() {
         if (!GEGENSTANDSKLASSEN) {
-            GEGENSTANDSKLASSEN = getGegenstandsklassen();
+            GEGENSTANDSKLASSEN = getAuswahlliste("item_?item_class");
+            FERTIGKEITEN = getAuswahlliste("item_?any_skill");
+            EIGENSCHAFTEN = getAuswahlliste("item_?bonus_attr");
         }
     }
 
-    function getGegenstandsklassen() {
-        const selectInput = document.getElementsByName("item_3item_class")[0];
+    const AUSWAHL_IDS = [3, 4, 5, 6, 7, 10, 11];
+
+    function getSuchInput(nameSchema) {
+        for (var i = 0, l = AUSWAHL_IDS.length; i < l; i++) {
+            const curName = nameSchema.replace("?", AUSWAHL_IDS[i]);
+            const result = document.getElementsByName(curName)[0];
+            if (result) return result;
+        }
+        console.error("SuchInput nicht gefunden: " + nameSchema);
+    }
+
+    function getAuswahlliste(nameSchema) {
+        var selectInput = getSuchInput(nameSchema);
         const result = Array();
         util.forEach(selectInput.options, a => {
             const curText = a.text.trim();
@@ -513,18 +575,8 @@
         "Schütze": "Sü",
     }
 
-    const EIGENSCHAFT = {
-        "Charisma": "Ch",
-        "Geschicklichkeit": "Ge",
-        "Konstitution": "Ko",
-        "Intelligenz": "In",
-        "Schnelligkeit": "Sn",
-        "Stärke": "St",
-        "Wahrnehmung": "Wa",
-        "Willenskraft": "Wi",
-    }
-
-    const TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
+    const TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
+    const JEGLICHE_HAND = ["Beide Hände", "Waffenhand", "Schildhand", "Einhändig"];
 
     const SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Psychologischer Schaden"];
 
@@ -532,56 +584,42 @@
 
     const BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
 
-    const SuchKriterien = {
-        Schaden: function() {
-            const span = document.createElement("span");
-            const select1 = createSelect(["<Schadensart>", ...SCHADENSARTEN]);
-            span.append(select1);
-            const select2 = createSelect(BESITZER_BETROFFENER);
-            span.append(select2);
-            const select3 = createSelect(["<Angriffstyp>", "Nahkampf", "Fernkampf"]);
-            span.append(select3);
-            const select4 = createSelect(["<a/z>", "(a)", "(z)"]);
-            span.append(select4);
-
-            return {
-                matches: function(item) {
-                    var result = Array();
-                    if (select2.value === "Besitzer" || select2.value === "") {
-                        const cur = item.effects?.owner?.schaden;
-                        if(cur) result.push(...cur);
-                    }
-                    if (select2.value === "Betroffener" || select2.value === "") {
-                        const cur = item.effects?.target?.schaden;
-                        if(cur) result.push(...cur);
-                    }
-                    if (debug) console.log("likhsdf", item, result);
-                    var next = Array();
-                    if(select1.value !== "") {
-                        result.forEach(cur => {
-                            if(cur.damageType === select1.value) {
-                                next.push(cur);
-                            }
-                        });
-                        result = next;
-                        next = Array();
-                    }
-                    if(select4.value !== "") {
-                        result.forEach(cur => {
-                            if(cur.bonus.includes(select4.value) || cur.attackType.includes(select4.value)) {
-                                next.push(cur);
-                            }
-                        });
-                        result = next;
-                        next = Array();
-                    }
-                    return result.length > 0;
-                },
-                get: function() {
-                    return span;
+    function effects2Kriterium(id, selectArray) {
+        const span = document.createElement("span");
+        const select1 = createSelect(selectArray);
+        span.append(select1);
+        const select2 = createSelect(BESITZER_BETROFFENER);
+        span.append(select2);
+        return {
+            matches: function (item) {
+                var result = Array();
+                if (select2.value === "Besitzer" || select2.value === "") {
+                    const cur = item.effects?.owner?.[id];
+                    if (cur) result.push(...cur);
                 }
-            };
-        },
+                if (select2.value === "Betroffener" || select2.value === "") {
+                    const cur = item.effects?.target?.[id];
+                    if (cur) result.push(...cur);
+                }
+                var next = Array();
+                if (select1.value !== "") {
+                    result.forEach(cur => {
+                        if (cur.type === select1.value) {
+                            next.push(cur);
+                        }
+                    });
+                    result = next;
+                    next = Array();
+                }
+                return result.length > 0;
+            },
+            get: function () {
+                return span;
+            }
+        }
+    }
+
+    const SuchKriterien = {
         Klasse: function() {
             const span = document.createElement("span");
             const select1 = createSelect(["<Klasse>", ...Object.keys(KLASSEN)]);
@@ -606,7 +644,14 @@
             span.append(select1);
             return {
                 matches: function (item) {
-                    return item?.data?.trageort === select1.value;
+                    const trageort = item?.data?.trageort
+                    if (select1.value === "Jegliche Hand/Hände") {
+                        for (const curTrageort of JEGLICHE_HAND) {
+                            if (trageort === curTrageort) return true;
+                        }
+                        return false;
+                    }
+                    return trageort === select1.value;
                 },
                 get: function () {
                     return span;
@@ -621,7 +666,6 @@
                 matches: function (item) {
                     if (select1.value === "") return true;
                     const klassen = item.data?.gegenstandsklassen;
-                    console.log("Search for '" + select1.value + "'", item, klassen);
                     if (klassen) {
                         return klassen.includes(select1.value);
                     }
@@ -667,75 +711,58 @@
                 }
             }
         },
-        Eigenschaft: function() {
+        "Bonus - Eigenschaft": () => effects2Kriterium("eigenschaft", ["<Eigenschaft>", ...Object.values(EIGENSCHAFTEN)]),
+        "Bonus - Fertigkeit": () => effects2Kriterium("fertigkeit", ["<Fertigkeit>", ...Object.values(FERTIGKEITEN)]),
+        "Bonus - Parade": () => effects2Kriterium("parade", ["<Parade>", ...ANGRIFFSARTEN]),
+        "Bonus - Schaden": function () {
             const span = document.createElement("span");
-            const select1 = createSelect(["<Eigenschaft>", ...Object.keys(EIGENSCHAFT)]);
+            const select1 = createSelect(["<Schadensart>", ...SCHADENSARTEN]);
             span.append(select1);
             const select2 = createSelect(BESITZER_BETROFFENER);
             span.append(select2);
-            return {
-                matches: function(item) {
-                    var result = Array();
-                    if (select2.value === "Besitzer" || select2.value === "") {
-                        const cur = item.effects?.owner?.eigenschaft;
-                        if(cur) result.push(...cur);
-                    }
-                    if (select2.value === "Betroffener" || select2.value === "") {
-                        const cur = item.effects?.target?.eigenschaft;
-                        if(cur) result.push(...cur);
-                    }
-                    var next = Array();
-                    if(select1.value !== "") {
-                        result.forEach(cur => {
-                            if(cur.type === select1.value) {
-                                next.push(cur);
-                            }
-                        });
-                        result = next;
-                        next = Array();
-                    }
-                    return result.length > 0;
-                },
-                get: function() {
-                    return span;
-                }
-            }
-        },
-        Parade: function() {
-            const span = document.createElement("span");
-            const select1 = createSelect(["<Parade>", ...ANGRIFFSARTEN]);
-            span.append(select1);
-            const select2 = createSelect(BESITZER_BETROFFENER);
-            span.append(select2);
-            return {
-                matches: function(item) {
-                    var result = Array();
-                    if (select2.value === "Besitzer" || select2.value === "") {
-                        const cur = item.effects?.owner?.parade;
-                        if(cur) result.push(...cur);
-                    }
-                    if (select2.value === "Betroffener" || select2.value === "") {
-                        const cur = item.effects?.target?.parade;
-                        if(cur) result.push(...cur);
-                    }
-                    var next = Array();
-                    if(select1.value !== "") {
-                        result.forEach(cur => {
-                            if(cur.type === select1.value) {
-                                next.push(cur);
-                            }
-                        });
-                        result = next;
-                        next = Array();
-                    }
-                    return result.length > 0;
-                },
-                get: function() {
-                    return span;
-                }
-            }
-        },
+            const select3 = createSelect(["<Angriffstyp>", ...ANGRIFFSARTEN]);
+            span.append(select3);
+            const select4 = createSelect(["<a/z>", "(a)", "(z)"]);
+            span.append(select4);
 
+            return {
+                matches: function(item) {
+                    var result = Array();
+                    if (select2.value === "Besitzer" || select2.value === "") {
+                        const cur = item.effects?.owner?.schaden;
+                        if(cur) result.push(...cur);
+                    }
+                    if (select2.value === "Betroffener" || select2.value === "") {
+                        const cur = item.effects?.target?.schaden;
+                        if(cur) result.push(...cur);
+                    }
+                    if (debug) console.log("likhsdf", item, result);
+                    var next = Array();
+                    if(select1.value !== "") {
+                        result.forEach(cur => {
+                            if (cur.damageType === select1.value) {
+                                next.push(cur);
+                            }
+                        });
+                        result = next;
+                        next = Array();
+                    }
+                    if (select4.value !== "") {
+                        result.forEach(cur => {
+                            if (cur.bonus.includes(select4.value) || cur.attackType.includes(select4.value)) {
+                                next.push(cur);
+                            }
+                        });
+                        result = next;
+                        next = Array();
+                    }
+                    return result.length > 0;
+                },
+                get: function() {
+                    return span;
+                }
+            };
+        },
     }
 
     function td(txtOrElement) {
@@ -1009,20 +1036,18 @@
             }
             return this.itemIds;
         },
-
-        gmSetIndexItem: async function (itemName, item) {
-            await this.ensureItemSources();
-            if (!this.itemSources[itemName]) {
-                this.itemSources[itemName] = item;
-            }
+        saveItemSources: async function () {
+            await GM.setValue(ITEM_SOURCES, this.itemSources);
         },
+
 
         gmSetSourceItem: async function (itemName, item) {
             if (item.data || item.effects) throw new Error("Item enthält bereits abgeleitete Daten!");
             if (!item.details || !item.link) throw new Error("Item enthält keine Source-Daten");
             await this.ensureItemSources();
+            item.time = new Date().getTime();
             this.itemSources[itemName] = item;
-            await GM.setValue(ITEM_SOURCES, this.itemSources);
+            await this.saveItemSources();
         },
 
         gmSetItem: async function (itemName, item) {
@@ -1048,9 +1073,7 @@
             await GM.setValue(ITEM_DB_STORE, this.itemDB);
         },
 
-        indexItem: async function(itemName, element) {
-            await this.ensureItemSources();
-            const sourceItem = this.itemSources[itemName];
+        indexItem: async function (itemName, element, sourceItem) {
             const missingElement = element.parentElement.className === "missingWrapper" && element.parentElement.children.length > 1 && element.parentElement.children[1];
             if (!sourceItem || !sourceItem.details) {
                 if(!missingElement) {
@@ -1080,14 +1103,12 @@
                     element.parentElement.removeChild(missingElement);
                 }
             }
-            if (!sourceItem || sourceItem.dataVersion !== currentDataVersion) {
+            if (!sourceItem) {
                 const newItem = {
                     name: itemName,
                 }
-                // console.log("added item: "+itemName, metaInfo, this.itemIds);
-                await this.gmSetIndexItem(itemName, newItem);
-            } else {
-                sourceItem.time = new Date().getTime();
+                console.log("New item entry", newItem, sourceItem);
+                this.itemSources[itemName] = newItem;
             }
         },
 
@@ -1176,6 +1197,15 @@
             parent.append(td);
             return [result, label];
         },
+        createUploadLink: function (data, filename) {
+            var result = document.createElement('a');
+            var blob = new Blob([data], {type: 'text/plain'});
+            result.href = window.URL.createObjectURL(blob);
+            result.download = filename;
+            result.dataset.downloadurl = ['text/plain', result.download, result.href].join(':');
+            result.draggable = true;
+            return result;
+        }
     }
 
     startMod();
