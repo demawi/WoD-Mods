@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18.2
+// @version        0.18.3
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -20,7 +20,7 @@
 
 (function() {
     'use strict';
-    const version = "0.18.2";
+    const version = "0.18.3";
     const stand = "15.11.2024";
     const currentReportDataVersion = 4;
     const forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
@@ -1929,7 +1929,11 @@
                     return ["", "", ""];
                 case "A":
                     if (node.href.startsWith("http")) {
-                        return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes), "[/url]"];
+                        if (node.classList.contains("rep_monster")) {
+                            return ["", "[beast:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
+                        } else {
+                            return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes), "[/url]"];
+                        }
                     }
                     return ["", this.toBBCodeArray(node.childNodes), ""];
                 case "THEAD":
