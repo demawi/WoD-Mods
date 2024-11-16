@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18.1
+// @version        0.18.2
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -20,7 +20,7 @@
 
 (function() {
     'use strict';
-    const version = "0.18.1";
+    const version = "0.18.2";
     const stand = "15.11.2024";
     const currentReportDataVersion = 4;
     const forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
@@ -1281,7 +1281,7 @@
                 toBBCodeButton.style.color = "darkgrey";
                 toBBCodeButton.classList.add("bbignore");
                 toBBCodeButton.onmouseover = function () {
-                    return wodToolTip(this, 'Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren.');
+                    return unsafeWindow.wodToolTip(this, 'Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren.');
                 }
 
                 //toBBCodeButton.title = "Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren."
@@ -1293,11 +1293,12 @@
                 toBBCodeDone.style.margin = "auto";
                 toBBCodeDone.style.position = "relative";
                 toBBCodeDone.style.top = "2px";
+                toBBCodeDone.classList.add("bbignore");
 
 
                 toBBCodeButtonContainer.append(toBBCodeButton);
                 toBBCodeButton.onclick = function () {
-                    wodToolTipHide(toBBCodeButton);
+                    unsafeWindow.wodToolTipHide(toBBCodeButton);
                     toBBCodeButtonContainer.removeChild(toBBCodeButton);
                     toBBCodeButtonContainer.append(toBBCodeDone);
 
