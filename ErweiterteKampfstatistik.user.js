@@ -9,6 +9,7 @@
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
+// @include        http*://*/wod/spiel/*dungeon/combat_report.php*
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
