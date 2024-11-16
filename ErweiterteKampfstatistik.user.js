@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18
+// @version        0.18.1
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -20,7 +20,7 @@
 
 (function() {
     'use strict';
-    const version = "0.18";
+    const version = "0.18.1";
     const stand = "15.11.2024";
     const currentReportDataVersion = 4;
     const forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
@@ -1250,7 +1250,7 @@
                 infoHeader.style.position = "absolute";
                 infoHeader.style.right = "7px";
                 infoHeader.style.top = "7px";
-                infoHeader.innerHTML += "<a target='_blank' href='" + forumLink + "' style='font-size:10px;color:darkgrey;' class='bbignoreColor'>" + version + " </a>";
+                infoHeader.innerHTML += "<a target='_blank' href='" + forumLink + "' style='font-size:12px;color:darkgrey;' class='bbignoreColor' onmouseover=\"return wodToolTip(this, 'Hier gehts zum Foren-Post der Anwendung')\">" + version + " </a>";
 
                 // 🔗📌📍
                 const info = document.createElement("span");
@@ -1267,16 +1267,44 @@
                 info.innerHTML = "<span class='bbignore' onmouseover=\"return wodToolTip(this,'" + infoTipp.replaceAll("'", "\\'").replaceAll('"', '\\"') + "');\"><img alt='' height='14px' border='0' src='/wod/css/skins/skin-8/images/icons/inf.gif'></span>";
                 infoHeader.append(info);
 
+                const toBBCodeButtonContainer = document.createElement("span");
+                infoHeader.append(toBBCodeButtonContainer);
+                toBBCodeButtonContainer.style.width = "20px";
+                toBBCodeButtonContainer.style.height = "100%";
+                toBBCodeButtonContainer.style.display = "inline-block";
+
                 const toBBCodeButton = document.createElement("span");
-                infoHeader.append(toBBCodeButton);
-                toBBCodeButton.style.fontSize = "11px";
-                toBBCodeButton.style.cursor = "pointer";
+                toBBCodeButton.style.fontSize = "12px";
+                toBBCodeButton.style.cursor = "copy";
                 toBBCodeButton.innerHTML = "[bb]";
                 toBBCodeButton.style.marginLeft = "2px";
                 toBBCodeButton.style.color = "darkgrey";
                 toBBCodeButton.classList.add("bbignore");
-                toBBCodeButton.title = "Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren."
+                toBBCodeButton.onmouseover = function () {
+                    return wodToolTip(this, 'Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren.');
+                }
+
+                //toBBCodeButton.title = "Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren."
+
+                const toBBCodeDone = document.createElement("img");
+                toBBCodeDone.src = "/wod/css/img/smiley/yes.png";
+                toBBCodeDone.style.height = "10px";
+                toBBCodeDone.style.display = "block";
+                toBBCodeDone.style.margin = "auto";
+                toBBCodeDone.style.position = "relative";
+                toBBCodeDone.style.top = "2px";
+
+
+                toBBCodeButtonContainer.append(toBBCodeButton);
                 toBBCodeButton.onclick = function () {
+                    wodToolTipHide(toBBCodeButton);
+                    toBBCodeButtonContainer.removeChild(toBBCodeButton);
+                    toBBCodeButtonContainer.append(toBBCodeDone);
+
+                    setTimeout(function () {
+                        toBBCodeButtonContainer.removeChild(toBBCodeDone);
+                        toBBCodeButtonContainer.append(toBBCodeButton);
+                    }, 1500);
                     console.log(table);
                     navigator.clipboard.writeText(util.toBBCode(table));
                 }
