@@ -448,12 +448,12 @@
         },
         "Schaden (Besitzer)": {
             pfad: "effects.owner.schaden",
-            when: "Schaden",
+            when: "Bonus - Schaden",
             toHTML: spalten3Output
         },
         "Schaden (Betroffener)": {
             pfad: "effects.target.schaden",
-            when: "Schaden",
+            when: "Bonus - Schaden",
             toHTML: spalten3Output
         },
         "Parade (Besitzer)": {
