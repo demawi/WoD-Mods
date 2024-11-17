@@ -48,6 +48,15 @@
             }
         }
 
+        // Sicher für concurrent modification
+        static forEachSafe(array, fn) {
+            const newArray = Array();
+            for (var i = 0, l = array.length; i < l; i++) {
+                newArray.push(array[i]);
+            }
+            newArray.forEach(a => fn(a));
+        }
+
         static hatClassName(node, className) {
             return node.classList && node.classList.contains(className);
         }
@@ -72,13 +81,9 @@
             remove(myDocument.getElementById("gadgettable-left-td"));
             remove(myDocument.getElementById("gadgettable-right-td"));
             const mainContent = myDocument.getElementsByClassName("gadget main_content lang-de")[0];
-            for (var i = 0; i < mainContent.parentElement.children.length; i++) {
-                const cur = mainContent.parentElement.children[i];
-                if (cur !== mainContent) {
-                    remove(cur);
-                    i--;
-                }
-            }
+            util.forEachSafe(mainContent.parentElement.children, cur => {
+                if (cur !== mainContent) remove(cur);
+            });
             removeNoWodNodes(myDocument.documentElement);
 
             const tooltip = myDocument.getElementsByClassName("tooltip")[0];
@@ -103,6 +108,7 @@
             });
 
             function buttonReplaceWithElement(element, text, href) {
+                console.log("ButtonReplace", element, text);
                 if (element) {
                     const newButton = document.createElement("a");
                     newButton.classList = element.classList;
@@ -114,10 +120,16 @@
             }
 
             function buttonReplace(buttonName, text, href) {
-                buttonReplaceWithElement(myDocument.getElementsByName(buttonName)[0], text, href);
+                util.forEachSafe(myDocument.getElementsByName(buttonName), a => buttonReplaceWithElement(a, text, href));
             }
 
-            buttonReplaceWithElement((myDocument.getElementsByName("stats[0]")[0] || myDocument.getElementsByName("items[0]")[0]).parentElement.children[0], "Übersicht", "../");
+            var mainNavigationButton = myDocument.getElementsByName("stats[0]")[0];
+            if (!mainNavigationButton) {
+                mainNavigationButton = myDocument.getElementsByName("items[0]")[0];
+            }
+            util.forEach(myDocument.getElementsByName(mainNavigationButton.name), a => {
+                buttonReplaceWithElement(a.parentElement.children[0], "Übersicht", "../");
+            });
             buttonReplace("stats[0]", "Statistik", "Statistik.html");
             buttonReplace("items[0]", "Gegenstände", "Gegenstaende.html");
             buttonReplace("details[0]", "Bericht", "Level1.html");
