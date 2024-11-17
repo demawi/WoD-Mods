@@ -337,15 +337,17 @@
                                                 subStats.unit = unit;
                                                 subStats.title = unit.typeRef;
 
-                                                // anhand des Names wird eh schon aufgeschlüsselt, hier benötigen wir die restlichen Informationen
-                                                const id = finalLevelNr + "_" + finalAreaNr + "_" + unit.index || 1;
-                                                if (id) {
-                                                    var unitCount = subStats.unitCount;
-                                                    if (!unitCount) {
-                                                        unitCount = {};
-                                                        subStats.unitCount = unitCount;
+                                                if (!unit.id.isHero) {
+                                                    // anhand des Names wird eh schon aufgeschlüsselt, hier benötigen wir die restlichen Informationen
+                                                    const id = finalLevelNr + "_" + finalAreaNr + "_" + unit.index || 1;
+                                                    if (id) {
+                                                        var unitCount = subStats.unitCount;
+                                                        if (!unitCount) {
+                                                            unitCount = {};
+                                                            subStats.unitCount = unitCount;
+                                                        }
+                                                        unitCount[id] = true;
                                                     }
-                                                    unitCount[id] = true;
                                                 }
                                             } else if (curFilter.endsWith("attackType")) {
                                                 subStats = getStat(curStats, queryFilter, actionTarget.fertigkeit.type, "sub", "attackType");
