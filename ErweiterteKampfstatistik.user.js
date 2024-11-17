@@ -21,151 +21,155 @@
 
 (function() {
     'use strict';
-    const version = "0.18.3";
-    const stand = "15.11.2024";
-    const currentReportDataVersion = 4;
-    const forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
 
-    var thisReport;
-    var thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
-    var outputAnchor;
+    class Mod {
+        static version = "0.18.3";
+        static stand = "15.11.2024";
+        static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
+        static currentReportDataVersion = 4;
 
-    // Einstiegspunkt der Anwendung
-    async function startMod() {
-        if (WoD.istSeite_Kampfbericht()) { // Einzelseite
-            outputAnchor = createOutputAnchor();
-            outputAnchor.saveExecute(async function () {
-                // cur_rep_id für Dungeons, report bei Schlachten
-                const reportId = WoD.getReportId();
-                await Storage.loadThisReport(reportId);
+        static thisReport;
+        static thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
+        static outputAnchor;
+        static runSave;
 
-                var levelData = DataModel.readAndStoreKampfbericht(reportId);
-                if (levelData) {
-                    var roundCount = levelData.roundCount;
+        // Einstiegspunkt der Anwendung
+        static async startMod() {
+            if (WoD.istSeite_Kampfbericht()) { // Einzelseite
+                Mod.outputAnchor = Mod.createOutputAnchor();
+                Mod.runSave(async function () {
+                    // cur_rep_id für Dungeons, report bei Schlachten
+                    const reportId = WoD.getReportId();
+                    await Storage.loadThisReport(reportId);
 
-                    var hinweisText = ": " + roundCount + " Runden";
-                    const reportProgress = getReportProgress();
-                    if (reportProgress.missingReports.length > 0) {
-                        hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
+                    var levelData = ReportParser.readAndStoreKampfbericht(reportId);
+                    if (levelData) {
+                        var roundCount = levelData.roundCount;
+
+                        var hinweisText = ": " + roundCount + " Runden";
+                        const reportProgress = Mod.getReportProgress();
+                        if (reportProgress.missingReports.length > 0) {
+                            hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
+                        }
+                        Mod.outputAnchor.setTitle(hinweisText);
+                        Mod.thisLevelDatas = [levelData];
+                        await Storage.saveThisReport();
                     }
-                    outputAnchor.setTitle(hinweisText);
-                    thisLevelDatas = [levelData];
-                    await Storage.saveThisReport();
+                });
+            }
+            if (WoD.istSeite_Kampfstatistik()) { // Übersichtsseite
+                Mod.outputAnchor = Mod.createOutputAnchor();
+                Mod.runSave(async function () {
+                    const reportId = WoD.getReportId();
+                    await Storage.loadThisReport(reportId);
+
+                    if (Mod.thisReport.levelCount) {
+                        const reportProgress = Mod.getReportProgress();
+
+                        var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
+                        if (reportProgress.foundReportCount < reportProgress.levelCount) {
+                            hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
+                        }
+                        Mod.outputAnchor.setTitle(hinweisText);
+                        Mod.thisLevelDatas = Mod.thisReport.levelDatas;
+                    } else {
+                        Mod.outputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
+                    }
+                    Storage.validateAllReports(); // no await
+                });
+            }
+        }
+
+        static getReportProgress() {
+            var foundReportCount = 0;
+            var missingReports = Array();
+            var allRoundNumbers = Array();
+            var roundCount = 0;
+            var areaCount = 0;
+            var levelCount = 0;
+            var levelDatas;
+
+            if (Mod.thisReport) {
+                levelCount = Mod.thisReport.levelCount;
+                levelDatas = Mod.thisReport.levelDatas;
+
+                for (var i = 0, l = levelCount; i < l; i++) {
+                    if (levelDatas.length > i) {
+                        const levelData = levelDatas[i];
+                        if (levelData) {
+                            const curAreaCount = Object.keys(levelData.areas).length;
+                            const areaRoundCounts = Array();
+                            levelData.areas.forEach(area => areaRoundCounts.push(area.rounds.length));
+                            allRoundNumbers[i] = (curAreaCount > 1 ? "[" + areaRoundCounts.join(", ") + "]" : "" + levelData.roundCount);
+                            roundCount += levelData.roundCount;
+                            areaCount += curAreaCount;
+                            foundReportCount++;
+                            continue;
+                        }
+                        allRoundNumbers[i] = "x";
+                    } else {
+                        allRoundNumbers[i] = "x";
+                    }
+                    missingReports.push(i + 1);
+                }
+            }
+            return {
+                levelDatas: levelDatas,
+                levelCount: levelCount,
+                foundReportCount: foundReportCount,
+                missingReports: missingReports,
+                allRoundNumbers: allRoundNumbers,
+                roundCount: roundCount,
+            }
+        }
+
+        // erzeugt den Punkt wo wir uns mit der UI ranhängen können
+        static createOutputAnchor() {
+            // Ausgabe
+            var headings = document.getElementsByTagName("h2");
+            var content = document.createElement("div");
+            content.hidden = true;
+            var header = document.createElement("div");
+            header.innerHTML = "Erweiterte Kampfstatistiken";
+            var firstClick = true;
+            var foundError;
+            const collapsible = util.createCollapsible("20px", true, function (hide) {
+                content.hidden = hide;
+                if (foundError) {
+                    const zeileUndSpalte = foundError.stack.match(/:(\d+:\d+)/)[1]
+                    content.innerHTML = foundError + " v" + Mod.version + " -> " + zeileUndSpalte + "Forum <a target='_blank' href='" + Mod.forumLink + "'>Link ins Forum</a>"
+                        + "<br>Wer selber nachschauen möchte: der Error inklusive Link wurde auch in die Entwicklerkonsole geschrieben";
+                } else if (firstClick) {
+                    firstClick = false;
+                    const anchor = document.createElement("div");
+                    content.appendChild(anchor);
+                    const view = new QueryModel.StatQuery("heroes", "attack", []);
+                    const initialStatView = new Viewer.StatView(view, true, false);
+                    new Viewer.StatTable(initialStatView, Mod.thisLevelDatas, anchor);
+                    content.append(document.createElement("br"));
                 }
             });
-        }
-        if (WoD.istSeite_Kampfstatistik()) { // Übersichtsseite
-            outputAnchor = createOutputAnchor();
-            outputAnchor.saveExecute(async function () {
-                const reportId = WoD.getReportId();
-                await Storage.loadThisReport(reportId);
+            headings[0].parentNode.insertBefore(header, headings[0].nextSibling);
+            headings[0].parentNode.insertBefore(content, header.nextSibling);
 
-                if (thisReport.levelCount) {
-                    const reportProgress = getReportProgress();
+            function setTitle(titleMessage) {
+                header.innerHTML = "Erweiterte Kampfstatistiken" + titleMessage;
+                header.append(collapsible);
+            }
 
-                    var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
-                    if (reportProgress.foundReportCount < reportProgress.levelCount) {
-                        hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
-                    }
-                    outputAnchor.setTitle(hinweisText);
-                    thisLevelDatas = thisReport.levelDatas;
+            function logError(error) {
+                setTitle("<span title='" + error + "'>⚠️ Ein Fehler ist aufgetreten, es konnten diesmal leider keine Statistiken erstellt werden!</span>");
+                foundError = error;
+                if (error.additionals) {
+                    console.error("Ein Fehler wurde abgefangen!", error, ...error.additionals);
                 } else {
-                    outputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
+                    console.error("Ein Fehler wurde abgefangen!", error);
                 }
-                Storage.validateAllReports(); // no await
-            });
-        }
-    }
-
-    function getReportProgress() {
-        var foundReportCount = 0;
-        var missingReports = Array();
-        var allRoundNumbers = Array();
-        var roundCount = 0;
-        var areaCount = 0;
-        var levelCount = 0;
-        var levelDatas;
-
-        if (thisReport) {
-            levelCount = thisReport.levelCount;
-            levelDatas = thisReport.levelDatas;
-
-            for(var i=0,l=levelCount;i<l;i++) {
-                if(levelDatas.length > i) {
-                    const levelData = levelDatas[i];
-                    if(levelData) {
-                        const curAreaCount = Object.keys(levelData.areas).length;
-                        const areaRoundCounts = Array();
-                        levelData.areas.forEach(area => areaRoundCounts.push(area.rounds.length));
-                        allRoundNumbers[i] = (curAreaCount > 1 ? "[" + areaRoundCounts.join(", ") + "]" : "" + levelData.roundCount);
-                        roundCount += levelData.roundCount;
-                        areaCount += curAreaCount;
-                        foundReportCount++;
-                        continue;
-                    }
-                    allRoundNumbers[i] = "x";
-                } else {
-                    allRoundNumbers[i] = "x";
-                }
-                missingReports.push(i+1);
             }
-        }
-        return {
-            levelDatas: levelDatas,
-            levelCount: levelCount,
-            foundReportCount: foundReportCount,
-            missingReports: missingReports,
-            allRoundNumbers: allRoundNumbers,
-            roundCount: roundCount,
-        }
-    }
 
-    // erzeugt den Punkt wo wir uns mit der UI ranhängen können
-    function createOutputAnchor() {
-        // Ausgabe
-        var headings = document.getElementsByTagName("h2");
-        var content = document.createElement("div");
-        content.hidden = true;
-        var header = document.createElement("div");
-        header.innerHTML = "Erweiterte Kampfstatistiken";
-        var firstClick = true;
-        var foundError;
-        const collapsible = util.createCollapsible("20px", true, function (hide) {
-            content.hidden = hide;
-            if (foundError) {
-                const zeileUndSpalte = foundError.stack.match(/:(\d+:\d+)/)[1]
-                content.innerHTML = foundError + " v" + version + " -> " + zeileUndSpalte + "Forum <a target='_blank' href='" + forumLink + "'>Link ins Forum</a>"
-                    + "<br>Wer selber nachschauen möchte: der Error inklusive Link wurde auch in die Entwicklerkonsole geschrieben";
-            } else if (firstClick) {
-                firstClick = false;
-                const anchor = document.createElement("div");
-                content.appendChild(anchor);
-                const view = new QueryModel.StatQuery("heroes", "attack", []);
-                const initialStatView = new Viewer.StatView(view, true, false);
-                new Viewer.StatTable(initialStatView, thisLevelDatas, anchor);
-                content.append(document.createElement("br"));
-            }
-        });
-        headings[0].parentNode.insertBefore(header, headings[0].nextSibling);
-        headings[0].parentNode.insertBefore(content, header.nextSibling);
-
-        function setTitle(titleMessage) {
-            header.innerHTML = "Erweiterte Kampfstatistiken" + titleMessage;
-            header.append(collapsible);
-        }
-
-        function logError(error) {
-            setTitle("<span title='" + error + "'>⚠️ Ein Fehler ist aufgetreten, es konnten diesmal leider keine Statistiken erstellt werden!</span>");
-            foundError = error;
-            if (error.additionals) {
-                console.error("Ein Fehler wurde abgefangen!", error, ...error.additionals);
-            } else {
-                console.error("Ein Fehler wurde abgefangen!", error);
-            }
-        }
-        return {
             // führt die Funktion in einem gesicherten Kontext aus, um aufkommende Fehler abzufangen und konform anzuzeigen
-            saveExecute: function (asyncFunction) {
+            // jeglicher Code sollte in diesem Kontext laufen
+            Mod.runSave = function (asyncFunction) {
                 try {
                     const functionResult = asyncFunction()
                     if (functionResult && functionResult.catch) {
@@ -176,9 +180,11 @@
                 } catch (error) {
                     logError(error);
                 }
-            },
-            setTitle: setTitle
-        };
+            }
+            return {
+                setTitle: setTitle
+            };
+        }
     }
 
     class SearchEngine {
@@ -429,7 +435,8 @@
 
     }
 
-    class DataModel {
+    // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
+    class ReportParser {
         static currentRound;
 
         static readAndStoreKampfbericht(reportId) {
@@ -443,12 +450,12 @@
                 levelCount = document.getElementsByClassName("navigation levels")[0].children.length - 1;
             }
             const levelData = this.readKampfbericht();
-            thisReport.id = reportId;
-            thisReport.levelCount = levelCount;
-            if (!thisReport.levelDatas) {
-                thisReport.levelDatas = [];
+            Mod.thisReport.id = reportId;
+            Mod.thisReport.levelCount = levelCount;
+            if (!Mod.thisReport.levelDatas) {
+                Mod.thisReport.levelDatas = [];
             }
-            thisReport.levelDatas[levelNr - 1] = levelData;
+            Mod.thisReport.levelDatas[levelNr - 1] = levelData;
             return levelData;
         }
 
@@ -500,25 +507,25 @@
             monster;
 
             constructor(nr, roundTD) {
-                if (!DataModel.currentRound) {
+                if (!ReportParser.currentRound) {
                     this.area = 1;
                 } else {
                     if (roundTD.getElementsByClassName("rep_round_headline")[0].innerText === "Runde 1") {
-                        this.area = DataModel.currentRound.area + 1;
+                        this.area = ReportParser.currentRound.area + 1;
                     } else {
-                        this.area = DataModel.currentRound.area;
+                        this.area = ReportParser.currentRound.area;
                     }
                 }
-                DataModel.currentRound = this;
+                ReportParser.currentRound = this;
                 this.nr = nr;
 
                 var statusTables = roundTD.getElementsByClassName("rep_status_table"); // üblicherweise sollten es immer 2 sein, nur am Ende des Kampfes dann 4
                 if (statusTables.length !== 2 && statusTables.length !== 4) {
                     console.error("Es wurden keine zwei StatusTable in einer Runde gefunden: " + statusTables.length);
                 }
-                this.helden = DataModel.GruppenStatus(statusTables[0], true);
+                this.helden = ReportParser.GruppenStatus(statusTables[0], true);
                 if (!this.helden) return; // keine kampfbereiten Helden, keine Aktionen
-                this.monster = DataModel.GruppenStatus(statusTables[1], false);
+                this.monster = ReportParser.GruppenStatus(statusTables[1], false);
                 if (!this.monster) return; // keine kampfbereiten Gegner, keine Aktionen
                 var vorrunde = Array();
                 var runde = Array();
@@ -533,9 +540,9 @@
                         // currently nothing to do
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
-                            vorrunde.push(DataModel.Action(null, currentAction.children[1], currentAction.children[2]));
+                            vorrunde.push(ReportParser.Action(null, currentAction.children[1], currentAction.children[2]));
                         } else { // Runden-Aktion
-                            runde.push(DataModel.Action(currentAction.children[0], currentAction.children[1], currentAction.children[2]));
+                            runde.push(ReportParser.Action(currentAction.children[0], currentAction.children[1], currentAction.children[2]));
                         }
                     }
                 }
@@ -829,12 +836,12 @@
                         items.push({
                             name: itemName,
                             srcRef: href,
-                            wirkungen: util.searchWirkungen(actionElement, itemName),
+                            wirkungen: ReportParser.searchWirkungen(actionElement, itemName),
                         });
                     });
                 }
             }
-            var wirkungen = util.searchWirkungen(actionElement, name);
+            var wirkungen = ReportParser.searchWirkungen(actionElement, name);
             return {
                 name: name,
                 wirkungen: wirkungen,
@@ -863,7 +870,7 @@
 
             function addTarget() {
                 var line = util.arrayMap(currentLine, a => a.textContent).join("");
-                currentTarget = DataModel.Target(line);
+                currentTarget = ReportParser.Target(line);
                 currentTarget.unit = curTargetUnit;
                 targets.push(currentTarget);
             }
@@ -893,7 +900,7 @@
                         if (curElement.tagName === "A") { // Schaden an einem Gegenstand
                             lineNr = -1; // solange ignorieren bis eine neue Entität kommt
                         } else {
-                            currentTarget.damage.push(DataModel.Damage(curElement));
+                            currentTarget.damage.push(ReportParser.Damage(curElement));
                         }
                     } else {
                         currentLine.push(curElement);
@@ -981,6 +988,23 @@
                 //console.log(action, result);
             }
             //console.log(result);
+            return result;
+        }
+
+        static searchWirkungen(parentElement, name) {
+            var result;
+            const hrefs = parentElement.getElementsByTagName("a");
+            for (var i = 0, l = hrefs.length; i < l; i++) {
+                const href = hrefs[i];
+                if (href.innerText === name) {
+                    if (href.onmouseover) {
+                        result = href.onmouseover.toString();
+                        result = result.substring(result.indexOf("'") + 1, result.lastIndexOf("'"));
+                        result = ReportParser.Wirkungen(result, parentElement);
+                    }
+                    break;
+                }
+            }
             return result;
         }
 
@@ -1251,7 +1275,7 @@
                 infoHeader.style.position = "absolute";
                 infoHeader.style.right = "7px";
                 infoHeader.style.top = "7px";
-                infoHeader.innerHTML += "<a target='_blank' href='" + forumLink + "' style='font-size:12px;color:darkgrey;' class='bbignoreColor' onmouseover=\"return wodToolTip(this, 'Hier gehts zum Foren-Post der Anwendung')\">" + version + " </a>";
+                infoHeader.innerHTML += "<a target='_blank' href='" + Mod.forumLink + "' style='font-size:12px;color:darkgrey;' class='bbignoreColor' onmouseover=\"return wodToolTip(this, 'Hier gehts zum Foren-Post der Anwendung')\">" + Mod.version + " </a>";
 
                 // 🔗📌📍
                 const info = document.createElement("span");
@@ -1318,7 +1342,7 @@
                 this.anchor.appendChild(table);
                 if (this.statView.query.side && this.statView.query.type) {
                     const statView = this.statView;
-                    console.log("StatView", statView, thisLevelDatas);
+                    console.log("StatView", statView, Mod.thisLevelDatas);
                     if (!statView.result) {
                         tbody.innerHTML = "<td>Es konnte kein Ergebnis ermittelt werden!";
                         return;
@@ -1702,7 +1726,7 @@
             const result = await GM.getValue(id);
             if (!result) return {};
             // Nicht die aktuell verwendete Report-Version entdeckt => Der Report wird verworfen.
-            if (!result.metaData || !result.metaData.dataVersion || result.metaData.dataVersion !== currentReportDataVersion) {
+            if (!result.metaData || !result.metaData.dataVersion || result.metaData.dataVersion !== Mod.currentReportDataVersion) {
                 console.log("Report enthält alte Daten und wird verworfen", result);
                 await this.gmSetReport(id); // delete
                 return {};
@@ -1716,7 +1740,7 @@
             var compareDate = new Date();
             compareDate.setDate(compareDate.getDate() - 30);
             for (const [reportId, metaData] of Object.entries(this.reportIds)) {
-                if (metaData.dataVersion !== currentReportDataVersion || metaData.time && metaData.time < compareDate.getTime()) {
+                if (metaData.dataVersion !== Mod.currentReportDataVersion || metaData.time && metaData.time < compareDate.getTime()) {
                     console.log("Report veraltet und wird verworfen", reportId);
                     delete this.reportIds[reportId];
                     await this.gmSetReport(reportId);
@@ -1729,18 +1753,18 @@
         static async loadThisReport(reportId) {
             const storeId = "report_" + reportId;
             const result = await this.gmGetReport(storeId);
-            thisReport = result;
+            Mod.thisReport = result;
             //console.log("Loaded report", result);
         }
 
         static async saveThisReport() {
-            const storeId = "report_" + thisReport.id;
-            thisReport.metaData = {
-                dataVersion: currentReportDataVersion,
+            const storeId = "report_" + Mod.thisReport.id;
+            Mod.thisReport.metaData = {
+                dataVersion: Mod.currentReportDataVersion,
                 time: new Date().getTime()
             };
-            console.log("Saved report: ", storeId, thisReport);
-            await this.gmSetReport(storeId, thisReport);
+            console.log("Saved report: ", storeId, Mod.thisReport);
+            await this.gmSetReport(storeId, Mod.thisReport);
             //console.log("Stored report", thisReport);
         }
 
@@ -1830,23 +1854,6 @@
             }
         }
 
-        static searchWirkungen(parentElement, name) {
-            var result;
-            const hrefs = parentElement.getElementsByTagName("a");
-            for(var i=0,l=hrefs.length;i<l;i++) {
-                const href = hrefs[i];
-                if (href.innerText === name) {
-                    if(href.onmouseover) {
-                        result = href.onmouseover.toString();
-                        result = result.substring(result.indexOf("'")+1, result.lastIndexOf("'"));
-                        result = DataModel.Wirkungen(result, parentElement);
-                    }
-                    break;
-                }
-            }
-            return result;
-        }
-
         static createImgButton(height, url, fnCallback) {
             const result = document.createElement("img");
             result.style.height = height;
@@ -1872,7 +1879,7 @@
             collapsible.onclick = function() {
                 collapsed = !collapsed;
                 updateCollapserSrc();
-                outputAnchor.saveExecute(function () {
+                Mod.runSave(function () {
                     fnCallback(collapsed);
                 })
             }
@@ -1962,7 +1969,6 @@
         return error;
     }
 
-
-    startMod();
+    Mod.startMod();
 
 })();
