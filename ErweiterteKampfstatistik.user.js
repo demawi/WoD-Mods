@@ -128,8 +128,10 @@
             // Ausgabe
             var headings = document.getElementsByTagName("h2");
             var content = document.createElement("div");
+            content.classList.add("nowod");
             content.hidden = true;
             var header = document.createElement("div");
+            header.classList.add("nowod");
             header.innerHTML = "Erweiterte Kampfstatistiken";
             var firstClick = true;
             var foundError;
