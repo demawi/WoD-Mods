@@ -30,7 +30,7 @@
             // Gegenstandsseite
             if (page === "item.php") await ItemReader.start();
 
-            if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
+            if (page === "items.php" || page === "trade.php") await ItemSearchUILinker.start();
 
             await Storage.ensureItemSources();
             const allItemSources = Storage.itemSources;
@@ -140,7 +140,7 @@
         }
     }
 
-    class ItemSearchUI {
+    class ItemSearchUILinker {
         static async start() {
             // Erweiterung für die Suche
             const searchContainer = document.getElementsByClassName("search_container")[0];
@@ -166,7 +166,7 @@
 
                 updateMissingButton(); // kein await benötigt
 
-                const mySearchTable = SearchTable.createSearchTable();
+                const mySearchTable = ItemSearch.QueryTable.create();
                 const theirSearchTable = searchContainer.children[1];
 
                 const mySearchButton = document.createElement("a");
@@ -274,7 +274,7 @@
                         items = await Storage.ensureItemSources(true);
                     }
                     for (const [itemName, item] of Object.entries(items)) {
-                        if (missingSearch.checked && !item.details || missingSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && SearchTable.matches(item)) {
+                        if (missingSearch.checked && !item.details || missingSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && ItemSearch.matches(item)) {
                             switcher = !switcher;
                             const tr = document.createElement("tr");
                             tr.className = "row" + (switcher ? "0" : "1");
@@ -323,12 +323,12 @@
 
     class AutoColumns {
 
-        static AutoColumnsListe = {
-            Trageort: {
+        static AutoColumnsDefinition = class AutoColumnsDefinition {
+            static "Trageort" = {
                 pfad: "data.trageort",
                 notWhen: "Trageort",
-            },
-            Klasse: {
+            }
+            static "Klasse" = {
                 pfad: "data.klasse",
                 notWhen: "Klasse",
                 toHTML: function (obj) {
@@ -338,82 +338,82 @@
                     }
                     return Object.keys(SearchDomains.KLASSEN).filter(a => !obj.def.includes(a)).map(a => SearchDomains.KLASSEN[a]).join(", ");
                 }
-            },
-            Stufe: {
+            }
+            static "Stufe" = {
                 pfad: "data.bedingungen.Stufe",
                 toHTML: function (obj) {
                     return obj.comp + " " + obj.value;
                 }
-            },
-            "Schaden (Besitzer)": {
+            }
+            static "Schaden (Besitzer)" = {
                 pfad: "effects.owner.schaden",
                 when: "Bonus - Schaden",
                 toHTML: AutoColumns.default3SpaltenOutput
-            },
-            "Schaden (Betroffener)": {
+            }
+            static "Schaden (Betroffener)" = {
                 pfad: "effects.target.schaden",
                 when: "Bonus - Schaden",
                 toHTML: AutoColumns.default3SpaltenOutput
-            },
-            "Parade (Besitzer)": {
+            }
+            static "Parade (Besitzer)" = {
                 pfad: "effects.owner.parade",
                 when: "Bonus - Parade",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            "Parade (Betroffener)": {
+            }
+            static "Parade (Betroffener)" = {
                 pfad: "effects.target.parade",
                 when: "Bonus - Parade",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            "Angriff (Besitzer)": {
+            }
+            static "Angriff (Besitzer)" = {
                 pfad: "effects.owner.angriff",
                 when: "Bonus - Angriff",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            "Angriff (Betroffener)": {
+            }
+            static "Angriff (Betroffener)" = {
                 pfad: "effects.target.angriff",
                 when: "Bonus - Angriff",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            "Eigenschaft (Besitzer)": {
+            }
+            static "Eigenschaft (Besitzer)" = {
                 pfad: "effects.owner.eigenschaft",
                 when: "Bonus - Eigenschaft",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            "Eigenschaft (Betroffener)": {
+            }
+            static "Eigenschaft (Betroffener)" = {
                 pfad: "effects.target.eigenschaft",
                 when: "Bonus - Eigenschaft",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            "Fertigkeit (Besitzer)": {
+            }
+            static "Fertigkeit (Besitzer)" = {
                 pfad: "effects.owner.fertigkeit",
                 when: "Bonus - Fertigkeit",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            "Fertigkeit (Betroffener)": {
+            }
+            static "Fertigkeit (Betroffener)" = {
                 pfad: "effects.target.fertigkeit",
                 when: "Bonus - Fertigkeit",
                 toHTML: AutoColumns.default2SpaltenOutput
-            },
-            Gegenstandsklasse: {
+            }
+            static Gegenstandsklasse = {
                 pfad: "data.gegenstandsklassen",
                 notWhen: "Gegenstandsklasse",
                 toHTML: function (obj) {
                     return obj.join("<br>");
                 },
-            },
+            }
         }
 
         static whenBedingung(when) {
-            var validatorIndex = SearchTable.validatorTypes.indexOf(when);
-            var negator = SearchTable.negators[validatorIndex] || false;
+            var validatorIndex = ItemSearch.QueryTable.validatorTypes.indexOf(when);
+            var negator = ItemSearch.QueryTable.negators[validatorIndex] || false;
             var validator = validatorIndex > -1;
             return negator !== validator;
         }
 
         static getAutoColumns() {
             const result = {};
-            for (const [title, def] of Object.entries(this.AutoColumnsListe)) {
+            for (const [title, def] of Object.entries(this.AutoColumnsDefinition)) {
                 if (!def.notWhen && !def.when || def.notWhen && !this.whenBedingung(def.notWhen) || def.when && this.whenBedingung(def.when)) {
                     result[title] = {
                         pfadArray: def.pfad.split("."),
@@ -432,10 +432,10 @@
 
         static replaceHSFRMitBerechnung(text) {
             var result = text.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
-            var hsInput = SearchTable.getHsInput();
+            var hsInput = ItemSearch.QueryTable.getHsInput();
             if (hsInput === "") hsInput = null;
             else hsInput = Number(hsInput);
-            var frInput = SearchTable.getFrInput();
+            var frInput = ItemSearch.QueryTable.getFrInput();
             if (frInput === "") frInput = null;
             else frInput = Number(frInput);
 
@@ -573,6 +573,7 @@
 
 
     class SearchDomains {
+
         static GEGENSTANDSKLASSEN;
         static FERTIGKEITEN;
         static EIGENSCHAFTEN;
@@ -615,133 +616,12 @@
         static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Psychologischer Schaden"];
     }
 
-    class SearchTable {
+    class ItemSearch {
 
-        static validators = [];
-        static validatorTypes = [];
-        static negators = [];
-
-        static table;
-        static thead;
-        static tbody;
-
-        static hsInput;
-        static frInput;
-
-        static debug = false;
-
-        static matches(item) {
-            const result = this.#matches(item);
-            if (this.debug) console.log("Matches", result);
-            return result;
-        }
-
-        static #matches(item) {
-            this.debug = item.name.includes("Thanat");
-            if (this.debug) console.log(item);
-            const suchfeldWert = WoD.getSuchfeld().value.trim();
-            if (suchfeldWert !== "") {
-                const matching = "^" + suchfeldWert.replaceAll("*", ".*") + "$";
-                if (!item.name.match(matching)) return false;
-            }
-            for (var i = 0, l = this.validators.length; i < l; i++) {
-                const currentValidator = this.validators[i];
-                if (!currentValidator) continue;
-                const currentValidatorResult = currentValidator(item) || false;
-                const negatorWish = this.negators[i] || false;
-                if (this.debug) console.log("Matches2", currentValidatorResult, negatorWish);
-                if (currentValidatorResult === negatorWish) return false;
-            }
-            return true;
-        }
-
-        static getHsInput() {
-            return this.hsInput.value;
-        }
-
-        static getFrInput() {
-            return this.frInput.value;
-        }
-
-        static createSearchTable() {
-            this.table = document.createElement("table");
-            this.thead = document.createElement("thead");
-            this.tbody = document.createElement("tbody");
-            this.table.append(this.thead);
-            this.table.append(this.tbody);
-
-            this.hsInput = util.createTextInput("50px");
-            this.frInput = util.createTextInput("50px");
-            const tr = document.createElement("tr");
-            const th = document.createElement("th");
-            tr.append(th);
-            th.colSpan = 10;
-            this.thead.append(tr);
-            th.append(util.span("HS: "));
-            th.append(this.hsInput);
-            th.append(util.span(" FR: "));
-            th.append(this.frInput);
-
-            this.createAuswahl(0);
-            return this.table;
-        }
-
-        static createAuswahl(i) {
-            const tbody = this.tbody;
-            const thisObject = this;
-            const tr = document.createElement("tr");
-            tbody.append(tr);
-            const select = this.createSelect(["<Auswahl>"].concat(Object.keys(SearchTable.suchKriterien)));
-            const searchFieldsTD = document.createElement("td");
-            tr.append(select);
-            tr.append(searchFieldsTD);
-            const [checkbox, label] = util.createCheckbox(tr, "", "Negieren");
-            checkbox.onclick = function () {
-                const myCurIndex = [...tbody.children].indexOf(tr);
-                console.log("set checked", checkbox.checked);
-                thisObject.negators[myCurIndex] = checkbox.checked;
-            }
-            checkbox.parentElement.hidden = true;
-
-            select.onchange = function () {
-                const myCurIndex = [...tbody.children].indexOf(tr);
-                if (select.value === "") {
-                    searchFieldsTD.removeChild(searchFieldsTD.children[0]);
-                    delete thisObject.validators[myCurIndex];
-                    delete thisObject.validatorTypes[myCurIndex];
-                    checkbox.parentElement.hidden = true;
-                    thisObject.checkRemove(myCurIndex);
-                } else {
-                    const suche = thisObject.suchKriterien[select.value]();
-                    if (searchFieldsTD.children.length > 0) searchFieldsTD.removeChild(searchFieldsTD.children[0]);
-                    searchFieldsTD.append(suche.get());
-                    checkbox.parentElement.hidden = false;
-                    thisObject.validators[myCurIndex] = suche.matches;
-                    thisObject.validatorTypes[myCurIndex] = select.value;
-                    console.log("test", tbody.children.length, myCurIndex);
-                    if (tbody.children.length <= myCurIndex + 1) {
-                        thisObject.createAuswahl(myCurIndex + 1);
-                    }
-                }
-                console.log("Kriterien", thisObject.validators);
-            }
-        }
-
-        static checkRemove(i) {
-            if (this.tbody.children.length === 1) return false;
-            console.log("checkRemove", this.validatorTypes[i], this.tbody.children.length, i);
-            if (!this.validatorTypes[i]) {
-                this.validatorTypes.splice(i, i);
-                this.validators.splice(i, i);
-                this.negators.splice(i, i);
-                this.tbody.removeChild(this.tbody.children[i]);
-            }
-        }
-
-        static suchKriterien = {
-            Klasse: function () {
+        static SuchKriterien = class SuchKriterien {
+            static "Klasse" = () => {
                 const span = document.createElement("span");
-                const select1 = SearchTable.createSelect(["<Klasse>", ...Object.keys(SearchDomains.KLASSEN)]);
+                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...Object.keys(SearchDomains.KLASSEN)]);
                 span.append(select1);
                 return {
                     matches: function (item) {
@@ -756,10 +636,11 @@
                         return span;
                     }
                 }
-            },
-            Trageort: function () {
+            }
+
+            static "Trageort" = () => {
                 const span = document.createElement("span");
-                const select1 = SearchTable.createSelect(["<Klasse>", ...SearchDomains.TRAGEORT]);
+                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...SearchDomains.TRAGEORT]);
                 span.append(select1);
                 return {
                     matches: function (item) {
@@ -776,10 +657,11 @@
                         return span;
                     }
                 }
-            },
-            Gegenstandsklasse: function () {
+            }
+
+            static "Gegenstandsklasse" = () => {
                 const span = document.createElement("span");
-                const select1 = SearchTable.createSelect(["<Gegenstandsklasse>", ...SearchDomains.GEGENSTANDSKLASSEN]); // GEGENSTANDSKLASSEN
+                const select1 = ItemSearch.UI.createSelect(["<Gegenstandsklasse>", ...SearchDomains.GEGENSTANDSKLASSEN]); // GEGENSTANDSKLASSEN
                 span.append(select1);
                 return {
                     matches: function (item) {
@@ -794,8 +676,9 @@
                         return span;
                     }
                 }
-            },
-            Stufe: function () {
+            }
+
+            static "Stufe" = () => {
                 const span = document.createElement("span");
                 const textFrom = util.createTextInput("50px");
                 const textTo = util.createText("50px");
@@ -827,20 +710,21 @@
                         return span;
                     }
                 }
-            },
-            "Bonus - Eigenschaft": () => this.effects2Kriterium("eigenschaft", ["<Eigenschaft>", ...Object.values(SearchDomains.EIGENSCHAFTEN)]),
-            "Bonus - Fertigkeit": () => this.effects2Kriterium("fertigkeit", ["<Fertigkeit>", ...Object.values(SearchDomains.FERTIGKEITEN)]),
-            "Bonus - Parade": () => this.effects2Kriterium("parade", ["<Parade>", ...SearchDomains.ANGRIFFSARTEN]),
-            "Bonus - Angriff": () => this.effects2Kriterium("angriff", ["<Angriff>", ...SearchDomains.ANGRIFFSARTEN]),
-            "Bonus - Schaden": function () {
+            }
+
+            static "Bonus - Eigenschaft" = () => this.effects2Kriterium("eigenschaft", ["<Eigenschaft>", ...Object.values(SearchDomains.EIGENSCHAFTEN)])
+            static "Bonus - Fertigkeit" = () => this.effects2Kriterium("fertigkeit", ["<Fertigkeit>", ...Object.values(SearchDomains.FERTIGKEITEN)])
+            static "Bonus - Parade" = () => this.effects2Kriterium("parade", ["<Parade>", ...SearchDomains.ANGRIFFSARTEN])
+            static "Bonus - Angriff" = () => this.effects2Kriterium("angriff", ["<Angriff>", ...SearchDomains.ANGRIFFSARTEN])
+            static "Bonus - Schaden" = function () {
                 const span = document.createElement("span");
-                const select1 = SearchTable.createSelect(["<Schadensart>", ...SearchDomains.SCHADENSARTEN]);
+                const select1 = ItemSearch.UI.createSelect(["<Schadensart>", ...SearchDomains.SCHADENSARTEN]);
                 span.append(select1);
-                const select2 = SearchTable.createSelect(SearchDomains.BESITZER_BETROFFENER);
+                const select2 = ItemSearch.UI.createSelect(SearchDomains.BESITZER_BETROFFENER);
                 span.append(select2);
-                const select3 = SearchTable.createSelect(["<Angriffstyp>", ...SearchDomains.ANGRIFFSARTEN]);
+                const select3 = ItemSearch.UI.createSelect(["<Angriffstyp>", ...SearchDomains.ANGRIFFSARTEN]);
                 span.append(select3);
-                const select4 = SearchTable.createSelect(["<a/z>", ...SearchDomains.SCHADENSBONITYP]);
+                const select4 = ItemSearch.UI.createSelect(["<a/z>", ...SearchDomains.SCHADENSBONITYP]);
                 span.append(select4);
 
                 return {
@@ -890,54 +774,180 @@
                     get: function () {
                         return span;
                     }
-                };
-            },
-        }
+                }
+            }
 
-        static createSelect(options) {
-            const result = document.createElement("select");
-            options.forEach(opt => {
-                const value = opt.startsWith("<") ? "" : opt.replaceAll(":", "");
-                const autoSelected = opt.startsWith(":") ? "selected" : "";
-                result.innerHTML += "<option value='" + value + "' " + autoSelected + ">" + opt.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll(":", "") + "</option>";
-            });
-            return result;
-        }
-
-        static effects2Kriterium(id, selectArray) {
-            const span = document.createElement("span");
-            const select1 = this.createSelect(selectArray);
-            span.append(select1);
-            const select2 = this.createSelect(SearchDomains.BESITZER_BETROFFENER);
-            span.append(select2);
-            return {
-                matches: function (item) {
-                    var result = Array();
-                    if (select2.value === "Besitzer" || select2.value === "") {
-                        const cur = item.effects?.owner?.[id];
-                        if (cur) result.push(...cur);
+            static effects2Kriterium(id, selectArray) {
+                const span = document.createElement("span");
+                const select1 = ItemSearch.UI.createSelect(selectArray);
+                span.append(select1);
+                const select2 = ItemSearch.UI.createSelect(SearchDomains.BESITZER_BETROFFENER);
+                span.append(select2);
+                return {
+                    matches: function (item) {
+                        var result = Array();
+                        if (select2.value === "Besitzer" || select2.value === "") {
+                            const cur = item.effects?.owner?.[id];
+                            if (cur) result.push(...cur);
+                        }
+                        if (select2.value === "Betroffener" || select2.value === "") {
+                            const cur = item.effects?.target?.[id];
+                            if (cur) result.push(...cur);
+                        }
+                        var next = Array();
+                        if (select1.value !== "") {
+                            result.forEach(cur => {
+                                if (cur.type === select1.value && cur.bonus.includes("+")) {
+                                    next.push(cur);
+                                }
+                            });
+                            result = next;
+                            next = Array();
+                        }
+                        return result.length > 0;
+                    },
+                    get: function () {
+                        return span;
                     }
-                    if (select2.value === "Betroffener" || select2.value === "") {
-                        const cur = item.effects?.target?.[id];
-                        if (cur) result.push(...cur);
-                    }
-                    var next = Array();
-                    if (select1.value !== "") {
-                        result.forEach(cur => {
-                            if (cur.type === select1.value && cur.bonus.includes("+")) {
-                                next.push(cur);
-                            }
-                        });
-                        result = next;
-                        next = Array();
-                    }
-                    return result.length > 0;
-                },
-                get: function () {
-                    return span;
                 }
             }
         }
+
+        static QueryTable = class QueryTable {
+            static validators = [];
+            static validatorTypes = [];
+            static negators = [];
+
+            static table;
+            static thead;
+            static tbody;
+
+            static hsInput;
+            static frInput;
+
+            static getHsInput() {
+                return this.hsInput.value;
+            }
+
+            static getFrInput() {
+                return this.frInput.value;
+            }
+
+            static create() {
+                this.table = document.createElement("table");
+                this.thead = document.createElement("thead");
+                this.tbody = document.createElement("tbody");
+                this.table.append(this.thead);
+                this.table.append(this.tbody);
+
+                this.hsInput = util.createTextInput("50px");
+                this.frInput = util.createTextInput("50px");
+                const tr = document.createElement("tr");
+                const th = document.createElement("th");
+                tr.append(th);
+                th.colSpan = 10;
+                this.thead.append(tr);
+                th.append(util.span("HS: "));
+                th.append(this.hsInput);
+                th.append(util.span(" FR: "));
+                th.append(this.frInput);
+
+                this.createAuswahl(0);
+                return this.table;
+            }
+
+            static createAuswahl(i) {
+                const tbody = this.tbody;
+                const thisObject = this;
+                const tr = document.createElement("tr");
+                tbody.append(tr);
+                const select = ItemSearch.UI.createSelect(["<Auswahl>"].concat(Object.keys(ItemSearch.SuchKriterien)));
+                const searchFieldsTD = document.createElement("td");
+                tr.append(select);
+                tr.append(searchFieldsTD);
+                const [checkbox, label] = util.createCheckbox(tr, "", "Negieren");
+                checkbox.onclick = function () {
+                    const myCurIndex = [...tbody.children].indexOf(tr);
+                    console.log("set checked", checkbox.checked);
+                    thisObject.negators[myCurIndex] = checkbox.checked;
+                }
+                checkbox.parentElement.hidden = true;
+
+                select.onchange = function () {
+                    const myCurIndex = [...tbody.children].indexOf(tr);
+                    if (select.value === "") {
+                        searchFieldsTD.removeChild(searchFieldsTD.children[0]);
+                        delete thisObject.validators[myCurIndex];
+                        delete thisObject.validatorTypes[myCurIndex];
+                        checkbox.parentElement.hidden = true;
+                        thisObject.checkRemove(myCurIndex);
+                    } else {
+                        const suche = ItemSearch.SuchKriterien[select.value]();
+                        if (searchFieldsTD.children.length > 0) searchFieldsTD.removeChild(searchFieldsTD.children[0]);
+                        searchFieldsTD.append(suche.get());
+                        checkbox.parentElement.hidden = false;
+                        thisObject.validators[myCurIndex] = suche.matches;
+                        thisObject.validatorTypes[myCurIndex] = select.value;
+                        console.log("test", tbody.children.length, myCurIndex);
+                        if (tbody.children.length <= myCurIndex + 1) {
+                            thisObject.createAuswahl(myCurIndex + 1);
+                        }
+                    }
+                    console.log("Kriterien", thisObject.validators);
+                }
+            }
+
+            static checkRemove(i) {
+                if (this.tbody.children.length === 1) return false;
+                console.log("checkRemove", this.validatorTypes[i], this.tbody.children.length, i);
+                if (!this.validatorTypes[i]) {
+                    this.validatorTypes.splice(i, i);
+                    this.validators.splice(i, i);
+                    this.negators.splice(i, i);
+                    this.tbody.removeChild(this.tbody.children[i]);
+                }
+            }
+        }
+
+        static UI = class UI {
+            static createSelect(options) {
+                const result = document.createElement("select");
+                options.forEach(opt => {
+                    const value = opt.startsWith("<") ? "" : opt.replaceAll(":", "");
+                    const autoSelected = opt.startsWith(":") ? "selected" : "";
+                    result.innerHTML += "<option value='" + value + "' " + autoSelected + ">" + opt.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll(":", "") + "</option>";
+                });
+                return result;
+            }
+        }
+
+        static debug = false;
+
+        static matches(item) {
+            const result = this.#matches(item);
+            if (this.debug) console.log("Matches", result);
+            return result;
+        }
+
+        static #matches(item) {
+            this.debug = item.name.includes("Thanat");
+            if (this.debug) console.log(item);
+            const suchfeldWert = WoD.getSuchfeld().value.trim();
+            if (suchfeldWert !== "") {
+                const matching = "^" + suchfeldWert.replaceAll("*", ".*") + "$";
+                if (!item.name.match(matching)) return false;
+            }
+            for (var i = 0, l = this.QueryTable.validators.length; i < l; i++) {
+                const currentValidator = this.QueryTable.validators[i];
+                if (!currentValidator) continue;
+                const currentValidatorResult = currentValidator(item) || false;
+                const negatorWish = this.QueryTable.negators[i] || false;
+                if (this.debug) console.log("Matches2", currentValidatorResult, negatorWish);
+                if (currentValidatorResult === negatorWish) return false;
+            }
+            return true;
+        }
+
     }
 
     class ItemParser {
