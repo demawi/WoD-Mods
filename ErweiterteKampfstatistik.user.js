@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18.3
+// @version        0.18.4
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -23,8 +23,8 @@
     'use strict';
 
     class Mod {
-        static version = "0.18.3";
-        static stand = "15.11.2024";
+        static version = "0.18.4";
+        static stand = "17.11.2024";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
         static currentReportDataVersion = 4;
 
@@ -287,8 +287,8 @@
                     const finalAreaNr = areaNr;
 
                     const rounds = area.rounds;
-                    for (var i = 0, l = rounds.length; i < l; i++) {
-                        var round = rounds[i];
+                    for (var roundNr = 0, l = rounds.length; roundNr < l; roundNr++) {
+                        var round = rounds[roundNr];
                         round.actions.runde.forEach(action => {
                             var isHero = action.unit.id.isHero;
                             // console.log(myStats);
@@ -333,15 +333,19 @@
                                             } else if (curFilter.endsWith("unit")) {
                                                 subStats = getStat(curStats, queryFilter, actionTarget.unit.id.name, "sub", actionTarget.unit.id.isHero ? "herounit" : null);
                                                 if (!subStats) return false;
-                                                subStats.unit = actionTarget.unit;
-                                                subStats.title = actionTarget.unit.typeRef;
-                                                if (actionTarget.unit.id.index) {
+                                                const unit = actionTarget.unit;
+                                                subStats.unit = unit;
+                                                subStats.title = unit.typeRef;
+
+                                                // anhand des Names wird eh schon aufgeschlüsselt, hier benötigen wir die restlichen Informationen
+                                                const id = finalLevelNr + "_" + finalAreaNr + "_" + unit.index || 1;
+                                                if (id) {
                                                     var unitCount = subStats.unitCount;
                                                     if (!unitCount) {
                                                         unitCount = {};
                                                         subStats.unitCount = unitCount;
                                                     }
-                                                    unitCount[actionTarget.unit.id.index] = true;
+                                                    unitCount[id] = true;
                                                 }
                                             } else if (curFilter.endsWith("attackType")) {
                                                 subStats = getStat(curStats, queryFilter, actionTarget.fertigkeit.type, "sub", "attackType");
@@ -1201,7 +1205,12 @@
                     }
                     var unitCount = dmgStat.unitCount;
                     if (unitCount) {
-                        unitCount = " (" + Object.keys(unitCount).length + ")";
+                        unitCount = Object.keys(unitCount).length;
+                        if (unitCount > 0) {
+                            unitCount = " (" + unitCount + ")";
+                        } else {
+                            unitCount = "";
+                        }
                     } else {
                         unitCount = "";
                     }
@@ -1336,10 +1345,6 @@
                     console.log(table);
                     navigator.clipboard.writeText(util.toBBCode(table));
                 }
-
-
-
-
 
                 this.anchor.appendChild(table);
                 if (this.statView.query.side && this.statView.query.type) {
@@ -1638,7 +1643,7 @@
                     }
                 });
                 collapsible.style.paddingLeft = "10px";
-                th.append(collapsible);
+                //th.append(collapsible);
 
                 return th;
             }
