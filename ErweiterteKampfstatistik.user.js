@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18.4
+// @version        0.18.5
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -23,7 +23,7 @@
     'use strict';
 
     class Mod {
-        static version = "0.18.4";
+        static version = "0.18.5";
         static stand = "17.11.2024";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
         static currentReportDataVersion = 4;
@@ -1278,16 +1278,49 @@
                 table.style.minWidth = "600px";
                 table.className = "content_table";
                 table.border = 1;
+                const thead = document.createElement("thead");
+                table.append(thead);
                 const tbody = document.createElement("tbody");
                 table.append(tbody);
-                const headerTr = this.createHeader(tbody);
-                headerTr.style.position = "relative";
+
+                const thisObject = this;
+
+                function fillHead(thead) {
+                    const outerTR = document.createElement("tr");
+                    outerTR.classList.add("row0");
+                    thead.append(outerTR);
+                    const tableWrapTD = document.createElement("td");
+                    tableWrapTD.colSpan = 100;
+                    outerTR.append(tableWrapTD);
+                    const headerTable = document.createElement("table");
+                    headerTable.style.width = "100%";
+                    tableWrapTD.append(headerTable);
+
+
+                    const headerTableTr = document.createElement("tr");
+                    headerTable.append(headerTableTr);
+                    const headerTh = thisObject.createHeader();
+                    headerTableTr.append(headerTh);
+
+                    const right = document.createElement("th");
+                    right.style.position = "relative";
+                    headerTableTr.append(right);
+
+                    return right;
+                }
+
+                const rightTH = fillHead(thead);
+                rightTH.style.textAlign = "right";
+                rightTH.style.verticalAlign = "top";
+
 
                 const infoHeader = document.createElement("span");
-                headerTr.append(infoHeader);
-                infoHeader.style.position = "absolute";
-                infoHeader.style.right = "7px";
-                infoHeader.style.top = "7px";
+                infoHeader.style.whiteSpace = "nowrap";
+                infoHeader.style.marginRight = "5px";
+                rightTH.append(infoHeader);
+                //infoHeader.style.position = "absolute";
+                //infoHeader.style.right = "7px";
+                //infoHeader.style.top = "7px";
                 infoHeader.innerHTML += "<a target='_blank' href='" + Mod.forumLink + "' style='font-size:12px;color:darkgrey;' class='bbignoreColor' onmouseover=\"return wodToolTip(this, 'Hier gehts zum Foren-Post der Anwendung')\">" + Mod.version + " </a>";
 
                 // 🔗📌📍
@@ -1439,18 +1472,13 @@
                 return result;
             }
 
-            createHeader(curTable) {
-                var tr = document.createElement("tr");
-                tr.className = "row0";
-                curTable.append(tr);
-
+            createHeader() {
                 const thisObject = this;
                 const query = this.statView.query;
                 const th = document.createElement("th");
                 th.colSpan = 100;
                 th.style.textAlign = "left";
                 th.className = "row0";
-                tr.append(th);
 
                 // Helden - Monster
                 const sideElement = document.createElement("span");
@@ -1523,6 +1551,7 @@
                         const curQueryFilter = query.filter[i];
                         const finalI = i;
                         const containerElement = document.createElement("span");
+                        containerElement.style.whiteSpace = "nowrap";
                         const labelElement = document.createElement("a");
                         const selectInput = document.createElement("select");
                         const allPossibleSelections = thisObject.getSelectionsFor(curQueryFilter, curStatResult);
