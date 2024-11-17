@@ -147,9 +147,9 @@
             if (searchContainer) {
                 const searchContainerTitle = searchContainer.children[0].children[0].children[0];
 
-                const [itemDBSearch] = util.createCheckbox(searchContainerTitle, "itemDB", "Item-DB");
+                const [itemDBSearch] = util.createCheckboxInTd(searchContainerTitle, "itemDB", "Item-DB");
 
-                const [missingSearch, missingSearchLabel] = util.createCheckbox(searchContainerTitle, "missingSearch", "");
+                const [missingSearch, missingSearchLabel] = util.createCheckboxInTd(searchContainerTitle, "missingSearch", "");
 
                 async function updateMissingButton() {
                     const allItems = await Storage.ensureItemSources();
@@ -194,7 +194,7 @@
                 };
 
                 function changeContainer() {
-                    SearchDomains.fetchDataForAuswahllisten();
+                    ItemSearch.SearchDomains.fetchDataForAuswahllisten();
                     if (itemDBSearch.checked || missingSearch.checked) {
                         buttonContainer.removeChild(buttonContainer.children[0]);
                         buttonContainer.append(mySearchButton);
@@ -334,9 +334,9 @@
                 toHTML: function (obj) {
                     if (obj.typ === "alle") return "alle";
                     if (obj.typ === "nur") {
-                        return obj.def.map(a => SearchDomains.KLASSEN[a]).join(", ");
+                        return obj.def.map(a => ItemSearch.SearchDomains.KLASSEN[a]).join(", ");
                     }
-                    return Object.keys(SearchDomains.KLASSEN).filter(a => !obj.def.includes(a)).map(a => SearchDomains.KLASSEN[a]).join(", ");
+                    return Object.keys(ItemSearch.SearchDomains.KLASSEN).filter(a => !obj.def.includes(a)).map(a => ItemSearch.SearchDomains.KLASSEN[a]).join(", ");
                 }
             }
             static "Stufe" = {
@@ -393,6 +393,16 @@
             static "Fertigkeit (Betroffener)" = {
                 pfad: "effects.target.fertigkeit",
                 when: "Bonus - Fertigkeit",
+                toHTML: AutoColumns.default2SpaltenOutput
+            }
+            static "Talentklasse (Besitzer)" = {
+                pfad: "effects.owner.talentklasse",
+                when: "Bonus - Talentklasse",
+                toHTML: AutoColumns.default2SpaltenOutput
+            }
+            static "Talentklasse (Betroffener)" = {
+                pfad: "effects.target.talentklasse",
+                when: "Bonus - Talentklasse",
                 toHTML: AutoColumns.default2SpaltenOutput
             }
             static Gegenstandsklasse = {
@@ -572,57 +582,12 @@
     }
 
 
-    class SearchDomains {
-
-        static GEGENSTANDSKLASSEN;
-        static FERTIGKEITEN;
-        static EIGENSCHAFTEN;
-
-        // müssen vorab geholt werden bevor der eigentliche Such-Container ausgebettet wird.
-        static fetchDataForAuswahllisten() {
-            if (!this.GEGENSTANDSKLASSEN) {
-                this.GEGENSTANDSKLASSEN = WoD.getAuswahlliste("item_?item_class");
-                this.FERTIGKEITEN = WoD.getAuswahlliste("item_?any_skill");
-                this.EIGENSCHAFTEN = WoD.getAuswahlliste("item_?bonus_attr");
-            }
-        }
-
-        static KLASSEN = {
-            "Barbar": "Bb",
-            "Barde": "Bd",
-            "Dieb": "Di",
-            "Gaukler": "Ga",
-            "Gelehrter": "Ge",
-            "Gestaltwandler": "Gw",
-            "Gladiator": "Gl",
-            "Hasardeur": "Ha",
-            "Jäger": "Jä",
-            "Klingenmagier": "Km",
-            "Magier": "Ma",
-            "Mönch": "Mo",
-            "Paladin": "Pa",
-            "Priester": "Pr",
-            "Quacksalber": "Qu",
-            "Ritter": "Ri",
-            "Schamane": "Sm",
-            "Schütze": "Sü",
-        }
-        static SCHADENSBONITYP = ["Zusätzlich (weder a noch z)", "Nur bei Anwendung (a)", "Nur wenn schon vorhanden (z)"];
-        static ANGRIFFSARTEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt"];
-        static BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
-        static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
-        static JEGLICHE_HAND = ["Beide Hände", "Waffenhand", "Schildhand", "Einhändig"];
-
-        static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Psychologischer Schaden"];
-    }
-
     class ItemSearch {
 
         static SuchKriterien = class SuchKriterien {
-            static "Klasse" = () => {
-                const span = document.createElement("span");
-                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...Object.keys(SearchDomains.KLASSEN)]);
-                span.append(select1);
+            static "Klasse" = (container) => {
+                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...Object.keys(ItemSearch.SearchDomains.KLASSEN)]);
+                container.append(select1);
                 return {
                     matches: function (item) {
                         const klasse = item?.data?.klasse;
@@ -632,37 +597,29 @@
                         }
                         return !klasse.def.includes(select1.value);
                     },
-                    get: function () {
-                        return span;
-                    }
                 }
             }
 
-            static "Trageort" = () => {
-                const span = document.createElement("span");
-                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...SearchDomains.TRAGEORT]);
-                span.append(select1);
+            static "Trageort" = (container) => {
+                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...ItemSearch.SearchDomains.TRAGEORT]);
+                container.append(select1);
                 return {
                     matches: function (item) {
                         const trageort = item?.data?.trageort
                         if (select1.value === "Jegliche Hand/Hände") {
-                            for (const curTrageort of SearchDomains.JEGLICHE_HAND) {
+                            for (const curTrageort of ItemSearch.SearchDomains.JEGLICHE_HAND) {
                                 if (trageort === curTrageort) return true;
                             }
                             return false;
                         }
                         return trageort === select1.value;
                     },
-                    get: function () {
-                        return span;
-                    }
                 }
             }
 
-            static "Gegenstandsklasse" = () => {
-                const span = document.createElement("span");
-                const select1 = ItemSearch.UI.createSelect(["<Gegenstandsklasse>", ...SearchDomains.GEGENSTANDSKLASSEN]); // GEGENSTANDSKLASSEN
-                span.append(select1);
+            static "Gegenstandsklasse" = (container) => {
+                const select1 = ItemSearch.UI.createSelect(["<Gegenstandsklasse>", ...ItemSearch.SearchDomains.GEGENSTANDSKLASSEN]); // GEGENSTANDSKLASSEN
+                container.append(select1);
                 return {
                     matches: function (item) {
                         if (select1.value === "") return true;
@@ -672,19 +629,15 @@
                         }
                         return false;
                     },
-                    get: function () {
-                        return span;
-                    }
                 }
             }
 
-            static "Stufe" = () => {
-                const span = document.createElement("span");
+            static "Stufe" = (container) => {
                 const textFrom = util.createTextInput("50px");
                 const textTo = util.createText("50px");
-                span.append(textFrom);
-                span.append(util.span(" - "));
-                span.append(textTo);
+                container.append(textFrom);
+                container.append(util.span(" - "));
+                container.append(textTo);
                 return {
                     matches: function (item) {
                         var from = textFrom.value.trim();
@@ -706,26 +659,24 @@
                             return Number(value) >= Number(to);
                         }
                     },
-                    get: function () {
-                        return span;
-                    }
                 }
             }
 
-            static "Bonus - Eigenschaft" = () => this.effects2Kriterium("eigenschaft", ["<Eigenschaft>", ...Object.values(SearchDomains.EIGENSCHAFTEN)])
-            static "Bonus - Fertigkeit" = () => this.effects2Kriterium("fertigkeit", ["<Fertigkeit>", ...Object.values(SearchDomains.FERTIGKEITEN)])
-            static "Bonus - Parade" = () => this.effects2Kriterium("parade", ["<Parade>", ...SearchDomains.ANGRIFFSARTEN])
-            static "Bonus - Angriff" = () => this.effects2Kriterium("angriff", ["<Angriff>", ...SearchDomains.ANGRIFFSARTEN])
-            static "Bonus - Schaden" = function () {
-                const span = document.createElement("span");
-                const select1 = ItemSearch.UI.createSelect(["<Schadensart>", ...SearchDomains.SCHADENSARTEN]);
-                span.append(select1);
-                const select2 = ItemSearch.UI.createSelect(SearchDomains.BESITZER_BETROFFENER);
-                span.append(select2);
-                const select3 = ItemSearch.UI.createSelect(["<Angriffstyp>", ...SearchDomains.ANGRIFFSARTEN]);
-                span.append(select3);
-                const select4 = ItemSearch.UI.createSelect(["<a/z>", ...SearchDomains.SCHADENSBONITYP]);
-                span.append(select4);
+            static "Bonus - Eigenschaft" = (container) => this.effects2Kriterium(container, "eigenschaft", ["<Eigenschaft>", ...Object.values(ItemSearch.SearchDomains.EIGENSCHAFTEN)])
+            static "Bonus - Fertigkeit" = (container) => this.effects2Kriterium(container, "fertigkeit", ["<Fertigkeit>", ...Object.values(ItemSearch.SearchDomains.FERTIGKEITEN)])
+            static "Bonus - Talentklasse" = (container) => this.effects2Kriterium(container, "talentklasse", ["<Talentklasse>", ...ItemSearch.SearchDomains.TALENTKLASSEN])
+
+            static "Bonus - Angriff" = (container) => this.effects2Kriterium(container, "angriff", ["<Angriff>", ...ItemSearch.SearchDomains.ANGRIFFSARTEN])
+            static "Bonus - Parade" = (container) => this.effects2Kriterium(container, "parade", ["<Parade>", ...ItemSearch.SearchDomains.ANGRIFFSARTEN])
+            static "Bonus - Schaden" = function (container) {
+                const select1 = ItemSearch.UI.createSelect(["<Schadensart>", ...ItemSearch.SearchDomains.SCHADENSARTEN]);
+                container.append(select1);
+                const select2 = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
+                container.append(select2);
+                const select3 = ItemSearch.UI.createSelect(["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSARTEN]);
+                container.append(select3);
+                const select4 = ItemSearch.UI.createSelect(["<a/z>", ...ItemSearch.SearchDomains.SCHADENSBONITYP]);
+                container.append(select4);
 
                 return {
                     matches: function (item) {
@@ -752,13 +703,13 @@
                             result.forEach(cur => {
                                 var matches = false;
                                 switch (select4.value) {
-                                    case SearchDomains.SCHADENSBONITYP[0]:
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[0]:
                                         matches = !cur.bonus.includes("(a)") && !cur.attackType.includes("(a)") && !cur.bonus.includes("(z)") && !cur.attackType.includes("(z)");
                                         break;
-                                    case SearchDomains.SCHADENSBONITYP[1]:
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[1]:
                                         matches = cur.bonus.includes("(a)") || cur.attackType.includes("(a)");
                                         break;
-                                    case SearchDomains.SCHADENSBONITYP[2]:
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[2]:
                                         matches = cur.bonus.includes("(z)") || cur.attackType.includes("(z)");
                                         break;
                                 }
@@ -771,18 +722,14 @@
                         }
                         return result.length > 0;
                     },
-                    get: function () {
-                        return span;
-                    }
                 }
             }
 
-            static effects2Kriterium(id, selectArray) {
-                const span = document.createElement("span");
-                const select1 = ItemSearch.UI.createSelect(selectArray);
-                span.append(select1);
-                const select2 = ItemSearch.UI.createSelect(SearchDomains.BESITZER_BETROFFENER);
-                span.append(select2);
+            static effects2Kriterium(container, id, selectArray) {
+                const select1 = ItemSearch.UI.createIntelligentMultiSelect(selectArray);
+                container.append(select1);
+                const select2 = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
+                container.append(select2);
                 return {
                     matches: function (item) {
                         var result = Array();
@@ -795,9 +742,10 @@
                             if (cur) result.push(...cur);
                         }
                         var next = Array();
-                        if (select1.value !== "") {
+                        const selectedOptions = ItemSearch.SuchKriterien.getSelectedOptions(select1);
+                        if (selectedOptions) {
                             result.forEach(cur => {
-                                if (cur.type === select1.value && cur.bonus.includes("+")) {
+                                if (selectedOptions.includes(cur.type) && cur.bonus.includes("+")) {
                                     next.push(cur);
                                 }
                             });
@@ -806,12 +754,62 @@
                         }
                         return result.length > 0;
                     },
-                    get: function () {
-                        return span;
-                    }
+                }
+            }
+
+            static getSelectedOptions(select1) {
+                if (select1.selectedOptions.length > 0 && !(select1.selectedOptions.length === 1 && select1.selectedOptions[0].value === "")) {
+                    return util.getSelectedOptions(select1);
                 }
             }
         }
+
+        static SearchDomains = class {
+
+            static GEGENSTANDSKLASSEN;
+            static FERTIGKEITEN;
+            static EIGENSCHAFTEN;
+            static TALENTKLASSEN;
+
+            // müssen vorab geholt werden bevor der eigentliche Such-Container ausgebettet wird.
+            static fetchDataForAuswahllisten() {
+                if (!this.GEGENSTANDSKLASSEN) {
+                    this.GEGENSTANDSKLASSEN = WoD.getAuswahlliste("item_?item_class");
+                    this.FERTIGKEITEN = WoD.getAuswahlliste("item_?any_skill");
+                    this.EIGENSCHAFTEN = WoD.getAuswahlliste("item_?bonus_attr");
+                    this.TALENTKLASSEN = WoD.getAuswahlliste("item_?any_skillclass");
+                }
+            }
+
+            static KLASSEN = {
+                "Barbar": "Bb",
+                "Barde": "Bd",
+                "Dieb": "Di",
+                "Gaukler": "Ga",
+                "Gelehrter": "Ge",
+                "Gestaltwandler": "Gw",
+                "Gladiator": "Gl",
+                "Hasardeur": "Ha",
+                "Jäger": "Jä",
+                "Klingenmagier": "Km",
+                "Magier": "Ma",
+                "Mönch": "Mo",
+                "Paladin": "Pa",
+                "Priester": "Pr",
+                "Quacksalber": "Qu",
+                "Ritter": "Ri",
+                "Schamane": "Sm",
+                "Schütze": "Sü",
+            }
+            static SCHADENSBONITYP = ["Zusätzlich (weder a noch z)", "Nur bei Anwendung (a)", "Nur wenn schon vorhanden (z)"];
+            static ANGRIFFSARTEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt"];
+            static BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
+            static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
+            static JEGLICHE_HAND = ["Beide Hände", "Waffenhand", "Schildhand", "Einhändig"];
+
+            static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Psychologischer Schaden"];
+        }
+
 
         static QueryTable = class QueryTable {
             static validators = [];
@@ -843,10 +841,12 @@
                 this.hsInput = util.createTextInput("50px");
                 this.frInput = util.createTextInput("50px");
                 const tr = document.createElement("tr");
-                const th = document.createElement("th");
+                const th = document.createElement("td");
                 tr.append(th);
                 th.colSpan = 10;
+                th.style.textAlign = "left";
                 this.thead.append(tr);
+                th.append(util.span("Boniberechnung mit: "))
                 th.append(util.span("HS: "));
                 th.append(this.hsInput);
                 th.append(util.span(" FR: "));
@@ -861,11 +861,17 @@
                 const thisObject = this;
                 const tr = document.createElement("tr");
                 tbody.append(tr);
+                const mainSelectTD = document.createElement("td");
+                mainSelectTD.style.verticalAlign = "top";
                 const select = ItemSearch.UI.createSelect(["<Auswahl>"].concat(Object.keys(ItemSearch.SuchKriterien)));
                 const searchFieldsTD = document.createElement("td");
-                tr.append(select);
+                searchFieldsTD.style.verticalAlign = "top";
+                mainSelectTD.append(select);
+                tr.append(mainSelectTD);
                 tr.append(searchFieldsTD);
-                const [checkbox, label] = util.createCheckbox(tr, "", "Negieren");
+                const [checkbox, checkboxLabel, labelcheckBoxTd] = util.createCheckboxInTd(tr, "", "Negieren");
+                labelcheckBoxTd.style.verticalAlign = "top";
+
                 checkbox.onclick = function () {
                     const myCurIndex = [...tbody.children].indexOf(tr);
                     console.log("set checked", checkbox.checked);
@@ -876,15 +882,14 @@
                 select.onchange = function () {
                     const myCurIndex = [...tbody.children].indexOf(tr);
                     if (select.value === "") {
-                        searchFieldsTD.removeChild(searchFieldsTD.children[0]);
+                        searchFieldsTD.innerHTML = "";
                         delete thisObject.validators[myCurIndex];
                         delete thisObject.validatorTypes[myCurIndex];
                         checkbox.parentElement.hidden = true;
                         thisObject.checkRemove(myCurIndex);
                     } else {
-                        const suche = ItemSearch.SuchKriterien[select.value]();
-                        if (searchFieldsTD.children.length > 0) searchFieldsTD.removeChild(searchFieldsTD.children[0]);
-                        searchFieldsTD.append(suche.get());
+                        searchFieldsTD.innerHTML = "";
+                        const suche = ItemSearch.SuchKriterien[select.value](searchFieldsTD);
                         checkbox.parentElement.hidden = false;
                         thisObject.validators[myCurIndex] = suche.matches;
                         thisObject.validatorTypes[myCurIndex] = select.value;
@@ -912,11 +917,25 @@
         static UI = class UI {
             static createSelect(options) {
                 const result = document.createElement("select");
+                result.style.display = "inline-block";
+                result.style.verticalAlign = "top";
                 options.forEach(opt => {
                     const value = opt.startsWith("<") ? "" : opt.replaceAll(":", "");
                     const autoSelected = opt.startsWith(":") ? "selected" : "";
                     result.innerHTML += "<option value='" + value + "' " + autoSelected + ">" + opt.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll(":", "") + "</option>";
                 });
+                return result;
+            }
+
+            static createIntelligentMultiSelect(options) {
+                const result = this.createSelect(options);
+                result.onclick = function (e) {
+                    if (e.ctrlKey) {
+                        result.multiple = "multiple";
+                    } else if (e.altKey) {
+                        result.multiple = "";
+                    }
+                }
                 return result;
             }
         }
@@ -934,7 +953,7 @@
             if (this.debug) console.log(item);
             const suchfeldWert = WoD.getSuchfeld().value.trim();
             if (suchfeldWert !== "") {
-                const matching = "^" + suchfeldWert.replaceAll("*", ".*") + "$";
+                const matching = "^(" + suchfeldWert.replaceAll("*", ".*") + ")$";
                 if (!item.name.match(matching)) return false;
             }
             for (var i = 0, l = this.QueryTable.validators.length; i < l; i++) {
@@ -1046,6 +1065,16 @@
             var currentBoniContext;
             var tableType;
             var ownerType;
+
+            function getBoniContext(ctxName) {
+                var result = currentOwnerContext[ctxName];
+                if (!result) {
+                    result = [];
+                    currentOwnerContext[ctxName] = result;
+                }
+                return result;
+            }
+
             for (var i = 0, l = div.children.length; i < l; i++) {
                 const cur = div.children[i];
                 if (cur.tagName === "H2") {
@@ -1057,12 +1086,7 @@
                     }
                 } else if (cur.tagName === "H3") {
                     tableType = this.getType(cur.textContent.trim());
-                    var newContext = currentOwnerContext[tableType];
-                    if (!newContext) {
-                        newContext = [];
-                        currentOwnerContext[tableType] = newContext;
-                    }
-                    currentBoniContext = newContext;
+                    currentBoniContext = getBoniContext(tableType);
                 } else if (cur.className === "content_table") {
                     const tableTRs = cur.querySelectorAll('tr.row0, tr.row1');
                     switch (tableType) {
@@ -1081,7 +1105,6 @@
                             break;
                         case "eigenschaft":
                         case "angriff":
-                        case "fertigkeit":
                         case "parade":
                         case "wirkung":
                         case "beute": // 2-Spalten-Standard
@@ -1092,6 +1115,25 @@
                                     dauer: b.children.length > 2 ? b.children[2].textContent.trim() : undefined,
                                     bemerkung: b.children.length > 3 ? b.children[3].textContent.trim() : undefined,
                                 }
+                            });
+                            break;
+                        case "fertigkeit":
+                            tableTRs.forEach(b => {
+                                var type = b.children[0].textContent.trim();
+                                var targetContext;
+                                if (type.startsWith("alle Fertigkeiten der Klasse")) {
+                                    targetContext = getBoniContext("talentklasse");
+                                    type = type.substring(29);
+                                    console.log("Talentklasse: '" + type + "'");
+                                } else {
+                                    targetContext = currentBoniContext;
+                                }
+                                targetContext.push({
+                                    type: type,
+                                    bonus: b.children[1].textContent.trim(),
+                                    dauer: b.children.length > 2 ? b.children[2].textContent.trim() : undefined,
+                                    bemerkung: b.children.length > 3 ? b.children[3].textContent.trim() : undefined,
+                                });
                             });
                             break;
                         default:
@@ -1365,6 +1407,16 @@
             }
         }
 
+        static getSelectedOptions(selectInput) {
+            const result = [];
+            var options = selectInput.selectedOptions;
+            for (var i = 0, l = options.length; i < l; i++) {
+                const opt = options[i];
+                result.push(opt.value || opt.text);
+            }
+            return result;
+        }
+
         static span(text) {
             const result = document.createElement("span");
             result.innerHTML = text;
@@ -1377,7 +1429,7 @@
             return span.textContent.trim();
         }
 
-        static createCheckbox(parent, id, labelTitle) {
+        static createCheckboxInTd(parent, id, labelTitle) {
             const result = document.createElement("input");
             result.type = "checkbox";
             result.id = id;
@@ -1388,7 +1440,7 @@
             label.innerText = labelTitle;
             td.append(label);
             parent.append(td);
-            return [result, label];
+            return [result, label, td];
         }
 
         static createTextInput(width) {
