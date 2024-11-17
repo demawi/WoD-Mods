@@ -108,7 +108,6 @@
             });
 
             function buttonReplaceWithElement(element, text, href) {
-                console.log("ButtonReplace", element, text);
                 if (element) {
                     const newButton = document.createElement("a");
                     newButton.classList = element.classList;
