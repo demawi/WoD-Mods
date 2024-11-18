@@ -761,6 +761,8 @@
                 container.append(select1);
                 const select2 = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
                 container.append(select2);
+                const [checkBox, label, span] = util.createCheckBoxInSpan("debuff_" + id, "Debuff");
+                container.append(span);
                 return {
                     matches: function (item) {
                         if (select1.value === "" && select2.value === "") return true;
@@ -777,7 +779,7 @@
                         const selectedOptions = ItemSearch.SuchKriterien.getSelectedOptions(select1);
                         if (selectedOptions) {
                             result.forEach(cur => {
-                                if (selectedOptions.includes(cur.type) && cur.bonus.includes("+")) {
+                                if (selectedOptions.includes(cur.type) && (!checkBox.checked && cur.bonus.includes("+") || checkBox.checked && cur.bonus.includes("-"))) {
                                     next.push(cur);
                                 }
                             });
@@ -1477,6 +1479,19 @@
             td.append(label);
             parent.append(td);
             return [result, label, td];
+        }
+
+        static createCheckBoxInSpan(id, labelTitle) {
+            const result = document.createElement("input");
+            result.type = "checkbox";
+            result.id = id;
+            var span = document.createElement("span");
+            span.append(result);
+            const label = document.createElement("label");
+            label.for = id;
+            label.innerText = labelTitle;
+            span.append(label);
+            return [result, label, span];
         }
 
         static createTextInput(width) {

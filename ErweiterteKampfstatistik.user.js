@@ -1197,12 +1197,14 @@
                                 var curLevel;
                                 var curArea;
                                 var actionTR;
+                                var curRound;
                                 statResult.actions.forEach(action => {
                                     var border = "";
                                     if (curLevel !== action.level || curArea !== action.area) {
                                         var style = "";
                                         curLevel = action.level;
                                         curArea = action.area;
+                                        curRound = null;
                                         tbody.innerHTML += "<tr><td colspan=100 style='font-style: italic;padding-top:5px;color:lightgray;'>Level " + curLevel + " Kampf " + curArea + "</td></tr>";
                                         tbody.innerHTML += "<tr colspan=100 style='border-top: 1px solid black;" + style + "font-style: italic;height:10px;'><td></td></tr>";
                                     } else {
@@ -1213,7 +1215,10 @@
                                     actionTR.innerHTML = action.src;
                                     const roundTd = document.createElement("td");
                                     roundTd.style.width = "1px";
-                                    roundTd.innerHTML = "R" + action.round;
+                                    if (curRound !== action.round) {
+                                        roundTd.innerHTML = "R" + action.round;
+                                        curRound = action.round;
+                                    }
                                     roundTd.style.color = "lightgray";
                                     roundTd.style.fontStyle = "italic";
                                     actionTR.insertBefore(roundTd, actionTR.children[0]);
