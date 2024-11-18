@@ -1049,10 +1049,11 @@
                 const mitVorzeichen = this.mitVorzeichen;
                 const Column = Viewer.Column;
                 const isDefense = statView.query.type === "defense";
-                this.columns.push(new Column("Aktionen", center("Aktionen"), dmgStat => center(dmgStat.actions.length)));
                 if (isDefense) {
+                    this.columns.push(new Column("Verteidigungs Aktionen", center("Verteidigungs<br>Aktionen"), dmgStat => center(dmgStat.actions.length)));
                     this.columns.push(new Column("Erfolgreich", center("Erfolgreich<br>verteidigt"), dmgStat => center(dmgStat.result[0] + ":" + this.gesamtErfolge(dmgStat))));
                 } else {
+                    this.columns.push(new Column("Angriffs Aktionen", center("Angriffs<br>Aktionen"), dmgStat => center(dmgStat.actions.length)));
                     this.columns.push(new Column("Erfolgreich", center("Erfolgreich<br>angegriffen"), dmgStat => center(this.gesamtErfolge(dmgStat) + ":" + dmgStat.result[0])));
                 }
                 this.columns.push(new Column("Erfolge", center("normal / gut / krit"), dmgStat => this.center(dmgStat.result[1] + " / " + dmgStat.result[2] + " / " + dmgStat.result[3])));
@@ -1174,25 +1175,37 @@
                     line.onclick = function () {
                         opened = !opened;
                         const myIndex = util.getMyIndex(line);
-                        if (opened) {
-                            const tr = document.createElement("tr");
-                            addTR = tr;
-                            const td = document.createElement("td");
-                            td.style.backgroundColor = "#606060";
-                            td.colSpan = 100;
-                            tr.append(td);
-                            const table = document.createElement("table");
-                            table.style.width = "100%";
-                            td.append(table);
-                            util.addNode(line.parentElement, tr, myIndex + 1);
 
-                            statResult.actions.forEach(action => {
-                                table.innerHTML += action.src;
-                            })
+                        if (opened) {
+                            const openFunction = async function () {
+                                const tr = document.createElement("tr");
+                                addTR = tr;
+                                const td = document.createElement("td");
+                                td.style.backgroundColor = "#606060";
+                                td.colSpan = 100;
+                                tr.append(td);
+                                const table = document.createElement("table");
+                                table.style.width = "100%";
+                                td.append(table);
+                                util.addNode(line.parentElement, tr, myIndex + 1);
+
+                                statResult.actions.forEach(action => {
+                                    table.innerHTML += action.src;
+                                })
+                                line.style.cursor = "pointer";
+                            }
+                            if (statResult.actions.length > 150) {
+                                line.style.cursor = "wait";
+                                setTimeout(openFunction, 50);
+                            } else {
+                                openFunction();
+                            }
+
                         } else {
                             addTR.parentElement.removeChild(addTR);
                             addTR = null;
                         }
+
                     }
                 }
 
