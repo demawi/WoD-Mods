@@ -23,10 +23,10 @@
     'use strict';
 
     class Mod {
-        static version = "0.18.5";
+        static version = "0.19";
         static stand = "17.11.2024";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
-        static currentReportDataVersion = 4;
+        static currentReportDataVersion = 5;
 
         static thisReport;
         static thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
@@ -443,6 +443,7 @@
 
     }
 
+    // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
     class ReportParser {
         static currentRound;
@@ -548,9 +549,9 @@
                         // currently nothing to do
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
-                            vorrunde.push(ReportParser.Action(null, currentAction.children[1], currentAction.children[2]));
+                            vorrunde.push(ReportParser.Action(currentAction, null, currentAction.children[1], currentAction.children[2]));
                         } else { // Runden-Aktion
-                            runde.push(ReportParser.Action(currentAction.children[0], currentAction.children[1], currentAction.children[2]));
+                            runde.push(ReportParser.Action(currentAction, currentAction.children[0], currentAction.children[1], currentAction.children[2]));
                         }
                     }
                 }
@@ -860,7 +861,7 @@
             }
         }
 
-        static Action(initiative, action, target) {
+        static Action(actionTR, initiative, action, target) {
             var actionText = action.innerText;
             var who;
             var fertigkeit;
@@ -985,12 +986,13 @@
                 }
             }
 
-            //console.log(action);
+            //console.log(actionTR);
             var result = {
                 name: unit.id.name, // nur fürs Testen
                 unit: unit,
                 fertigkeit: fertigkeit,
                 targets: targets,
+                src: actionTR.outerHTML,
             };
             if (!unit.isHero) {
                 //console.log(action, result);
@@ -1153,19 +1155,45 @@
                 }
                 table.append(header);
 
-                function addLine(statView, prefix, dmgStat) {
+                function addLine(statView, prefix, statResult) {
                     const line = document.createElement("tr");
                     switcher = !switcher;
                     line.className = switcher ? "row0" : "row1";
-                    line.innerHTML += convertPrefix(prefix, dmgStat);
+                    line.innerHTML += convertPrefix(prefix, statResult);
                     for (const column of tableView.columns) {
-                        const columnResult = column.cellRenderer(dmgStat);
+                        const columnResult = column.cellRenderer(statResult);
                         if (!columnResult.startsWith("<td")) {
                             throw error("Zelleneintrag muss immer mit <td anfangen!", column.id, columnResult);
                         }
                         line.innerHTML += columnResult;
                     }
                     table.append(line);
+                    line.style.cursor = "pointer";
+                    var opened = false;
+                    var addTR;
+                    line.onclick = function () {
+                        opened = !opened;
+                        const myIndex = util.getMyIndex(line);
+                        if (opened) {
+                            const tr = document.createElement("tr");
+                            addTR = tr;
+                            const td = document.createElement("td");
+                            td.style.backgroundColor = "#606060";
+                            td.colSpan = 100;
+                            tr.append(td);
+                            const table = document.createElement("table");
+                            table.style.width = "100%";
+                            td.append(table);
+                            util.addNode(line.parentElement, tr, myIndex + 1);
+
+                            statResult.actions.forEach(action => {
+                                table.innerHTML += action.src;
+                            })
+                        } else {
+                            addTR.parentElement.removeChild(addTR);
+                            addTR = null;
+                        }
+                    }
                 }
 
                 function addLine2(statView, id, statResult) {
@@ -1736,17 +1764,16 @@
             var thisData = this[referenceMapId];
             if (!thisData) {
                 thisData = await GM.getValue(referenceMapId, {});
+                if (!thisData) thisData = {};
                 this[referenceMapId] = thisData;
             }
-            //console.log("Storage Current", referenceMapId, thisData);
             if (data) {
                 thisData[id] = metaData;
                 await GM.setValue(referenceMapId, thisData);
             } else { // delete
                 if (thisData[id]) {
                     delete thisData[id];
-                    //console.log("delete value");
-                    await GM.deleteValue(referenceMapId);
+                    await GM.setValue(referenceMapId, thisData);
                 }
             }
             await GM.setValue(id, data);
@@ -1815,6 +1842,15 @@
                 result.push(fn(list[i]));
             }
             return result;
+        }
+
+        static addNode(parent, element, index) {
+            if (!(index > -1) || index >= parent.children.length) parent.append(element);
+            parent.insertBefore(element, parent.children[index]);
+        }
+
+        static getMyIndex(element) {
+            return Array.prototype.indexOf.call(element.parentElement.children, element);
         }
 
         static arraySearch(array, predicate) {
