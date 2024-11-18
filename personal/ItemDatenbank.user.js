@@ -225,11 +225,46 @@
                     changeContainer();
                 };
 
+                function getItemValue(obj, columnDef, pfadArray) {
+                    if (!pfadArray) pfadArray = columnDef.pfadArray;
+                    if (!obj) return "";
+                    if (pfadArray.length === 0) {
+                        if (columnDef.toHTML) return columnDef.toHTML(obj);
+                        if (typeof obj === "string") return obj;
+                        return JSON.stringify(obj);
+                    }
+                    return getItemValue(obj[pfadArray[0]], columnDef, pfadArray.slice(1));
+                }
+
+                var sortOrderColumnDef;
+
+                async function getItemResult() {
+                    var items;
+                    if (itemDBSearch.checked) {
+                        items = await Storage.ensureItemDB(true);
+                    } else {
+                        items = await Storage.ensureItemSources(true);
+                    }
+                    const itemResult = Array();
+                    for (const [itemName, item] of Object.entries(items)) {
+                        if (missingSearch.checked && !item.details || missingSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && ItemSearch.matches(item)) {
+                            itemResult.push(item);
+                        }
+                    }
+                    if (sortOrderColumnDef) {
+                        itemResult.sort((a, b) => {
+                            return getItemValue(a, sortOrderColumnDef).localeCompare(getItemValue(b, sortOrderColumnDef));
+                        })
+                    }
+                    return itemResult;
+                }
+
                 const updateResultTable = async function () {
                     // Search and display result
                     if (resultContainer.children.length > 0) {
                         resultContainer.removeChild(resultContainer.children[0]);
                     }
+                    const itemResults = await getItemResult()
 
                     updateMissingButton();
                     const table = document.createElement("table");
@@ -242,75 +277,64 @@
                     const tbody = document.createElement("tbody");
                     table.append(tbody);
                     resultContainer.append(table);
-                    headTR.innerHTML += "<th></th><th>Gegenstand</th>";
+                    headTR.innerHTML += "<th></th><th>Gegenstand (" + itemResults.length + ")</th>";
 
                     var columns;
                     if (itemDBSearch.checked) {
                         columns = AutoColumns.getAutoColumns();
-                        for (const column of Object.keys(columns)) {
-                            headTR.innerHTML += "<th>" + column + "</th>";
+                        for (const [columnTitle, columnDef] of Object.entries(columns)) {
+                            const columnHead = document.createElement("th");
+                            headTR.append(columnHead);
+                            columnHead.innerHTML = columnTitle;
+                            columnHead.style.cursor = "pointer";
+                            columnHead.onclick = function () {
+                                sortOrderColumnDef = columnDef;
+                                updateResultTable();
+                            }
                         }
                     } else {
                         columns = Array();
                     }
 
-                    function getItemValue(obj, pfadArray, toHTML, lastHeader) {
-                        //console.log("getItemValue", obj, pfadArray);
-                        if (!obj) return "";
-                        if (pfadArray.length === 0) {
-                            if (toHTML) return toHTML(obj);
-                            if (typeof obj === "string") return obj;
-                            return JSON.stringify(obj);
-                        }
-                        return getItemValue(obj[pfadArray[0]], pfadArray.slice(1), toHTML, pfadArray[0]);
-                    }
-
                     var i = 1;
                     var switcher = false;
-                    var items;
-                    if (itemDBSearch.checked) {
-                        items = await Storage.ensureItemDB(true);
-                    } else {
-                        items = await Storage.ensureItemSources(true);
-                    }
-                    for (const [itemName, item] of Object.entries(items)) {
-                        if (missingSearch.checked && !item.details || missingSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && ItemSearch.matches(item)) {
-                            switcher = !switcher;
-                            const tr = document.createElement("tr");
-                            tr.className = "row" + (switcher ? "0" : "1");
-                            tbody.append(tr);
-                            var td = document.createElement("td");
+
+                    for (const item of itemResults) {
+                        switcher = !switcher;
+                        const tr = document.createElement("tr");
+                        tr.className = "row" + (switcher ? "0" : "1");
+                        tbody.append(tr);
+                        var td = document.createElement("td");
+                        tr.append(td);
+                        td.innerHTML = "" + i;
+                        td = document.createElement("td");
+                        tr.append(td);
+
+                        for (const [title, columnDef] of Object.entries(columns)) {
+                            const td = document.createElement("td");
+                            td.innerHTML = getItemValue(item, columnDef);
                             tr.append(td);
-                            td.innerHTML = "" + i;
-                            td = document.createElement("td");
-                            tr.append(td);
-
-                            for (const [title, columnDef] of Object.entries(columns)) {
-                                const td = document.createElement("td");
-                                td.innerHTML = getItemValue(item, columnDef.pfadArray, columnDef.toHTML);
-                                tr.append(td);
-                            }
-
-                            const href = document.createElement("a");
-                            const url = "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURI(itemName);
-                            href.href = url;
-                            href.target = "ItemView";
-                            href.innerHTML = itemName;
-
-                            if (itemDBSearch.checked) {
-                                href.onclick = function () {
-                                    return wo(url + "&IS_POPUP=1");
-                                }
-                            } else {
-                                href.onclick = function () {
-                                    href.parentElement.removeChild(href);
-                                    //return wo(url + "&IS_POPUP=1");
-                                }
-                            }
-
-                            td.append(href);
-                            i++;
                         }
+
+                        const href = document.createElement("a");
+                        const url = "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURI(item.name);
+                        href.href = url;
+                        href.target = "ItemView";
+                        href.innerHTML = item.name;
+
+                        if (itemDBSearch.checked) {
+                            href.onclick = function () {
+                                return wo(url + "&IS_POPUP=1");
+                            }
+                        } else {
+                            href.onclick = function () {
+                                href.parentElement.removeChild(href);
+                                //return wo(url + "&IS_POPUP=1");
+                            }
+                        }
+
+                        td.append(href);
+                        i++;
                     }
                 }
                 mySearchButton.onclick = updateResultTable;
@@ -388,12 +412,12 @@
             static "Fertigkeit (Besitzer)" = {
                 pfad: "effects.owner.fertigkeit",
                 when: "Bonus - Fertigkeit",
-                toHTML: AutoColumns.default2SpaltenOutput
+                toHTML: AutoColumns.default2SpaltenOutputWithLink(a => WoD.getLinkForFertigkeit(a)),
             }
             static "Fertigkeit (Betroffener)" = {
                 pfad: "effects.target.fertigkeit",
                 when: "Bonus - Fertigkeit",
-                toHTML: AutoColumns.default2SpaltenOutput
+                toHTML: AutoColumns.default2SpaltenOutputWithLink(a => WoD.getLinkForFertigkeit(a)),
             }
             static "Talentklasse (Besitzer)" = {
                 pfad: "effects.owner.talentklasse",
@@ -405,9 +429,9 @@
                 when: "Bonus - Talentklasse",
                 toHTML: AutoColumns.default2SpaltenOutput
             }
-            static Gegenstandsklasse = {
+            static "Gegenstandsklasse" = {
                 pfad: "data.gegenstandsklassen",
-                notWhen: "Gegenstandsklasse",
+                when: "Gegenstandsklasse",
                 toHTML: function (obj) {
                     return obj.join("<br>");
                 },
@@ -424,7 +448,9 @@
         static getAutoColumns() {
             const result = {};
             for (const [title, def] of Object.entries(this.AutoColumnsDefinition)) {
-                if (!def.notWhen && !def.when || def.notWhen && !this.whenBedingung(def.notWhen) || def.when && this.whenBedingung(def.when)) {
+                const notWhen = def.notWhen;
+                const when = def.when;
+                if (!notWhen && !when || notWhen && !this.whenBedingung(notWhen) || when && this.whenBedingung(when)) {
                     result[title] = {
                         pfadArray: def.pfad.split("."),
                         toHTML: def.toHTML,
@@ -439,9 +465,8 @@
             return text.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
         }
 
-
-        static replaceHSFRMitBerechnung(text) {
-            var result = text.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
+        static replaceHSFRMitBerechnung(bonusText) {
+            var result = bonusText.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
             var hsInput = ItemSearch.QueryTable.getHsInput();
             if (hsInput === "") hsInput = null;
             else hsInput = Number(hsInput);
@@ -449,13 +474,7 @@
             if (frInput === "") frInput = null;
             else frInput = Number(frInput);
 
-            var nextResult = Array();
-            result.split("<br>").forEach(a => {
-                const boni = a.split(":"); // Name, Wert
-                nextResult.push(boni[0] + ": " + this.bonusAusrechnen(boni[1], hsInput, frInput));
-            });
-            //console.log("Ausrechnen", result, nextResult);
-            return nextResult.join("<br>");
+            return this.bonusAusrechnen(result, hsInput, frInput);
         }
 
         static bonusAusrechnen(bonus, hsWert, frWert) {
@@ -561,22 +580,31 @@
             return result;
         }
 
-        static default2SpaltenOutput(obj) {
+        static default2SpaltenOutput(obj, linkFn) {
             var result = "";
             obj.forEach(parade => {
                 if (result.length > 0) result += "<br>";
-                result += parade.type + ": " + parade.bonus;
+                const bonus = AutoColumns.replaceHSFRMitBerechnung(parade.bonus);
+                console.log("GegBonus", parade.bonus, bonus);
+                result += (linkFn && linkFn(parade.type) || parade.type) + ": " + bonus + (parade.dauer ? " (" + parade.dauer + (parade.bemerkung ? "/" + parade.bemerkung : "") + ")" : "");
             });
-            return AutoColumns.replaceHSFRMitBerechnung(result);
+            return result;
+        }
+
+        static default2SpaltenOutputWithLink(linkFn) {
+            return obj => {
+                return this.default2SpaltenOutput(obj, linkFn);
+            }
         }
 
         static default3SpaltenOutput(obj) {
             var result = "";
             obj.forEach(dmg => {
                 if (result.length > 0) result += "<br>";
+                const bonus = AutoColumns.replaceHSFR(dmg.bonus);
                 result += dmg.damageType + "(" + dmg.attackType + "): " + dmg.bonus;
             });
-            return AutoColumns.replaceHSFR(result);
+            return result;
         }
 
     }
@@ -590,6 +618,7 @@
                 container.append(select1);
                 return {
                     matches: function (item) {
+                        if (select1.value === "") return true;
                         const klasse = item?.data?.klasse;
                         if (!klasse || klasse.typ === "alle") return true;
                         if (klasse.typ === "nur") {
@@ -605,6 +634,7 @@
                 container.append(select1);
                 return {
                     matches: function (item) {
+                        if (select1.value === "") return true;
                         const trageort = item?.data?.trageort
                         if (select1.value === "Jegliche Hand/Hände") {
                             for (const curTrageort of ItemSearch.SearchDomains.JEGLICHE_HAND) {
@@ -634,7 +664,7 @@
 
             static "Stufe" = (container) => {
                 const textFrom = util.createTextInput("50px");
-                const textTo = util.createText("50px");
+                const textTo = util.createTextInput("50px");
                 container.append(textFrom);
                 container.append(util.span(" - "));
                 container.append(textTo);
@@ -680,6 +710,7 @@
 
                 return {
                     matches: function (item) {
+                        if (select1.value === "" && select2.value === "" && select3.value === "" && select4.value === "") return true;
                         var result = Array();
                         if (select2.value === "Besitzer" || select2.value === "") {
                             const cur = item.effects?.owner?.schaden;
@@ -732,6 +763,7 @@
                 container.append(select2);
                 return {
                     matches: function (item) {
+                        if (select1.value === "" && select2.value === "") return true;
                         var result = Array();
                         if (select2.value === "Besitzer" || select2.value === "") {
                             const cur = item.effects?.owner?.[id];
@@ -891,14 +923,14 @@
                         searchFieldsTD.innerHTML = "";
                         const suche = ItemSearch.SuchKriterien[select.value](searchFieldsTD);
                         checkbox.parentElement.hidden = false;
-                        thisObject.validators[myCurIndex] = suche.matches;
+                        suche.name = select.value;
+                        thisObject.validators[myCurIndex] = suche;
                         thisObject.validatorTypes[myCurIndex] = select.value;
                         console.log("test", tbody.children.length, myCurIndex);
                         if (tbody.children.length <= myCurIndex + 1) {
                             thisObject.createAuswahl(myCurIndex + 1);
                         }
                     }
-                    console.log("Kriterien", thisObject.validators);
                 }
             }
 
@@ -949,7 +981,7 @@
         }
 
         static #matches(item) {
-            this.debug = item.name.includes("Thanat");
+            this.debug = item.name.includes("Bleikugeln");
             if (this.debug) console.log(item);
             const suchfeldWert = WoD.getSuchfeld().value.trim();
             if (suchfeldWert !== "") {
@@ -959,7 +991,7 @@
             for (var i = 0, l = this.QueryTable.validators.length; i < l; i++) {
                 const currentValidator = this.QueryTable.validators[i];
                 if (!currentValidator) continue;
-                const currentValidatorResult = currentValidator(item) || false;
+                const currentValidatorResult = currentValidator.matches(item) || false;
                 const negatorWish = this.QueryTable.negators[i] || false;
                 if (this.debug) console.log("Matches2", currentValidatorResult, negatorWish);
                 if (currentValidatorResult === negatorWish) return false;
@@ -1378,6 +1410,10 @@
 
         static getSuchfeld() {
             return this.getSuchInput("item_?name");
+        }
+
+        static getLinkForFertigkeit(fertigkeit) {
+            return "<a href='/wod/spiel/hero/skill.php?name=" + fertigkeit + "&is_popup=1' onclick=\"return wo('/wod/spiel/hero/skill.php?name=Reaktion&session_hero_id=373802&IS_POPUP=1');\">" + fertigkeit + "</a>";
         }
 
         static getSuchInput(nameSchema) {
