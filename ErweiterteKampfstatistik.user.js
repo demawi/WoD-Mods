@@ -1170,7 +1170,9 @@
 
                 function addLine2(statView, id, statResult) {
                     if (id === "") id = "Gesamt";
-                    addLine(statView, id === "" ? "" : (id + ""), statResult, statResult.byDmgType);
+                    if (statResult.actions.length > 0) {
+                        addLine(statView, id === "" ? "" : (id + ""), statResult, statResult.byDmgType);
+                    }
                 }
 
                 function connect(a, b) {
@@ -1181,9 +1183,7 @@
                 function stepper(statView, title, curResult) {
                     if (curResult.sub) {
                         if (title !== "" || statView.showRootStat) {
-                            if (curResult.ruestung > -1) {
-                                addLine2(statView, title, curResult);
-                            }
+                            addLine2(statView, title, curResult);
                         }
                         for (const [id, dmg] of Object.entries(curResult.sub)) {
                             stepper(statView, connect(title, id), dmg);
@@ -1208,7 +1208,7 @@
                     var unitCount = dmgStat.unitCount;
                     if (unitCount) {
                         unitCount = Object.keys(unitCount).length;
-                        if (unitCount > 0) {
+                        if (unitCount > 1) {
                             unitCount = " (" + unitCount + ")";
                         } else {
                             unitCount = "";
