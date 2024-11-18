@@ -291,6 +291,8 @@
                         var round = rounds[roundNr];
                         round.actions.runde.forEach(action => {
                             var isHero = action.unit.id.isHero;
+                            action.level = finalLevelNr;
+                            action.area = finalAreaNr;
                             // console.log(myStats);
                             // a. Wir wollen Helden und deren Offensive: es muss ein Held angreifen.
                             // b. Wir wollen Monster und die Defensive: es muss ein Held angreifen.
@@ -1181,17 +1183,38 @@
                                 const tr = document.createElement("tr");
                                 addTR = tr;
                                 const td = document.createElement("td");
-                                td.style.backgroundColor = "#606060";
+                                td.style.backgroundColor = "#505050";
                                 td.colSpan = 100;
                                 tr.append(td);
                                 const table = document.createElement("table");
                                 table.style.width = "100%";
+                                table.style.borderCollapse = "collapse";
                                 td.append(table);
-                                util.addNode(line.parentElement, tr, myIndex + 1);
+                                const tbody = document.createElement("tbody");
+                                table.append(tbody);
 
+                                var curLevel;
+                                var curArea;
+                                var actionTR;
                                 statResult.actions.forEach(action => {
-                                    table.innerHTML += action.src;
+                                    var border = "";
+                                    if (curLevel !== action.level || curArea !== action.area) {
+                                        var style = "";
+                                        curLevel = action.level;
+                                        curArea = action.area;
+                                        tbody.innerHTML += "<tr><td style='font-style: italic;padding-top:5px;color:lightgray;'>Level " + curLevel + " Kampf " + curArea + "</td></tr>";
+                                        tbody.innerHTML += "<tr style='border-top: 1px solid black;" + style + "font-style: italic;height:10px;'><td></td></tr>";
+                                    } else {
+                                        border = "12px solid transparent";
+                                    }
+                                    actionTR = document.createElement("tr");
+                                    actionTR.innerHTML = action.src;
+                                    actionTR.children[0].style.paddingLeft = "10px";
+                                    actionTR.style.borderTop = border;
+                                    tbody.append(actionTR);
                                 })
+                                actionTR.style.borderBottom = "12px solid transparent";
+                                util.addNode(line.parentElement, tr, myIndex + 1);
                                 line.style.cursor = "pointer";
                             }
                             if (statResult.actions.length > 150) {
