@@ -293,6 +293,7 @@
                             var isHero = action.unit.id.isHero;
                             action.level = finalLevelNr;
                             action.area = finalAreaNr;
+                            action.round = roundNr;
                             // console.log(myStats);
                             // a. Wir wollen Helden und deren Offensive: es muss ein Held angreifen.
                             // b. Wir wollen Monster und die Defensive: es muss ein Held angreifen.
@@ -1202,14 +1203,22 @@
                                         var style = "";
                                         curLevel = action.level;
                                         curArea = action.area;
-                                        tbody.innerHTML += "<tr><td style='font-style: italic;padding-top:5px;color:lightgray;'>Level " + curLevel + " Kampf " + curArea + "</td></tr>";
-                                        tbody.innerHTML += "<tr style='border-top: 1px solid black;" + style + "font-style: italic;height:10px;'><td></td></tr>";
+                                        tbody.innerHTML += "<tr><td colspan=100 style='font-style: italic;padding-top:5px;color:lightgray;'>Level " + curLevel + " Kampf " + curArea + "</td></tr>";
+                                        tbody.innerHTML += "<tr colspan=100 style='border-top: 1px solid black;" + style + "font-style: italic;height:10px;'><td></td></tr>";
                                     } else {
                                         border = "12px solid transparent";
                                     }
+                                    console.log(action);
                                     actionTR = document.createElement("tr");
                                     actionTR.innerHTML = action.src;
+                                    const roundTd = document.createElement("td");
+                                    roundTd.style.width = "1px";
+                                    roundTd.innerHTML = "R" + action.round;
+                                    roundTd.style.color = "lightgray";
+                                    roundTd.style.fontStyle = "italic";
+                                    actionTR.insertBefore(roundTd, actionTR.children[0]);
                                     actionTR.children[0].style.paddingLeft = "10px";
+                                    actionTR.children[0].style.paddingRight = "10px";
                                     actionTR.style.borderTop = border;
                                     tbody.append(actionTR);
                                 })
