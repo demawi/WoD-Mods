@@ -1226,7 +1226,7 @@
                                     actionTR.children[0].style.paddingRight = "10px";
                                     actionTR.style.borderTop = border;
                                     tbody.append(actionTR);
-                                })
+                                });
                                 actionTR.style.borderBottom = "12px solid transparent";
                                 util.addNode(line.parentElement, tr, myIndex + 1);
                                 line.style.cursor = "pointer";
