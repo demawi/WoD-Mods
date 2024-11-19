@@ -42,7 +42,7 @@
                     const reportId = WoD.getReportId();
                     await Storage.loadThisReport(reportId);
 
-                    var levelData = ReportParser.readAndStoreKampfbericht(reportId);
+                    var levelData = ReportParser.readKampfberichtAndStoreIntoReport(document, Mod.thisReport, reportId);
                     if (levelData) {
                         var roundCount = levelData.roundCount;
 
@@ -451,28 +451,28 @@
     class ReportParser {
         static currentRound;
 
-        static readAndStoreKampfbericht(reportId) {
+        static readKampfberichtAndStoreIntoReport(container, report, reportId) {
             var levelNr;
             var levelCount;
             if (reportId.startsWith("schlacht_")) {
                 levelNr = 1;
                 levelCount = 1;
             } else { // Dungeon
-                levelNr = document.getElementsByName("current_level")[0].value;
-                levelCount = document.getElementsByClassName("navigation levels")[0].children.length - 1;
+                levelNr = container.getElementsByName("current_level")[0].value;
+                levelCount = container.getElementsByClassName("navigation levels")[0].children.length - 1;
             }
-            const levelData = this.readKampfbericht();
-            Mod.thisReport.id = reportId;
-            Mod.thisReport.levelCount = levelCount;
-            if (!Mod.thisReport.levelDatas) {
-                Mod.thisReport.levelDatas = [];
+            const levelData = this.readKampfbericht(container);
+            report.id = reportId;
+            report.levelCount = levelCount;
+            if (!report.levelDatas) {
+                report.levelDatas = [];
             }
-            Mod.thisReport.levelDatas[levelNr - 1] = levelData;
+            report.levelDatas[levelNr - 1] = levelData;
             return levelData;
         }
 
-        static readKampfbericht() {
-            var contentTables = document.getElementsByClassName("content_table");
+        static readKampfbericht(container) {
+            var contentTables = container.getElementsByClassName("content_table");
 
             var roundContentTable; // Suche nach dem Table der die eigentliche Runden enthält
             {
@@ -1797,6 +1797,7 @@
             }
         }
     }
+
 
     class Storage {
         // feste Punkte im Storage die auf andere IDs im Storage verweisen
