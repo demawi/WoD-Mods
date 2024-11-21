@@ -1369,12 +1369,22 @@
                 if (changedSomething) await GM.setValue(this.ITEM_SOURCES, this.itemSources);
             }
 
-            if (false) { // migrate to indexed db
+            if (true) { // migrate to indexed db
                 let old_itemSources = await Storage.ensureItemSources();
                 let old_itemDB = await Storage.ensureItemDB();
-                let itemDB = await MyStorage.getItemSourceDB();
+                let itemSourceDB = await MyStorage.getItemSourceDB();
+                let itemDB = await MyStorage.getItemDB();
 
-                async function addToIndexedDb(oldItem) {
+                for (const [itemName, oldItem] of Object.entries(old_itemSources)) {
+                    oldItem.id = oldItem.name.toLocaleLowerCase().trim();
+                    let newItem = await itemSourceDB.getValue(oldItem.id);
+                    if (!newItem) newItem = {};
+                    for (const [key, value] of Object.entries(oldItem)) {
+                        newItem[key] = value;
+                    }
+                    await itemSourceDB.setValue(newItem);
+                }
+                for (const [itemName, oldItem] of Object.entries(old_itemDB)) {
                     oldItem.id = oldItem.name.toLocaleLowerCase().trim();
                     let newItem = await itemDB.getValue(oldItem.id);
                     if (!newItem) newItem = {};
@@ -1382,13 +1392,6 @@
                         newItem[key] = value;
                     }
                     await itemDB.setValue(newItem);
-                }
-
-                for (const [itemName, sourceItem] of Object.entries(old_itemSources)) {
-                    await addToIndexedDb(sourceItem);
-                }
-                for (const [itemName, sourceItem] of Object.entries(old_itemDB)) {
-                    await addToIndexedDb(sourceItem);
                 }
 
             }
@@ -1436,31 +1439,35 @@
     class Storages {
 
         static IndexedDb = class {
-            storageId;
-            connection;
-            key;
-            indizes;
+            dbConnection;
+            objectStores = [];
+            version = 1;
+            dbname;
 
-            static async create(storageId, key, indizes) {
-                const result = new Storages.IndexedDb(storageId, key, indizes);
-                await result.openDB();
-                return result;
+            constructor(dbname) {
+                this.dbname = dbname;
             }
 
-            constructor(storageId, key, indizes) {
-                this.storageId = storageId;
-                this.key = key;
-                this.indizes = indizes;
+            createObjectStore(storageId, key, indizes) {
+                let objectStore = new Storages.ObjectStorage(storageId, key, indizes);
+                objectStore.indexedDb = this;
+                this.objectStores.push(objectStore);
+                return objectStore;
             }
 
-            async openDB() {
+            async getConnection() {
+                if (this.dbConnection) return this.dbConnection;
+                this.dbConnection = await this.connect();
+                return this.dbConnection;
+            }
+
+            async connect() {
                 const thisObject = this;
                 return new Promise((resolve, reject) => {
-                    var request = indexedDB.open(Mod.dbname, 3);
+                    var request = indexedDB.open(thisObject.dbname);
                     request.onsuccess = function (event) {
                         console.log("DBconnect success", event);
-                        thisObject.connection = event.target.result;
-                        resolve();
+                        resolve(event.target.result);
                     }
                     request.onerror = function (event) {
                         console.log("DBconnect error", event);
@@ -1479,10 +1486,65 @@
                 });
             }
 
+            async onupgradeneeded(event) {
+                const dbConnection = event.target.result;
+                this.useDb(dbConnection);
+                if (event.oldVersion === 0) {
+                    try {
+                        this.objectStores.forEach(objectstore => {
+                            let newDbStore = dbConnection.createObjectStore(objectstore.storageId, {
+                                keyPath: objectstore.key
+                            });
+                            if (objectstore.indizes) {
+                                objectstore.indizes.forEach(index => {
+                                    newDbStore.createIndex(index, index);
+                                })
+                            }
+                        });
+                    } catch (exception) {
+                        console.warn("objectStoreStatusReportList", exception);
+                    }
+                }
+            }
+
+            useDb(dbConnection) {
+                // Make sure to add a handler to be notified if another page requests a version
+                // change. We must close the database. This allows the other page to upgrade the database.
+                // If you don't do this then the upgrade won't happen until the user close the tab.
+                dbConnection.onversionchange = function (event) {
+                    console.log("onversionchange close db");
+                    dbConnection.close();
+                    console.log("db versionschange", event);
+                    alert("A new version of this page is ready. Please reload!");
+                };
+
+                dbConnection.onsuccess = function (event) {
+                    console.log("db success", event);
+                };
+
+                dbConnection.onError = function (event) {
+                    console.warn("db error", event);
+                };
+            }
+        }
+
+        static ObjectStorage = class {
+            storageId;
+            key;
+            indizes;
+            indexedDb;
+
+            constructor(storageId, key, indizes) {
+                this.storageId = storageId;
+                this.key = key;
+                this.indizes = indizes;
+            }
+
             async setValue(dbObject) {
                 const thisObject = this;
-                return new Promise((resolve, reject) => {
-                    let transaction = thisObject.connection.transaction(this.storageId, "readwrite");
+                return new Promise(async (resolve, reject) => {
+                    let connection = await thisObject.indexedDb.getConnection();
+                    let transaction = connection.transaction(this.storageId, "readwrite");
                     let objectStore = transaction.objectStore(this.storageId);
                     let request = objectStore.put(dbObject);
                     request.onsuccess = function (event) {
@@ -1499,8 +1561,9 @@
             async getValue(dbObjectId) {
                 dbObjectId = dbObjectId.toLocaleLowerCase().trim();
                 const thisObject = this;
-                return new Promise((resolve, reject) => {
-                    let transaction = thisObject.connection.transaction(this.storageId, "readwrite");
+                return new Promise(async (resolve, reject) => {
+                    let connection = await thisObject.indexedDb.getConnection();
+                    let transaction = connection.transaction(this.storageId, "readwrite");
                     let objectStore = transaction.objectStore(this.storageId);
                     const request = objectStore.get(dbObjectId);
 
@@ -1510,56 +1573,22 @@
                     };
                 });
             }
-
-            async onupgradeneeded(event) {
-                const oDb = event.target.result;
-                this.useDb(oDb);
-                if (event.oldVersion === 0) {
-                    try {
-                        let reportStore = oDb.createObjectStore(this.storageId, {
-                            keyPath: this.key
-                        });
-                        this.indizes.forEach(index => {
-                            reportStore.createIndex(index, index);
-                        })
-                    } catch (exception) {
-                        console.warn("objectStoreStatusReportList", exception);
-                    }
-                }
-            }
-
-            useDb(oDb) {
-                // Make sure to add a handler to be notified if another page requests a version
-                // change. We must close the database. This allows the other page to upgrade the database.
-                // If you don't do this then the upgrade won't happen until the user close the tab.
-                oDb.onversionchange = function (event) {
-                    console.log("onversionchange close db");
-                    oDb.close();
-                    console.log("db versionschange", event);
-                    alert("A new version of this page is ready. Please reload!");
-                };
-
-                oDb.onsuccess = function (event) {
-                    console.log("db success", event);
-                };
-
-                oDb.onError = function (event) {
-                    console.warn("db error", event);
-                };
-            }
-
         }
 
     }
 
     class MyStorage {
-        static items;
+        static indexedDb = new Storages.IndexedDb(Mod.dbname);
+        static itemSources = this.indexedDb.createObjectStore("itemSources", "id");
+        static items = this.indexedDb.createObjectStore("items", "id");
 
         static async getItemSourceDB() {
-            if (!this.items) this.items = await Storages.IndexedDb.create("items", "id");
-            return this.items;
+            return this.itemSources;
         }
 
+        static async getItemDB() {
+            return this.items;
+        }
     }
 
 
