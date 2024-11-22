@@ -2,9 +2,6 @@
 // @name           [WoD] Item-Datenbank
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
-// @grant   	   GM.getValue
-// @grant  		   GM.setValue
-// @grant          GM.deleteValue
 // @include        http*://*.world-of-dungeons.*/wod/spiel/*
 // ==/UserScript==
 // *************************************************************
@@ -32,25 +29,19 @@
             if (page === "item.php") await ItemReader.start();
 
             if (page === "items.php" || page === "trade.php") await ItemSearchUILinker.start();
-
-            await Storage.ensureItemSources();
-            const allItemSources = Storage.itemSources;
-            var countRetrieved = 0;
-            var all = 0;
-            for (const [itemName, item] of Object.entries(allItemSources)) {
-                all++;
-                if (item.details) {
-                    countRetrieved++;
-                }
-            }
-            console.log("ItemSources: " + countRetrieved + "/" + all);
-            await Storage.validateItems();
         }
     }
 
     class ItemReader {
         static async start() {
             var link = document.getElementById("link");
+            if (!link) {
+                if (document.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
+                    let itemName = document.querySelector("form input[name='name']").value;
+                    await MyStorage.notExistingItem(itemName.trim());
+                }
+                return;
+            }
             if (ItemParser.hasSetOrGemBonus(link)) {
                 console.log("Set oder gem-boni entdeckt! Item wird nicht für die Datenbank verwendet!");
                 return;
@@ -66,7 +57,7 @@
                 details: details,
                 link: link,
             }
-            await Storage.gmSetSourceItem(itemName, sourceItem);
+            await MyStorage.getItemSourceDB().setValue(sourceItem);
             const item = {
                 name: itemName,
                 details: details,
@@ -75,7 +66,7 @@
             await ItemParser.writeItemData(item);
             delete item.details;
             delete item.link;
-            await Storage.gmSetItem(itemName, item);
+            await MyStorage.getItemDB().setValue(item);
             console.log("Gegenstandsseite", sourceItem, item);
         }
     }
@@ -113,14 +104,12 @@
                     itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
 
                     if (index > 0) {
-                        await Storage.ensureItemSources();
-                        const sourceItem = Storage.itemSources[itemName];
+                        const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
                         if (!sourceItem || !sourceItem.details) missingItemsFound++;
                         if (!sourceItem) addedItems++;
-                        await Storage.indexItem(itemName, itemLinkElement, sourceItem);
+                        await MyStorage.indexItem(itemName, itemLinkElement, sourceItem);
                     }
                 }
-                if (addedItems) await Storage.saveItemSources();
                 missingSpanOverall.innerHTML = missingItemsFound + "�";
                 if (missingItemsFound === 0) {
                     if (document.body.contains(missingSpanOverall)) {
@@ -135,7 +124,6 @@
 
             await checkSiteForItems();
             setInterval(async function () {
-                await Storage.ensureItemSources(true);
                 checkSiteForItems();
             }, 10000);
         }
@@ -153,10 +141,11 @@
                 const [missingSearch, missingSearchLabel] = util.createCheckboxInTd(searchContainerTitle, "missingSearch", "");
 
                 async function updateMissingButton() {
-                    const allItems = await Storage.ensureItemSources();
+                    const allItems = await MyStorage.getItemSourceDB().getAll();
                     var itemsToLoad = 0;
                     var allItemCount = 0;
-                    for (const [itemName, item] of Object.entries(allItems)) {
+                    for (const item of allItems) {
+                        if (item.invalid) continue;
                         if (!item.details || item.irregular) {
                             itemsToLoad++;
                         }
@@ -242,12 +231,13 @@
                 async function getItemResult() {
                     var items;
                     if (itemDBSearch.checked) {
-                        items = await Storage.ensureItemDB(true);
+                        items = await MyStorage.getItemDB().getAll();
                     } else {
-                        items = await Storage.ensureItemSources(true);
+                        items = await MyStorage.getItemSourceDB().getAll();
                     }
                     const itemResult = Array();
-                    for (const [itemName, item] of Object.entries(items)) {
+                    for (const item of items) {
+                        if (item.invalid) continue;
                         if (missingSearch.checked && !item.details || missingSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && ItemSearch.matches(item)) {
                             itemResult.push(item);
                         }
@@ -318,7 +308,7 @@
                         }
 
                         const href = document.createElement("a");
-                        const url = "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURI(item.name);
+                        const url = "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURIComponent(item.name);
                         href.href = url;
                         href.target = "ItemView";
                         href.innerHTML = item.name;
@@ -1012,8 +1002,8 @@
         // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
         static async writeItemData(item) {
             try {
-                this.writeItemDataLink(item);
                 this.writeItemDataDetails(item);
+                this.writeItemDataLink(item);
                 item.dataVersion = Mod.currentItemDataVersion;
             } catch (error) {
                 console.log(error);
@@ -1057,9 +1047,12 @@
                         }
                         break;
                     case "Voraussetzungen":
-                        var bedingungen = {};
-                        var freieBedingungen = Array();
-                        tr.children[1].innerHTML.split("<br>").forEach(line => {
+                        let bedingungen = {};
+                        let freieBedingungen = Array();
+                        util.forEach(tr.children[1].children, elem => {
+                            if (elem.tagName === "BR") return;
+                            let line = elem.textContent.trim();
+                            if (line === "") return;
                             const matches = line.trim().match(/^(.*) (ab|bis) (\d*)$/);
                             if (matches) {
                                 bedingungen[matches[1]] = {
@@ -1069,7 +1062,7 @@
                             } else {
                                 freieBedingungen.push(line);
                             }
-                        });
+                        })
                         data.bedingungen = bedingungen;
                         data.bedingungen2 = freieBedingungen;
                         break;
@@ -1237,205 +1230,6 @@
 
     }
 
-    class Storage {
-        static ITEM_SOURCES = "itemSources"; // Speicherung der Sourcen
-        static ITEM_ID_STORE = "itemIds";
-        static ITEM_DB_STORE = "itemDB";
-
-        // feste Punkte im Storage die auf andere IDs im Storage verweisen
-        static data = null;
-        static itemIds = null; // Enthält Referenzen für einzelne Einträge im Storage sowie noch Metadaten über das Item
-        static itemSources = null;
-        static itemDB = null;
-        static count = 0;
-
-        static async ensureItemSources(force) {
-            if (!this.itemSources || force) {
-                this.count++;
-                const start = new Date();
-                this.itemSources = await GM.getValue(this.ITEM_SOURCES, {});
-                if (!force) console.log("Loaded ItemSources [" + (new Date() - start) + " msecs]", this.itemSources);
-            }
-            return this.itemSources;
-        }
-
-        static async ensureItemDB(force) {
-            if (!this.itemDB || force) {
-                this.itemDB = await GM.getValue(this.ITEM_DB_STORE, {});
-                const start = new Date();
-                if (!force) console.log("Loaded ItemDB [" + (new Date() - start) + " msecs]", this.itemDB);
-            }
-            return this.itemDB;
-        }
-
-        static async ensureItemsIdMap(force) {
-            if(!this.itemIds || force) {
-                this.itemIds = await GM.getValue(this.ITEM_ID_STORE, {});
-                const start = new Date();
-                if (!force) console.log("Loaded ItemIdStore [" + (new Date() - start) + " msecs]", this.itemIds);
-            }
-            return this.itemIds;
-        }
-
-        static async saveItemSources() {
-            await GM.setValue(this.ITEM_SOURCES, this.itemSources);
-        }
-
-        static async gmSetSourceItem(itemName, item) {
-            if (item.data || item.effects) throw new Error("Item enthält bereits abgeleitete Daten!");
-            if (!item.details || !item.link) throw new Error("Item enthält keine Source-Daten");
-            await this.ensureItemSources();
-            item.time = new Date().getTime();
-            this.itemSources[itemName] = item;
-            await this.saveItemSources();
-        }
-
-        static async gmSetItem(itemName, item) {
-            if (!item.data || !item.effects) throw new Error("Item wurde noch nicht eingelesen!");
-            if (item.details || item.link) throw new Error("Item enthält noch Source-Daten");
-            await this.ensureItemsIdMap();
-            await this.ensureItemDB();
-            const itemRootId = "item_" + itemName;
-            if(item) {
-                this.itemDB[itemName] = item;
-                this.itemIds[itemRootId] = {
-                    dataVersion: Mod.currentDataVersion,
-                    time: new Date().getTime(),
-                    loaded: !!item.details,
-                };
-                await GM.setValue(itemRootId, item);
-            } else {
-                delete this.itemDB[itemName];
-                delete this.itemIds[itemRootId];
-                await GM.deleteValue(itemRootId);
-            }
-            await GM.setValue(this.ITEM_ID_STORE, this.itemIds);
-            await GM.setValue(this.ITEM_DB_STORE, this.itemDB);
-        }
-
-        static async indexItem(itemName, element, sourceItem) {
-            const missingElement = element.parentElement.className === "missingWrapper" && element.parentElement.children.length > 1 && element.parentElement.children[1];
-            if (!sourceItem || !sourceItem.details) {
-                if(!missingElement) {
-                    if(element.parentElement.className !== "missingWrapper") {
-                        const missingWrapper = document.createElement("span");
-                        missingWrapper.className = "missingWrapper";
-                        element.parentElement.insertBefore(missingWrapper, element);
-                        element.parentElement.removeChild(element);
-                        missingWrapper.append(element);
-                        missingWrapper.onclick = function() {
-                            if(missingWrapper.children.length > 1) {
-                                missingWrapper.removeChild(missingWrapper.children[1]);
-                            }
-                        }
-                    }
-                    const missingSpan = document.createElement("span");
-                    missingSpan.onclick = function(event) {
-                        event.stopPropagation();
-                    }
-                    missingSpan.style.color = "red";
-                    missingSpan.innerHTML = "�";
-                    missingSpan.className = "missingMe";
-                    element.parentElement.append(missingSpan);
-                }
-            } else {
-                if(missingElement) {
-                    element.parentElement.removeChild(missingElement);
-                }
-            }
-            if (!sourceItem) {
-                const newItem = {
-                    name: itemName,
-                }
-                console.log("New item entry", newItem, sourceItem);
-                this.itemSources[itemName] = newItem;
-            }
-        }
-
-        static async validateItems() {
-            if (true) {
-                await Storage.ensureItemSources();
-                var changedSomething = false;
-                for (const [itemName, sourceItem] of Object.entries(Storage.itemSources)) {
-                    if (itemName.includes("%3F")) {
-                        delete Storage.itemSources[itemName];
-                        const itemNameNew = decodeURIComponent(itemName);
-                        console.log("Change name", itemName, itemNameNew);
-                        sourceItem.name = itemNameNew;
-                        this.gmSetIndexItem(itemNameNew, sourceItem);
-                        changedSomething = true;
-                    }
-                }
-                if (changedSomething) await GM.setValue(this.ITEM_SOURCES, this.itemSources);
-            }
-
-            if (true) { // migrate to indexed db
-                let old_itemSources = await Storage.ensureItemSources();
-                let old_itemDB = await Storage.ensureItemDB();
-                let itemSourceDB = await MyStorage.getItemSourceDB();
-                let itemDB = await MyStorage.getItemDB();
-
-                for (const [itemName, oldItem] of Object.entries(old_itemSources)) {
-                    oldItem.id = oldItem.name.toLocaleLowerCase().trim();
-                    let newItem = await itemSourceDB.getValue(oldItem.id);
-                    if (!newItem) newItem = {};
-                    for (const [key, value] of Object.entries(oldItem)) {
-                        newItem[key] = value;
-                    }
-                    await itemSourceDB.setValue(newItem);
-                }
-                for (const [itemName, oldItem] of Object.entries(old_itemDB)) {
-                    oldItem.id = oldItem.name.toLocaleLowerCase().trim();
-                    let newItem = await itemDB.getValue(oldItem.id);
-                    if (!newItem) newItem = {};
-                    for (const [key, value] of Object.entries(oldItem)) {
-                        newItem[key] = value;
-                    }
-                    await itemDB.setValue(newItem);
-                }
-
-            }
-
-            // await this.ensureAllItems();
-            // await GM.setValue(ITEM_SOURCES, this.allItems);
-            // prüft und aktualisiert bei Bedarf die Item DB anhand der Sourcen
-            //await GM.setValue(ITEM_DB_STORE, {}); // delete and rewrite all ItemDB-Objects
-            async function updateItemDB() {
-                await Storage.ensureItemSources();
-                await Storage.ensureItemDB();
-                for (const [itemName, sourceItem] of Object.entries(Storage.itemSources)) {
-                    var item = Storage.itemDB[itemName];
-                    if (!item || item.dataVersion !== Mod.currentItemDataVersion) {
-                        if (sourceItem.details) {
-                            //console.log("Update Item to ItemDB", sourceItem);
-                            item = {
-                                name: itemName,
-                                details: sourceItem.details,
-                                link: sourceItem.link,
-                            }
-                            ItemParser.writeItemData(item);
-                            delete item.details;
-                            delete item.link;
-                            await Storage.gmSetItem(itemName, item);
-                        }
-                    }
-                }
-            }
-
-            await updateItemDB();
-            return;
-            await this.ensureItemsIdMap();
-            await this.ensureItemSources();
-            Object.keys(this.itemIds).forEach(async a => {
-                if(a.includes("%3A") || a.includes("%2C")) {
-                    console.log("falsches Item: "+a);
-                    await this.gmSetSourceItem(a.substring(a.indexOf("_") + 1));
-                }
-            });
-        }
-    }
-
-
     class Storages {
 
         static IndexedDb = class {
@@ -1540,19 +1334,36 @@
                 this.indizes = indizes;
             }
 
+            async connect(withWrite) {
+                let connection = await this.indexedDb.getConnection();
+                let transaction = connection.transaction(this.storageId, withWrite ? "readwrite" : "readonly");
+                return transaction.objectStore(this.storageId);
+            }
+
             async setValue(dbObject) {
+                dbObject.id = dbObject.name.toLocaleLowerCase().trim();
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
-                    let connection = await thisObject.indexedDb.getConnection();
-                    let transaction = connection.transaction(this.storageId, "readwrite");
-                    let objectStore = transaction.objectStore(this.storageId);
+                    let objectStore = await thisObject.connect(true);
                     let request = objectStore.put(dbObject);
                     request.onsuccess = function (event) {
-                        console.log("DBObject save success")
                         resolve();
                     };
                     request.onerror = function (event) {
-                        console.log("DBObject save error", event);
+                        reject();
+                    }
+                });
+            }
+
+            async delete(dbObjectId) {
+                const thisObject = this;
+                return new Promise(async (resolve, reject) => {
+                    let objectStore = await thisObject.connect(true);
+                    let request = objectStore.delete(dbObjectId);
+                    request.onsuccess = function (event) {
+                        resolve();
+                    };
+                    request.onerror = function (event) {
                         reject();
                     }
                 });
@@ -1562,10 +1373,34 @@
                 dbObjectId = dbObjectId.toLocaleLowerCase().trim();
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
+                    let objectStore = await thisObject.connect(false);
+                    const request = objectStore.get(dbObjectId);
+                    request.onsuccess = function (event) {
+                        const result = event.target.result;
+                        resolve(result);
+                    };
+                });
+            }
+
+            async contains(dbObjectId) {
+                const thisObject = this;
+                return new Promise(async (resolve, reject) => {
+                    let objectStore = await thisObject.connect(false);
+                    const request = objectStore.getKey(dbObjectId);
+                    request.onsuccess = function (event) {
+                        const result = event.target.result;
+                        resolve(!!result);
+                    };
+                });
+            }
+
+            async getAll() {
+                const thisObject = this;
+                return new Promise(async (resolve, reject) => {
                     let connection = await thisObject.indexedDb.getConnection();
                     let transaction = connection.transaction(this.storageId, "readwrite");
                     let objectStore = transaction.objectStore(this.storageId);
-                    const request = objectStore.get(dbObjectId);
+                    const request = objectStore.getAll();
 
                     request.onsuccess = function (event) {
                         const result = event.target.result;
@@ -1582,12 +1417,58 @@
         static itemSources = this.indexedDb.createObjectStore("itemSources", "id");
         static items = this.indexedDb.createObjectStore("items", "id");
 
-        static async getItemSourceDB() {
+        static getItemSourceDB() {
             return this.itemSources;
         }
 
-        static async getItemDB() {
+        static getItemDB() {
             return this.items;
+        }
+
+        static async notExistingItem(itemName) {
+            await this.getItemSourceDB().delete("373802")
+            await this.getItemSourceDB().setValue({
+                name: itemName,
+                invalid: true,
+            });
+        }
+
+        static async indexItem(itemName, element, sourceItem) {
+            const missingElement = element.parentElement.className === "missingWrapper" && element.parentElement.children.length > 1 && element.parentElement.children[1];
+            if (!sourceItem || !sourceItem.details) {
+                if (!missingElement) {
+                    if (element.parentElement.className !== "missingWrapper") {
+                        const missingWrapper = document.createElement("span");
+                        missingWrapper.className = "missingWrapper";
+                        element.parentElement.insertBefore(missingWrapper, element);
+                        element.parentElement.removeChild(element);
+                        missingWrapper.append(element);
+                        missingWrapper.onclick = function () {
+                            if (missingWrapper.children.length > 1) {
+                                missingWrapper.removeChild(missingWrapper.children[1]);
+                            }
+                        }
+                    }
+                    const missingSpan = document.createElement("span");
+                    missingSpan.onclick = function (event) {
+                        event.stopPropagation();
+                    }
+                    missingSpan.style.color = "red";
+                    missingSpan.innerHTML = "�";
+                    missingSpan.className = "missingMe";
+                    element.parentElement.append(missingSpan);
+                }
+            } else {
+                if (missingElement) {
+                    element.parentElement.removeChild(missingElement);
+                }
+            }
+            if (!sourceItem) {
+                const newItem = {
+                    name: itemName,
+                }
+                this.itemSources.setValue(newItem);
+            }
         }
     }
 
