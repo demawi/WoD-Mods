@@ -312,80 +312,105 @@
                         addTargetDmgStats(curStats, levelStat, areaStat, roundStat, action, target, damage, hadDmgType, damageIndexFinal);
                         return true;
                     }
+
+                    function applyFilter(curStats, queryFilter, statTarget) {
+                        var subStats;
+                        if (curFilter.endsWith("position")) {
+                            subStats = getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
+                            if (!subStats) return false;
+                        } else if (curFilter.endsWith("unit")) {
+                            subStats = getStat(curStats, queryFilter, statTarget.unit.id.name, "sub", statTarget.unit.id.isHero ? "herounit" : null);
+                            if (!subStats) return false;
+                            const unit = statTarget.unit;
+                            subStats.unit = unit;
+                            subStats.title = unit.typeRef;
+
+
+                            if (!unit.id.isHero) {
+                                // anhand des Names wird eh schon aufgeschlüsselt, hier benötigen wir die restlichen Informationen
+                                const id = action.level + "_" + action.area + "_" + unit.index || 1;
+                                if (id) {
+                                    var unitCount = subStats.unitCount;
+                                    if (!unitCount) {
+                                        unitCount = {};
+                                        subStats.unitCount = unitCount;
+                                    }
+                                    unitCount[id] = true;
+                                }
+                            }
+                            if (ReportParser.isUnitEqual(unit, action.unit)) {
+                                subStats.actionUnit = unit;
+                            }
+                        } else if (curFilter.endsWith("skillType")) {
+                            subStats = getStat(curStats, queryFilter, statTarget.fertigkeit.type, "sub", "skillType");
+                            if (!subStats) return false;
+                        } else if (curFilter.endsWith("skill")) {
+                            subStats = getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
+                            if (!subStats) return false;
+                            subStats.title = statTarget.fertigkeit.typeRef;
+                        } else if (curFilter.endsWith("level")) {
+                            if (levelDataArray.length === 1) return; // Wenn es nur einen Level gibt, wird dieses Kriterium ignoriert
+                            subStats = getStat(curStats, queryFilter, "Level " + level.nr, "sub", "level");
+                            if (!subStats) return false;
+                            const areas = level.areas;
+                            subStats.title = "Level " + level.nr + "<br>(" + level.roundCount + " Runden)" + (area.nr === 1 ? "" : "<br>(" + areas.length + " Kämpfe)");
+                        } else if (curFilter.endsWith("fight")) {
+                            subStats = getStat(curStats, queryFilter, "Kampf " + level.nr + "." + area.nr, "sub", "fight");
+                            if (!subStats) return false;
+                            subStats.title = "Kampf " + level.nr + "." + area.nr + "<br>(" + area.rounds.length + " Runden)";
+                        } else if (curFilter.endsWith("items")) {
+                            subStats = getStat(curStats, queryFilter, util.arrayMap(statTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
+                            if (!subStats) return false;
+                            subStats.title = util.arrayMap(statTarget.fertigkeit.items, a => a.srcRef).join(", ");
+                        } else if (curFilter.endsWith("dmgType")) {
+                            hadDmgType = true;
+                            subStats = getStat(curStats, queryFilter, damage === true ? "Ohne Schaden" : damage.type, "sub", "dmgType");
+                            if (!subStats) return false;
+                        } else {
+                            console.error("StatQuery-Filter ist nicht valide: '" + curFilter + "'");
+                        }
+                        if (!subStats.actionUnit && curStats.actionUnit) {
+                            subStats.actionUnit = curStats.actionUnit;
+                        }
+                        subStats.filterType = curFilter;
+                        return subStats;
+                    }
+
                     const queryFilter = filters[0];
                     const curFilter = queryFilter.spec;
                     var statTarget;
+                    var secondStatTarget;
                     if (curFilter.startsWith("skillType") || curFilter.startsWith("skill")) { // attackType und skill sind immer auf der aktiven Unit
-                        statTarget = action;
+                        statTarget = action
                     } else if (wantResouces) {
                         if (wantHeroes) {
-                            statTarget = action.unit.id.isHero ? action : target;
+                            statTarget = action.unit.id.isHero ? action : null;
+                            if (target) secondStatTarget = target.unit.id.isHero ? target : null;
                         } else {
-                            statTarget = action.unit.id.isHero ? target : action;
+                            statTarget = action.unit.id.isHero ? null : action;
+                            if (target) secondStatTarget = target.unit.id.isHero ? null : target;
                         }
                     } else if (curFilter.startsWith("enemy_")) {
                         statTarget = wantDefense ? action : target;
                     } else {
                         statTarget = wantDefense ? target : action;
                     }
-                    var subStats;
-                    if (curFilter.endsWith("position")) {
-                        subStats = getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
-                        if (!subStats) return false;
-                    } else if (curFilter.endsWith("unit")) {
-                        subStats = getStat(curStats, queryFilter, statTarget.unit.id.name, "sub", statTarget.unit.id.isHero ? "herounit" : null);
-                        if (!subStats) return false;
-                        const unit = statTarget.unit;
-                        subStats.unit = unit;
-                        subStats.title = unit.typeRef;
 
-                        if (!unit.id.isHero) {
-                            // anhand des Names wird eh schon aufgeschlüsselt, hier benötigen wir die restlichen Informationen
-                            const id = action.level + "_" + action.area + "_" + unit.index || 1;
-                            if (id) {
-                                var unitCount = subStats.unitCount;
-                                if (!unitCount) {
-                                    unitCount = {};
-                                    subStats.unitCount = unitCount;
-                                }
-                                unitCount[id] = true;
-                            }
-                        }
-                    } else if (curFilter.endsWith("skillType")) {
-                        subStats = getStat(curStats, queryFilter, statTarget.fertigkeit.type, "sub", "skillType");
-                        if (!subStats) return false;
-                    } else if (curFilter.endsWith("skill")) {
-                        subStats = getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
-                        if (!subStats) return false;
-                        subStats.title = statTarget.fertigkeit.typeRef;
-                    } else if (curFilter.endsWith("level")) {
-                        if (levelDataArray.length === 1) return; // Wenn es nur einen Level gibt, wird dieses Kriterium ignoriert
-                        subStats = getStat(curStats, queryFilter, "Level " + level.nr, "sub", "level");
-                        if (!subStats) return false;
-                        const areas = level.areas;
-                        subStats.title = "Level " + level.nr + "<br>(" + level.roundCount + " Runden)" + (area.nr === 1 ? "" : "<br>(" + areas.length + " Kämpfe)");
-                    } else if (curFilter.endsWith("fight")) {
-                        subStats = getStat(curStats, queryFilter, "Kampf " + level.nr + "." + area.nr, "sub", "fight");
-                        if (!subStats) return false;
-                        subStats.title = "Kampf " + level.nr + "." + area.nr + "<br>(" + area.rounds.length + " Runden)";
-                    } else if (curFilter.endsWith("items")) {
-                        subStats = getStat(curStats, queryFilter, util.arrayMap(statTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
-                        if (!subStats) return false;
-                        subStats.title = util.arrayMap(statTarget.fertigkeit.items, a => a.srcRef).join(", ");
-                    } else if (curFilter.endsWith("dmgType")) {
-                        hadDmgType = true;
-                        subStats = getStat(curStats, queryFilter, damage === true ? "Ohne Schaden" : damage.type, "sub", "dmgType");
-                        if (!subStats) return false;
-                    } else {
-                        console.error("StatQuery-Filter ist nicht valide: '" + curFilter + "'");
-                    }
-                    subStats.filterType = curFilter;
                     const tail = filters.slice(1);
-                    if (execFilter(subStats, tail)) {
-                        addTargetDmgStats(curStats, levelStat, areaStat, roundStat, action, target, damage, hadDmgType, damageIndexFinal, true);
-                        return true;
+                    if (statTarget) {
+                        let subStats = applyFilter(curStats, queryFilter, statTarget);
+                        if (subStats) {
+                            addTargetDmgStats(curStats, levelStat, areaStat, roundStat, action, target, damage, hadDmgType, damageIndexFinal, true);
+                            execFilter(subStats, tail);
+                        }
                     }
-                    return false;
+                    if (secondStatTarget) {
+                        let subStats = applyFilter(curStats, queryFilter, secondStatTarget);
+                        if (subStats) {
+                            addTargetDmgStats(curStats, levelStat, areaStat, roundStat, action, target, damage, hadDmgType, damageIndexFinal, true);
+                            execFilter(subStats, tail);
+                        }
+                    }
                 }
                 execFilter(stats, filter);
             }
@@ -546,6 +571,11 @@
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
     class ReportParser {
         static currentRound;
+
+        static isUnitEqual(unit1, unit2) {
+            console.log("UnitEquals", unit1, unit2);
+            return unit1.id.name === unit2.id.name;
+        }
 
         static readKampfberichtAndStoreIntoReport(container, report, reportId) {
             var levelNr;
@@ -1167,7 +1197,7 @@
                 super();
                 const center = this.center;
                 const Column = Viewer.Column;
-                this.columns.push(new Column("Aktionen", center("Aktionen"), stat => {
+                this.columns.push(new Column("Aktionen", center("Aktionen<br>(aktive:passive)"), stat => {
                     let activeActions = statView.query.side === "heroes" ? stat.actionsHelden : stat.actionsMonster;
                     let passiveActions = statView.query.side === "heroes" ? stat.actionsMonster : stat.actionsHelden;
                     activeActions = util.arrayFilter(activeActions, action => action.type !== "init");
@@ -1197,7 +1227,37 @@
                     const min = util.arrayMin(hps);
                     const max = util.arrayMax(hps);
                     return center("" + min + " - " + max + "");
-                }))
+                }));
+                this.columns.push(new Column("Aktionsarten", center("Aktiva<br>(Angriff / Heilung / Buff)"), stat => {
+                    let actions = stat.actions;
+                    actions = util.arrayFilter(actions, action => action.type !== "init");
+                    if (stat.actionUnit) {
+                        actions = util.arrayFilter(actions, action => {
+                            console.log("hdf", action, stat.actionUnit);
+                            return ReportParser.isUnitEqual(action.unit, stat.actionUnit);
+                        });
+                    }
+                    let heal = util.arrayFilter(actions, action => action.fertigkeit.type === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.type === "Wirkung").length;
+                    return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
+                }));
+                this.columns.push(new Column("Aktionsarten", center("Passiva<br>(Parade / Geheilt / Gebufft)"), stat => {
+                    let actions = stat.actions;
+                    actions = util.arrayFilter(actions, action => action.type !== "init");
+                    if (stat.actionUnit) {
+                        actions = util.arrayFilter(actions, action => {
+                            return !ReportParser.isUnitEqual(action.unit, stat.actionUnit);
+                        });
+                        util.arrayFilter(actions, action => {
+                            return util.arrayFilter(action.targets, target => {
+                                return ReportParser.isUnitEqual(stat.actionUnit, target.unit);
+                            }).length > 0;
+                        });
+                    }
+                    let heal = util.arrayFilter(actions, action => action.fertigkeit.type === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.type === "Wirkung").length;
+                    return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
+                }));
             }
         }
 
