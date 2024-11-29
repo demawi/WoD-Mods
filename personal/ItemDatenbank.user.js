@@ -14,6 +14,7 @@
 
 (function() {
     'use strict';
+    let debug = false;
 
     class Mod {
         static dbname = "wodDB";
@@ -28,11 +29,20 @@
             // Gegenstandsseite
             if (page === "item.php") await ItemReader.start();
 
-            if (page === "items.php" || page === "trade.php") await ItemSearchUILinker.start();
+            if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
         }
     }
 
     class ItemReader {
+        static createItem(itemName) {
+            let worldName = window.location.href.match(/\/\/(.*?)\./)[1];
+            return {
+                name: itemName,
+                time: new Date().getTime(),
+                world: worldName[0].toUpperCase(),
+            }
+        }
+
         static async start() {
             var link = document.getElementById("link");
             if (!link) {
@@ -52,22 +62,14 @@
             const all = document.getElementsByTagName("h1")[0];
             var itemName = all.getElementsByTagName("a")[0].textContent.trim();
             if (itemName[itemName.length - 1] === "!") itemName = itemName.substring(0, itemName.length - 1);
-            const sourceItem = {
-                name: itemName,
-                details: details,
-                link: link,
-            }
+            const sourceItem = this.createItem(itemName);
+            sourceItem.details = details;
+            sourceItem.link = link;
             await MyStorage.getItemSourceDB().setValue(sourceItem);
-            const item = {
-                name: itemName,
-                details: details,
-                link: link,
-            }
-            await ItemParser.writeItemData(item);
-            delete item.details;
-            delete item.link;
+            const item = await ItemParser.getItemDataFromSource(sourceItem);
             await MyStorage.getItemDB().setValue(item);
             console.log("Gegenstandsseite", sourceItem, item);
+            //ItemParser.rewriteAllItemsFromSource();
         }
     }
 
@@ -129,7 +131,7 @@
         }
     }
 
-    class ItemSearchUILinker {
+    class ItemSearchUI {
         static async start() {
             // Erweiterung für die Suche
             const searchContainer = document.getElementsByClassName("search_container")[0];
@@ -307,24 +309,37 @@
                             tr.append(td);
                         }
 
+                        const itemSpan = document.createElement("span");
                         const href = document.createElement("a");
+                        itemSpan.append(href);
                         const url = "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURIComponent(item.name);
                         href.href = url;
                         href.target = "ItemView";
                         href.innerHTML = item.name;
 
                         if (itemDBSearch.checked) {
+                            console.log("slots" + item.data.edelslots);
+                            for (let i = 0, l = item.data.edelslots; i < l; i++) {
+                                if (itemSpan.children.length < 2) {
+                                    const abstand = document.createElement("span");
+                                    abstand.innerHTML = "&nbsp;";
+                                    itemSpan.append(abstand);
+                                }
+                                const img = document.createElement("img");
+                                img.src = "/wod/css/icons/WOD/gems/gem_0.png";
+                                itemSpan.append(img);
+                            }
                             href.onclick = function () {
                                 return wo(url + "&IS_POPUP=1");
                             }
                         } else {
                             href.onclick = function () {
-                                href.parentElement.removeChild(href);
+                                itemSpan.parentElement.removeChild(itemSpan);
                                 //return wo(url + "&IS_POPUP=1");
                             }
                         }
 
-                        td.append(href);
+                        td.append(itemSpan);
                         i++;
                     }
                 }
@@ -621,7 +636,7 @@
             }
 
             static "Trageort" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...ItemSearch.SearchDomains.TRAGEORT]);
+                const select1 = ItemSearch.UI.createSelect(["<Trageort>", ...ItemSearch.SearchDomains.TRAGEORT]);
                 container.append(select1);
                 return {
                     matches: function (item) {
@@ -671,11 +686,9 @@
                         if (!stufenBedingung) return true;
                         const value = stufenBedingung.value;
                         if (stufenBedingung.comp === "ab") {
-                            console.log(">>>ab", value, from, to, Number(value) >= Number(from));
                             if (to) return Number(value) <= Number(to);
                             return Number(value) <= Number(from);
                         } else { // bis
-                            console.log(">>>bis", value, from, to, !!to);
                             if (from) return Number(value) >= Number(from);
                             return Number(value) >= Number(to);
                         }
@@ -818,7 +831,7 @@
                 "Jäger": "Jä",
                 "Klingenmagier": "Km",
                 "Magier": "Ma",
-                "Mönch": "Mo",
+                "Mönch": "Mö",
                 "Paladin": "Pa",
                 "Priester": "Pr",
                 "Quacksalber": "Qu",
@@ -832,7 +845,7 @@
             static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
             static JEGLICHE_HAND = ["Beide Hände", "Waffenhand", "Schildhand", "Einhändig"];
 
-            static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Psychologischer Schaden"];
+            static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Blitzschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Säureschaden", "Psychologischer Schaden", "Arkaner Schaden"];
         }
 
 
@@ -899,7 +912,6 @@
 
                 checkbox.onclick = function () {
                     const myCurIndex = [...tbody.children].indexOf(tr);
-                    console.log("set checked", checkbox.checked);
                     thisObject.negators[myCurIndex] = checkbox.checked;
                 }
                 checkbox.parentElement.hidden = true;
@@ -919,7 +931,6 @@
                         suche.name = select.value;
                         thisObject.validators[myCurIndex] = suche;
                         thisObject.validatorTypes[myCurIndex] = select.value;
-                        console.log("test", tbody.children.length, myCurIndex);
                         if (tbody.children.length <= myCurIndex + 1) {
                             thisObject.createAuswahl(myCurIndex + 1);
                         }
@@ -929,7 +940,6 @@
 
             static checkRemove(i) {
                 if (this.tbody.children.length === 1) return false;
-                console.log("checkRemove", this.validatorTypes[i], this.tbody.children.length, i);
                 if (!this.validatorTypes[i]) {
                     this.validatorTypes.splice(i, i);
                     this.validators.splice(i, i);
@@ -965,8 +975,6 @@
             }
         }
 
-        static debug = false;
-
         static matches(item) {
             const result = this.#matches(item);
             if (this.debug) console.log("Matches", result);
@@ -974,7 +982,7 @@
         }
 
         static #matches(item) {
-            this.debug = item.name.includes("Bleikugeln");
+            this.debug = item.name.includes("Thanat");
             if (this.debug) console.log(item);
             const suchfeldWert = WoD.getSuchfeld().value.trim();
             if (suchfeldWert !== "") {
@@ -999,8 +1007,28 @@
             return linkElement.getElementsByClassName("gem_bonus_also_by_gem").length > 0 || linkElement.getElementsByClassName("gem_bonus_only_by_gem").length > 0;
         }
 
+        static async rewriteAllItemsFromSource() {
+            let itemSources = await MyStorage.getItemSourceDB().getAll();
+            for (const itemSource of itemSources) {
+                let item = await this.getItemDataFromSource(itemSource);
+                await MyStorage.getItemDB().setValue(item);
+            }
+        }
+
+        static async getItemDataFromSource(itemSource) {
+            const item = {
+                name: itemSource.name,
+                details: itemSource.details,
+                link: itemSource.link,
+            }
+            await this.#writeItemData(item);
+            delete item.details;
+            delete item.link;
+            return item;
+        }
+
         // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
-        static async writeItemData(item) {
+        static async #writeItemData(item) {
             try {
                 this.writeItemDataDetails(item);
                 this.writeItemDataLink(item);
@@ -1022,6 +1050,19 @@
                 const tr = tableTRs[i];
                 const kategorie = util.html2Text(tr.children[0].innerHTML.split("<br>")[0]);
                 switch (kategorie) {
+                    case "Besonderheiten":
+                        var besonderheiten = tr.children[1].textContent.trim();
+                        if (besonderheiten === "Veredelungen") {
+                            data.veredelung = true;
+                        } else {
+                            var matches = besonderheiten.match(/(.\d*)x veredelbar/);
+                            if (!matches) {
+                                console.error("Unbekannte Besonderheit entdeckt", item.name, besonderheiten);
+                                alert("Unbekannte Besonderheit entdeckt");
+                            }
+                            data.edelslots = matches[1];
+                        }
+                        break;
                     case "Heldenklassen":
                         var heldenklassen = tr.children[1].textContent.trim();
                         var typ;
@@ -1068,8 +1109,8 @@
                         break;
                     case "Gegenstandsklasse":
                         const gegenstandsklassen = Array();
-                        tr.children[1].innerHTML.split("<br>").forEach(line => {
-                            gegenstandsklassen.push(util.html2Text(line).trim());
+                        util.forEach(tr.children[1].getElementsByTagName("a"), a => {
+                            gegenstandsklassen.push(a.textContent.trim());
                         });
                         data.gegenstandsklassen = gegenstandsklassen;
                         break;
@@ -1152,7 +1193,6 @@
                                 if (type.startsWith("alle Fertigkeiten der Klasse")) {
                                     targetContext = getBoniContext("talentklasse");
                                     type = type.substring(29);
-                                    console.log("Talentklasse: '" + type + "'");
                                 } else {
                                     targetContext = currentBoniContext;
                                 }
@@ -1237,6 +1277,7 @@
             objectStores = [];
             version = 1;
             dbname;
+            static idx = 0;
 
             constructor(dbname) {
                 this.dbname = dbname;
@@ -1251,41 +1292,64 @@
 
             async getConnection() {
                 if (this.dbConnection) return this.dbConnection;
-                this.dbConnection = await this.connect();
+                this.dbConnection = await this.dbConnect();
+                this.useDb(this.dbConnection);
                 return this.dbConnection;
             }
 
-            async connect() {
+            areAllObjectStoresInstalled(dbConnection) {
+                const installedNames = dbConnection.objectStoreNames; // Array
+                for (const objectStore of this.objectStores) {
+                    if (!installedNames.contains(objectStore.storageId)) {
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            async dbConnect(version) {
                 const thisObject = this;
                 return new Promise((resolve, reject) => {
-                    var request = indexedDB.open(thisObject.dbname);
+                    var request = indexedDB.open(thisObject.dbname, version);
+                    request.idx = Storages.IndexedDb.idx++;
+                    console.log("request created " + request.idx + "_" + version);
                     request.onsuccess = function (event) {
+                        let dbConnection = event.target.result;
                         console.log("DBconnect success", event);
-                        resolve(event.target.result);
+                        let needNewStores = !thisObject.areAllObjectStoresInstalled(dbConnection);
+                        if (needNewStores) {
+                            request.wewillblock = true;
+                            dbConnection.close();
+                            console.log("Need new Stores to install!!! " + needNewStores);
+                            resolve(thisObject.dbConnect(new Date().getTime())); // force upgrade
+                        } else {
+                            resolve(event.target.result);
+                        }
                     }
                     request.onerror = function (event) {
                         console.log("DBconnect error", event);
                         reject();
                     }
                     request.onblocked = function () {
-                        console.log("DBconnect blocked", event);
+                        console.log("DBconnect blocked", request.idx, event);
                         alert("Please close all other tabs with this site open!");
                         reject();
                     }
                     request.onupgradeneeded = async function (event) {
                         console.log("DBconnect upgradeneeded", event);
                         await thisObject.onupgradeneeded(event);
-                        resolve();
+                        let conn = await thisObject.dbConnect();
+                        resolve(conn);
                     }
                 });
             }
 
             async onupgradeneeded(event) {
                 const dbConnection = event.target.result;
-                this.useDb(dbConnection);
-                if (event.oldVersion === 0) {
-                    try {
-                        this.objectStores.forEach(objectstore => {
+                try {
+                    this.objectStores.forEach(objectstore => {
+                        const storageId = objectstore.storageId;
+                        if (!dbConnection.objectStoreNames.contains(storageId)) {
                             let newDbStore = dbConnection.createObjectStore(objectstore.storageId, {
                                 keyPath: objectstore.key
                             });
@@ -1294,11 +1358,12 @@
                                     newDbStore.createIndex(index, index);
                                 })
                             }
-                        });
-                    } catch (exception) {
-                        console.warn("objectStoreStatusReportList", exception);
-                    }
+                        }
+                    });
+                } catch (exception) {
+                    console.warn("objectStoreStatusReportList", exception);
                 }
+                return true;
             }
 
             useDb(dbConnection) {
@@ -1310,14 +1375,6 @@
                     dbConnection.close();
                     console.log("db versionschange", event);
                     alert("A new version of this page is ready. Please reload!");
-                };
-
-                dbConnection.onsuccess = function (event) {
-                    console.log("db success", event);
-                };
-
-                dbConnection.onError = function (event) {
-                    console.warn("db error", event);
                 };
             }
         }
@@ -1417,6 +1474,8 @@
         static itemSources = this.indexedDb.createObjectStore("itemSources", "id");
         static items = this.indexedDb.createObjectStore("items", "id");
 
+        //static test = this.indexedDb.createObjectStore("test", "id");
+
         static getItemSourceDB() {
             return this.itemSources;
         }
@@ -1426,11 +1485,9 @@
         }
 
         static async notExistingItem(itemName) {
-            await this.getItemSourceDB().delete("373802")
-            await this.getItemSourceDB().setValue({
-                name: itemName,
-                invalid: true,
-            });
+            let item = ItemReader.createItem(itemName);
+            item.invalid = true;
+            await this.getItemSourceDB().setValue(item);
         }
 
         static async indexItem(itemName, element, sourceItem) {
