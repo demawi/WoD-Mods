@@ -442,6 +442,13 @@
                     return obj.join("<br>");
                 },
             }
+            static "nutzbar mit" = {
+                pfad: "data.fertigkeiten",
+                when: "nutzbar mit",
+                toHTML: function (obj) {
+                    return obj.join("<br>");
+                },
+            }
         }
 
         static whenBedingung(when) {
@@ -654,7 +661,7 @@
             }
 
             static "Gegenstandsklasse" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Gegenstandsklasse>", ...ItemSearch.SearchDomains.GEGENSTANDSKLASSEN]); // GEGENSTANDSKLASSEN
+                const select1 = ItemSearch.UI.createSelect(["<Gegenstandsklasse>", ...ItemSearch.SearchDomains.GEGENSTANDSKLASSEN]);
                 container.append(select1);
                 return {
                     matches: function (item) {
@@ -662,6 +669,21 @@
                         const klassen = item.data?.gegenstandsklassen;
                         if (klassen) {
                             return klassen.includes(select1.value);
+                        }
+                        return false;
+                    },
+                }
+            }
+
+            static "nutzbar mit" = (container) => {
+                const select1 = ItemSearch.UI.createSelect(["<Fertigkeit>", ...ItemSearch.SearchDomains.FERTIGKEITEN]);
+                container.append(select1);
+                return {
+                    matches: function (item) {
+                        if (select1.value === "") return true;
+                        const fertigkeiten = item.data?.fertigkeiten;
+                        if (fertigkeiten) {
+                            return fertigkeiten.includes(select1.value);
                         }
                         return false;
                     },
@@ -1030,8 +1052,8 @@
         // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
         static async #writeItemData(item) {
             try {
-                this.writeItemDataDetails(item);
-                this.writeItemDataLink(item);
+                this.writeItemData(item);
+                this.writeItemDataEffects(item);
                 item.dataVersion = Mod.currentItemDataVersion;
             } catch (error) {
                 console.log(error);
@@ -1040,7 +1062,7 @@
             }
         }
 
-        static writeItemDataDetails(item) {
+        static writeItemData(item) {
             const div = document.createElement("div");
             div.innerHTML = item.details;
             const data = {};
@@ -1107,13 +1129,22 @@
                         data.bedingungen = bedingungen;
                         data.bedingungen2 = freieBedingungen;
                         break;
-                    case "Gegenstandsklasse":
+                    case "Gegenstandsklasse": {
                         const gegenstandsklassen = Array();
                         util.forEach(tr.children[1].getElementsByTagName("a"), a => {
                             gegenstandsklassen.push(a.textContent.trim());
                         });
                         data.gegenstandsklassen = gegenstandsklassen;
                         break;
+                    }
+                    case "Fertigkeiten": {
+                        const fertigkeiten = Array();
+                        util.forEach(tr.children[1].getElementsByTagName("a"), a => {
+                            fertigkeiten.push(a.textContent.trim());
+                        });
+                        data.fertigkeiten = fertigkeiten;
+                        break;
+                    }
                     case "Wo getragen?":
                         data.trageort = tr.children[1].textContent.trim();
                         break;
@@ -1121,7 +1152,7 @@
             }
         }
 
-        static writeItemDataLink(item) {
+        static writeItemDataEffects(item) {
             const div = document.createElement("div");
             div.innerHTML = item.link;
             if (this.hasSetOrGemBonus(div)) {
