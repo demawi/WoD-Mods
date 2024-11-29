@@ -190,190 +190,296 @@
     }
 
     class SearchEngine {
-        static StatSearch(statQuery, levelDataArray) {
-            var createStat = () => {
-                return {
-                    result: {
-                        0: 0,
-                        1: 0,
-                        2: 0,
-                        3: 0,
-                    },
-                    value: 0,
-                    ruestung: 0,
-                    resistenz: 0,
-                    actions: Array(),
-                    actionsHelden: Array(),
-                    actionsMonster: Array(),
-                    levelStats: Array(),
-                    areaStats: Array(),
-                    roundStats: Array(),
-                    targets: Array(),
+
+        static createStat() {
+            return {
+                result: {
+                    0: 0,
+                    1: 0,
+                    2: 0,
+                    3: 0,
+                },
+                value: 0,
+                ruestung: 0,
+                resistenz: 0,
+                actions: Array(),
+                actionsHelden: Array(),
+                actionsMonster: Array(),
+                targets: Array(),
+            }
+        }
+
+        static getStat(previousStats, queryFilter, id, subDomain, typeInitialize) {
+            if (subDomain === "sub") {
+                var subIds = previousStats.subIds;
+                if (!subIds) {
+                    subIds = {};
+                    previousStats.subIds = subIds;
                 }
-            };
-            var addDmgStats = function (from, toStat) {
-                toStat.value += from.value;
-                toStat.ruestung += from.ruestung;
-                toStat.resistenz += from.resistenz;
-            };
-            var getStat = function (previousStats, queryFilter, id, subDomain, typeInitialize) {
-                if (subDomain === "sub") {
-                    var subIds = previousStats.subIds;
-                    if (!subIds) {
-                        subIds = {};
-                        previousStats.subIds = subIds;
+                subIds[id] = true;
+            }
+            if (queryFilter && queryFilter.selection && !queryFilter.selection.includes(id)) return;
+            var curObject = previousStats;
+            if (subDomain) {
+                var subDomainEntry = previousStats[subDomain];
+                if (!subDomainEntry) {
+                    subDomainEntry = {};
+                    // Um immer die gleichen Reihenfolge anzulegen
+                    if (typeInitialize === "herounit") {
+                        let levelDataArray = previousStats.statRoot.levelDataArray;
+                        levelDataArray[0].areas[0].rounds[0].helden.forEach(held => {
+                            subDomainEntry[held.id.name] = this.createStat();
+                        });
+                    } else if (typeInitialize === "position") {
+                        subDomainEntry["Vorne"] = this.createStat();
+                        subDomainEntry["Linke Seite"] = this.createStat();
+                        subDomainEntry["Rechte Seite"] = this.createStat();
+                        subDomainEntry["Zentrum"] = this.createStat();
+                        subDomainEntry["Hinten"] = this.createStat();
+                        subDomainEntry["Im Rücken"] = this.createStat();
+                    } else if (typeInitialize === "skillType") {
+                        subDomainEntry["Nahkampf"] = this.createStat();
+                        subDomainEntry["Zauber"] = this.createStat();
+                        subDomainEntry["Fernkampf"] = this.createStat();
+                        subDomainEntry["Sozial"] = this.createStat();
+                        subDomainEntry["Hinterhalt"] = this.createStat();
+                        subDomainEntry["Explosion"] = this.createStat();
                     }
-                    subIds[id] = true;
+                    previousStats[subDomain] = subDomainEntry;
                 }
-                if (queryFilter && queryFilter.selection && !queryFilter.selection.includes(id)) return;
-                var curObject = previousStats;
-                if (subDomain) {
-                    var subDomainEntry = previousStats[subDomain];
-                    if (!subDomainEntry) {
-                        subDomainEntry = {};
-                        // Um immer die gleichen Reihenfolge anzulegen
-                        if (typeInitialize === "herounit") {
-                            levelDataArray[0].areas[0].rounds[0].helden.forEach(held => {
-                                subDomainEntry[held.id.name] = createStat();
-                            });
-                        } else if (typeInitialize === "position") {
-                            subDomainEntry["Vorne"] = createStat();
-                            subDomainEntry["Linke Seite"] = createStat();
-                            subDomainEntry["Rechte Seite"] = createStat();
-                            subDomainEntry["Zentrum"] = createStat();
-                            subDomainEntry["Hinten"] = createStat();
-                            subDomainEntry["Im Rücken"] = createStat();
-                        } else if (typeInitialize === "skillType") {
-                            subDomainEntry["Nahkampf"] = createStat();
-                            subDomainEntry["Zauber"] = createStat();
-                            subDomainEntry["Fernkampf"] = createStat();
-                            subDomainEntry["Sozial"] = createStat();
-                            subDomainEntry["Hinterhalt"] = createStat();
-                            subDomainEntry["Explosion"] = createStat();
+                curObject = subDomainEntry;
+            }
+            var result = curObject[id];
+            if (!result) {
+                result = this.createStat()
+                curObject[id] = result;
+            }
+            return result;
+        }
+
+        static addDmgStats = function (from, toStat) {
+            toStat.value += from.value;
+            toStat.ruestung += from.ruestung;
+            toStat.resistenz += from.resistenz;
+        };
+
+        static addUnitStats(stats, unit) {
+            var unitStats = stats.units;
+            if (!unitStats) {
+                unitStats = [];
+                stats.units = unitStats;
+            }
+            if (!unitStats.includes(unit)) unitStats.push(unit);
+        }
+
+        static addUnitId(action, unit) {
+            if (unit.id.isHero) {
+                unit.id.id = unit.id.name;
+            } else {
+                unit.id.id = unit.id.name + "_" + (unit.index || 1) + "_" + action.level.nr + "_" + action.area.nr;
+            }
+        }
+
+        static addTargetDmgStats = function (toStat, action, target, damage, hadDmgType, damageIndexFinal) {
+            if (hadDmgType || damageIndexFinal === 0) {
+                if (!toStat.targets.includes(target)) {
+                    toStat.result[target.result]++;
+                    toStat.targets.push(target);
+                }
+            }
+            // actions: me on me, me on groupy, groupy on me, me on enemy, enemy on me
+            if (!toStat.actions.includes(action)) {
+                toStat.actions.push(action);
+            }
+            if (action.unit.id.isHero) {
+                if (!toStat.actionsHelden.includes(action)) {
+                    toStat.actionsHelden.push(action);
+                }
+            } else {
+                if (!toStat.actionsMonster.includes(action)) {
+                    toStat.actionsMonster.push(action);
+                }
+            }
+            if (damage !== true && !!damage) {
+                SearchEngine.addDmgStats(damage, toStat); // gesamtschaden
+                SearchEngine.addDmgStats(damage, SearchEngine.getStat(toStat, null, damage.type, "byDmgType"));
+            }
+        }
+
+        static createActionClassification(curStats, subStats, action, target, statTarget, queryFilterSpec) {
+            switch (queryFilterSpec) {
+                case "unit":
+                    subStats.actionClassification = function (curAction) {
+                        let curSettings = curStats.actionClassification(curAction);
+                        return {
+                            fromMe: curSettings.fromMe && ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
+                            atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => ReportParser.isUnitEqual(target.unit, statTarget.unit)),
                         }
-                        previousStats[subDomain] = subDomainEntry;
                     }
-                    curObject = subDomainEntry;
-                }
-                var result = curObject[id];
-                if (!result) {
-                    result = createStat()
-                    curObject[id] = result;
-                }
-                return result;
+                    break;
+                default:
+                    subStats.actionClassification = curStats.actionClassification;
             }
+        }
 
-            function addUnitStats(stats, unit) {
-                var unitStats = stats.units;
-                if (!unitStats) {
-                    unitStats = [];
-                    stats.units = unitStats;
+        static FilterKriterien = {
+            "position": {
+                name: "Position",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    return SearchEngine.getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
                 }
-                if (!unitStats.includes(unit)) unitStats.push(unit);
-            }
+            },
+            "enemy_position": {
+                name: "Position",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    return SearchEngine.getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
+                }
+            },
+            "unit": {
+                name: "Einheit",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.unit.id.name, "sub", statTarget.unit.id.isHero ? "herounit" : null);
+                    if (!subStats) return false;
+                    const unit = statTarget.unit;
+                    subStats.unit = unit;
+                    subStats.title = unit.typeRef;
 
-            const addTargetDmgStats = function (toStat, levelStat, areaStat, roundStat, fromAction, target, damage, hadDmgType, damageIndexFinal, inBetweenCalc) {
-                if (hadDmgType || damageIndexFinal === 0) {
-                    if (!toStat.targets.includes(target)) {
-                        toStat.result[target.result]++;
-                        toStat.targets.push(target);
+                    if (!unit.id.isHero) {
+                        var unitCount = subStats.unitCount;
+                        if (!unitCount) {
+                            unitCount = {};
+                            subStats.unitCount = unitCount;
+                        }
+                        unitCount[unit.id.id] = true;
                     }
-                }
-                if (!toStat.actions.includes(fromAction)) {
-                    toStat.actions.push(fromAction);
-                }
-                if (fromAction.unit.id.isHero) {
-                    if (!toStat.actionsHelden.includes(fromAction)) {
-                        toStat.actionsHelden.push(fromAction);
+                    if (ReportParser.isUnitEqual(unit, action.unit)) {
+                        subStats.actionUnit = unit;
                     }
-                } else {
-                    if (!toStat.actionsMonster.includes(fromAction)) {
-                        toStat.actionsMonster.push(fromAction);
-                    }
+                    return subStats;
                 }
-                if (damage !== true && !!damage) {
-                    addDmgStats(damage, toStat); // gesamtschaden
-                    addDmgStats(damage, getStat(toStat, null, damage.type, "byDmgType"));
-                }
-                if (!toStat.levelStats.includes(levelStat)) toStat.levelStats.push(levelStat);
-                if (!toStat.areaStats.includes(areaStat)) toStat.areaStats.push(areaStat);
-                if (!toStat.roundStats.includes(roundStat)) toStat.roundStats.push(roundStat);
-            }
+            },
+            "enemy_unit": {
+                name: "Gegner-Einheit",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.unit.id.name, "sub", statTarget.unit.id.isHero ? "herounit" : null);
+                    if (!subStats) return false;
+                    const unit = statTarget.unit;
+                    subStats.unit = unit;
+                    subStats.title = unit.typeRef;
 
+                    if (!unit.id.isHero) {
+                        var unitCount = subStats.unitCount;
+                        if (!unitCount) {
+                            unitCount = {};
+                            subStats.unitCount = unitCount;
+                        }
+                        unitCount[unit.id.id] = true;
+                    }
+                    if (ReportParser.isUnitEqual(unit, action.unit)) {
+                        subStats.actionUnit = unit;
+                    }
+                    return subStats;
+                }
+            },
+            "skillType": {
+                name: "FertigkeitsTyp",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    return SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.type, "sub", "skillType");
+                }
+            },
+            "skill": {
+                name: "Fertigkeit",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    if (!statTarget || !statTarget.fertigkeit) return;
+                    if (statRoot.wantHeroes !== statTarget.unit.id.isHero) return;
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
+                    subStats.title = statTarget.fertigkeit.typeRef;
+                    return subStats;
+                }
+            },
+            "skill_active": {
+                name: "Fertigkeit(Aktiv)",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    if (!statTarget || !statTarget.fertigkeit) return;
+                    if (statRoot.wantHeroes !== statTarget.unit.id.isHero) return;
+                    console.log("isso", action, curStats.actionClassification(action));
+                    if (!curStats.actionClassification(action).fromMe) return;
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
+                    subStats.title = statTarget.fertigkeit.typeRef;
+                    return subStats;
+                }
+            },
+            "level": {
+                name: "Level",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, "Level " + action.level.nr, "sub", "level");
+                    if (!subStats) return false;
+                    const areas = action.level.areas;
+                    subStats.title = "Level " + action.level.nr + "<br>(" + action.level.roundCount + " Runden)" + (action.area.nr === 1 ? "" : "<br>(" + areas.length + " Kämpfe)");
+                    return subStats;
+                }
+            },
+            "fight": {
+                name: "Kampf",
+                apply: (filterCfg, curStats, queryFilter, action, target, statTarget) => {
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, action.level.nr + "_" + action.area.nr, "sub", "fight");
+                    if (!subStats) return false;
+                    subStats.title = "Kampf " + action.level.nr + "." + action.area.nr + "<br>(" + action.area.rounds.length + " Runden)";
+                    return subStats;
+                }
+            },
+            "items": {
+                name: "Gegenstände",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, util.arrayMap(statTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
+                    if (!subStats) return false;
+                    subStats.title = util.arrayMap(statTarget.fertigkeit.items, a => a.srcRef).join(", ");
+                    return subStats;
+                }
+            },
+            "dmgType": {
+                name: "SchadensTyp",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    statRoot.hadDmgType = true;
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, damage === true ? "Ohne Schaden" : damage.type, "sub", "dmgType");
+                    if (!subStats) return false;
+                }
+            },
+
+        }
+
+        static StatSearch(statQuery, levelDataArray) {
             const wantHeroes = statQuery.side === "heroes";
             const wantDefense = statQuery.type === "defense";
-            const wantAllgemein = statQuery.type === "actions";
-            const wantResouces = statQuery.type === "resources";
+            const wantAll = statQuery.type === "all";
 
-            function doAnalysis(stats, levelStat, areaStat, roundStat, filter, level, area, round, action, target, damage, damageIndexFinal) {
-                var hadDmgType = false;
+            function doAnalysis(stats, filter, action, target, damage, damageIndexFinal) {
+                const statRoot = {
+                    hadDmgType: false,
+                    levelDataArray: levelDataArray,
+                    wantHeroes: wantHeroes,
+                }
+
+                function applyFilter(curStats, queryFilter, action, target, statTarget) {
+                    curStats.statRoot = statRoot;
+                    const filterKriterium = SearchEngine.FilterKriterien[queryFilter.spec];
+                    if (!filterKriterium) {
+                        alert("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
+                    }
+                    const subStats = filterKriterium.apply(statRoot, curStats, queryFilter, action, target, statTarget);
+                    if (!subStats) return subStats;
+                    SearchEngine.createActionClassification(curStats, subStats, action, target, statTarget, queryFilter.spec);
+                    if (!subStats.actionUnit && curStats.actionUnit) {
+                        subStats.actionUnit = curStats.actionUnit;
+                    }
+                    subStats.filterType = queryFilter.spec;
+                    return subStats;
+                }
+
                 const execFilter = function (curStats, filters) {
                     if (!filters || filters.length === 0) {
-                        addTargetDmgStats(curStats, levelStat, areaStat, roundStat, action, target, damage, hadDmgType, damageIndexFinal);
+                        SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal);
                         return true;
-                    }
-
-                    function applyFilter(curStats, queryFilter, statTarget) {
-                        var subStats;
-                        if (curFilter.endsWith("position")) {
-                            subStats = getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
-                            if (!subStats) return false;
-                        } else if (curFilter.endsWith("unit")) {
-                            subStats = getStat(curStats, queryFilter, statTarget.unit.id.name, "sub", statTarget.unit.id.isHero ? "herounit" : null);
-                            if (!subStats) return false;
-                            const unit = statTarget.unit;
-                            subStats.unit = unit;
-                            subStats.title = unit.typeRef;
-
-
-                            if (!unit.id.isHero) {
-                                // anhand des Names wird eh schon aufgeschlüsselt, hier benötigen wir die restlichen Informationen
-                                const id = action.level + "_" + action.area + "_" + unit.index || 1;
-                                if (id) {
-                                    var unitCount = subStats.unitCount;
-                                    if (!unitCount) {
-                                        unitCount = {};
-                                        subStats.unitCount = unitCount;
-                                    }
-                                    unitCount[id] = true;
-                                }
-                            }
-                            if (ReportParser.isUnitEqual(unit, action.unit)) {
-                                subStats.actionUnit = unit;
-                            }
-                        } else if (curFilter.endsWith("skillType")) {
-                            subStats = getStat(curStats, queryFilter, statTarget.fertigkeit.type, "sub", "skillType");
-                            if (!subStats) return false;
-                        } else if (curFilter.endsWith("skill")) {
-                            subStats = getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
-                            if (!subStats) return false;
-                            subStats.title = statTarget.fertigkeit.typeRef;
-                        } else if (curFilter.endsWith("level")) {
-                            if (levelDataArray.length === 1) return; // Wenn es nur einen Level gibt, wird dieses Kriterium ignoriert
-                            subStats = getStat(curStats, queryFilter, "Level " + level.nr, "sub", "level");
-                            if (!subStats) return false;
-                            const areas = level.areas;
-                            subStats.title = "Level " + level.nr + "<br>(" + level.roundCount + " Runden)" + (area.nr === 1 ? "" : "<br>(" + areas.length + " Kämpfe)");
-                        } else if (curFilter.endsWith("fight")) {
-                            subStats = getStat(curStats, queryFilter, "Kampf " + level.nr + "." + area.nr, "sub", "fight");
-                            if (!subStats) return false;
-                            subStats.title = "Kampf " + level.nr + "." + area.nr + "<br>(" + area.rounds.length + " Runden)";
-                        } else if (curFilter.endsWith("items")) {
-                            subStats = getStat(curStats, queryFilter, util.arrayMap(statTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
-                            if (!subStats) return false;
-                            subStats.title = util.arrayMap(statTarget.fertigkeit.items, a => a.srcRef).join(", ");
-                        } else if (curFilter.endsWith("dmgType")) {
-                            hadDmgType = true;
-                            subStats = getStat(curStats, queryFilter, damage === true ? "Ohne Schaden" : damage.type, "sub", "dmgType");
-                            if (!subStats) return false;
-                        } else {
-                            console.error("StatQuery-Filter ist nicht valide: '" + curFilter + "'");
-                        }
-                        if (!subStats.actionUnit && curStats.actionUnit) {
-                            subStats.actionUnit = curStats.actionUnit;
-                        }
-                        subStats.filterType = curFilter;
-                        return subStats;
                     }
 
                     const queryFilter = filters[0];
@@ -381,8 +487,8 @@
                     var statTarget;
                     var secondStatTarget;
                     if (curFilter.startsWith("skillType") || curFilter.startsWith("skill")) { // attackType und skill sind immer auf der aktiven Unit
-                        statTarget = action
-                    } else if (wantResouces) {
+                        statTarget = action;
+                    } else if (wantAll) {
                         if (wantHeroes) {
                             statTarget = action.unit.id.isHero ? action : null;
                             if (target) secondStatTarget = target.unit.id.isHero ? target : null;
@@ -398,23 +504,24 @@
 
                     const tail = filters.slice(1);
                     if (statTarget) {
-                        let subStats = applyFilter(curStats, queryFilter, statTarget);
+                        let subStats = applyFilter(curStats, queryFilter, action, target, statTarget);
                         if (subStats) {
-                            addTargetDmgStats(curStats, levelStat, areaStat, roundStat, action, target, damage, hadDmgType, damageIndexFinal, true);
+                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, true);
                             execFilter(subStats, tail);
                         }
                     }
                     if (secondStatTarget) {
-                        let subStats = applyFilter(curStats, queryFilter, secondStatTarget);
+                        let subStats = applyFilter(curStats, queryFilter, action, target, secondStatTarget);
                         if (subStats) {
-                            addTargetDmgStats(curStats, levelStat, areaStat, roundStat, action, target, damage, hadDmgType, damageIndexFinal, true);
+                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, true);
                             execFilter(subStats, tail);
                         }
                     }
                 }
                 execFilter(stats, filter);
             }
-            var stats = createStat();
+
+            var stats = this.createStat();
 
 
             var filter = statQuery.filter; // position, attackType, fertigkeit, units
@@ -422,69 +529,80 @@
                 const finalLevelNr = levelNr;
                 const level = levelDataArray[levelNr - 1];
                 level.nr = levelNr;
-                const levelStat = {};
                 if (!level) continue;
                 const areas = level.areas;
                 for (var areaNr = 1, areaCount = areas.length; areaNr <= areaCount; areaNr++) {
                     const area = areas[areaNr - 1];
                     area.nr = areaNr;
                     const finalAreaNr = areaNr;
-                    const areaStat = {};
 
                     const rounds = area.rounds;
                     for (var roundNr = 0, l = rounds.length; roundNr < l; roundNr++) {
                         var round = rounds[roundNr];
-                        const roundStat = {};
-                        if (wantResouces) {
+                        round.nr = roundNr + 1;
+                        if (wantAll) {
                             if (wantHeroes) {
                                 round.helden.forEach(unit => {
-                                    addUnitStats(levelStat, unit);
-                                    addUnitStats(areaStat, unit);
-                                    addUnitStats(roundStat, unit);
                                     var action = {
                                         name: unit.id.name,
                                         unit: unit,
                                         fertigkeit: null,
                                         targets: [],
-                                        level: levelNr,
-                                        area: areaNr,
-                                        round: roundNr,
+                                        level: level,
+                                        area: area,
+                                        round: round,
                                         type: "init",
                                         src: "<tr><td></td><td>" + unit.id.name + " tritt in die Runde mit " + unit.hp + " HP und " + unit.mp + " MP ein</td></tr>",
                                     };
-                                    doAnalysis(stats, levelStat, areaStat, roundStat, filter, level, area, round, action);
+                                    stats.actionClassification = function (curAction) {
+                                        return {
+                                            fromMe: wantHeroes && curAction.unit.id.isHero,
+                                            atMe: wantHeroes && curAction.unit.id.isHero,
+                                            fromGroup: wantHeroes && curAction.unit.id.isHero,
+                                            atGroup: wantHeroes && curAction.unit.id.isHero,
+                                        }
+                                    }
+                                    doAnalysis(stats, filter, action);
                                 });
                             }
 
                             round.actions.vorrunde.forEach(action => {
-                                action.level = finalLevelNr;
-                                action.area = finalAreaNr;
-                                action.round = roundNr;
+                                action.level = level;
+                                action.area = area;
+                                action.round = round;
                                 action.type = "vorrunde";
                             });
 
                             (round.actions.overtime || []).forEach(action => {
-                                action.level = finalLevelNr;
-                                action.area = finalAreaNr;
-                                action.round = roundNr;
+                                action.level = level;
+                                action.area = area;
+                                action.round = round;
                                 action.type = "overtime";
                             });
                         }
 
-
-
                         round.actions.runde.forEach(action => {
                             var isHero = action.unit.id.isHero;
-                            action.level = finalLevelNr;
-                            action.area = finalAreaNr;
-                            action.round = roundNr;
+                            action.level = level;
+                            action.area = area;
+                            action.round = round;
                             action.type = "action";
 
-                            if (wantResouces || (wantAllgemein && wantHeroes && isHero) || (wantAllgemein && !wantHeroes && !isHero) || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero)) {
+                            if (wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero)) {
+                                SearchEngine.addUnitId(action, action.unit);
                                 action.targets.forEach(target => {
                                     if (statQuery.type === "attack" || statQuery.type === "defense") {
                                         if (target.type !== "Angriff") { // Es wurde eine Verteidigungs-Probe gewürfelt
                                             return;
+                                        }
+                                    }
+                                    SearchEngine.addUnitId(action, target.unit);
+                                    stats.actionClassification = function (curAction) {
+                                        return {
+                                            fromMe: wantHeroes === curAction.unit.id.isHero,
+                                            atMe: wantHeroes === !!util.arraySearch(curAction.targets, target => target.unit.id.isHero === wantHeroes),
+                                            fromGroup: wantHeroes === curAction.unit.id.isHero,
+                                            atGroup: wantHeroes === !!util.arraySearch(action.targets, target => ReportParser.isUnitEqual(curAction.unit, target.unit)),
                                         }
                                     }
 
@@ -492,7 +610,7 @@
                                     if (damages.length === 0) damages = [true];
                                     for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
                                         const damage = damages[damageIndex];
-                                        doAnalysis(stats, levelStat, areaStat, roundStat, filter, level, area, round, action, target, damage, damageIndex);
+                                        doAnalysis(stats, filter, action, target, damage, damageIndex);
                                     }
                                 });
                             }
@@ -521,20 +639,13 @@
         static FilterTypes = {
             "attack": this.attackFilterType,
             "defense": this.attackFilterType,
-            "actions": {
+            "all": {
                 level: "Level",
                 fight: "Kampf",
                 position: "Position",
                 unit: "Einheit",
                 skill: "Fertigkeit",
-                skillType: "FertigkeitsTyp",
-                items: "Gegenstände",
-            },
-            "resources": {
-                level: "Level",
-                fight: "Kampf",
-                position: "Position",
-                unit: "Einheit",
+                skill_active: "Fertigkeit(Aktiv)",
             }
         }
 
@@ -573,7 +684,6 @@
         static currentRound;
 
         static isUnitEqual(unit1, unit2) {
-            console.log("UnitEquals", unit1, unit2);
             return unit1.id.name === unit2.id.name;
         }
 
@@ -667,15 +777,27 @@
                 var vorrunde = Array();
                 var overtime = Array();
                 var runde = Array();
-                var actions = util.arrayMap(roundTD.getElementsByClassName("rep_initiative"), function (a) {
-                    return a.parentElement
-                });
+                let actions = roundTD.getElementsByTagName("table")[2].querySelectorAll("tr");
                 for (var k = 0, kl = actions.length; k < kl; k++) {
                     var currentAction = actions[k]; // Round-Action-TR
                     if (currentAction.children.length === 1) { // <hr>
                         // nothing to do
                     } else if (currentAction.children.length === 2) { // Flucht z.B. "ist ein Feigling und flieht wegen Hitpointverlusts." oder "kann nichts tun"
                         // currently nothing to do
+                        let td = currentAction.children[1];
+                        if (td.childNodes.length === 1) {
+                            // einfache Beschreibung ohne Einheit-Verlinkung: Der Düsterwolf scheint noch etwas träge, offenbar muss er sich erst noch sammeln.
+                        } else if (td.childNodes[0].tagName === "A") { // regen oder initiative
+                            let text = td.childNodes[1].textContent;
+                            if (text.includes("wirkt")) { // Initiative
+
+                            } else { // Regen
+
+                            }
+                        } else {
+                            console.log("Aktion nicht zuweisbar", td);
+                            window.alert("Aktion nicht zuweisbar!");
+                        }
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
                             vorrunde.push(ReportParser.Action(currentAction, null, currentAction.children[1], currentAction.children[2]));
@@ -1176,19 +1298,6 @@
             }
         }
 
-
-        // Nur eigene aktive Aktionen (Angriffe, Heilungen, Wirkungen) keine Paraden
-        static TableViewAktiveAktionen = class extends Viewer.TableViewType {
-            columns = Array();
-
-            constructor(statView) {
-                super();
-                const center = this.center;
-                const Column = Viewer.Column;
-                this.columns.push(new Column("Aktionen", center("Aktionen"), stat => center(stat.actions.length)));
-            }
-        }
-
         // Alle Aktionen (Angriffe, Heilungen, Wirkungen, Paraden)
         static TableViewAlleAktionen = class extends Viewer.TableViewType {
             columns = Array();
@@ -1206,24 +1315,20 @@
                 }));
                 this.columns.push(new Column("HP", center("HP<br>Rundenbeginn<br>(min-max)"), stat => {
                     const hps = Array();
-                    const check = statView.query.side === "heroes";
-                    stat.actions.forEach(action => {
-                        if (action.unit.id.isHero === check) {
-                            hps.push(action.unit.hp);
-                        }
+                    util.arrayFilter(stat.actions, action => action.type === "init" && stat.actionClassification(action).fromMe).forEach(action => {
+                        hps.push(action.unit.hp);
                     });
+                    if (hps.length === 0) return center("-");
                     const min = util.arrayMin(hps);
                     const max = util.arrayMax(hps);
                     return center("" + min + " - " + max + "");
                 }));
                 this.columns.push(new Column("MP", center("MP<br>Rundenbeginn<br>(min-max)"), stat => {
                     const hps = Array();
-                    const check = statView.query.side === "heroes";
-                    stat.actions.forEach(action => {
-                        if (action.unit.id.isHero === check) {
-                            hps.push(action.unit.mp);
-                        }
+                    util.arrayFilter(stat.actions, action => action.type === "init" && stat.actionClassification(action).fromMe).forEach(action => {
+                        hps.push(action.unit.mp);
                     });
+                    if (hps.length === 0) return center("-");
                     const min = util.arrayMin(hps);
                     const max = util.arrayMax(hps);
                     return center("" + min + " - " + max + "");
@@ -1231,12 +1336,8 @@
                 this.columns.push(new Column("Aktionsarten", center("Aktiva<br>(Angriff / Heilung / Buff)"), stat => {
                     let actions = stat.actions;
                     actions = util.arrayFilter(actions, action => action.type !== "init");
-                    if (stat.actionUnit) {
-                        actions = util.arrayFilter(actions, action => {
-                            console.log("hdf", action, stat.actionUnit);
-                            return ReportParser.isUnitEqual(action.unit, stat.actionUnit);
-                        });
-                    }
+                    actions = util.arrayFilter(actions, action => stat.actionClassification(action).fromMe);
+
                     let heal = util.arrayFilter(actions, action => action.fertigkeit.type === "Heilung").length;
                     let wirkung = util.arrayFilter(actions, action => action.fertigkeit.type === "Wirkung").length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
@@ -1244,16 +1345,7 @@
                 this.columns.push(new Column("Aktionsarten", center("Passiva<br>(Parade / Geheilt / Gebufft)"), stat => {
                     let actions = stat.actions;
                     actions = util.arrayFilter(actions, action => action.type !== "init");
-                    if (stat.actionUnit) {
-                        actions = util.arrayFilter(actions, action => {
-                            return !ReportParser.isUnitEqual(action.unit, stat.actionUnit);
-                        });
-                        util.arrayFilter(actions, action => {
-                            return util.arrayFilter(action.targets, target => {
-                                return ReportParser.isUnitEqual(stat.actionUnit, target.unit);
-                            }).length > 0;
-                        });
-                    }
+                    actions = util.arrayFilter(actions, action => stat.actionClassification(action).atMe);
                     let heal = util.arrayFilter(actions, action => action.fertigkeit.type === "Heilung").length;
                     let wirkung = util.arrayFilter(actions, action => action.fertigkeit.type === "Wirkung").length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
@@ -1279,7 +1371,13 @@
                     this.columns.push(new Column("Erfolgreich", center("Erfolgreich<br>angegriffen"), dmgStat => center(this.gesamtErfolge(dmgStat) + ":" + dmgStat.result[0])));
                 }
                 this.columns.push(new Column("Erfolge", center("normal / gut / krit"), dmgStat => this.center(dmgStat.result[1] + " / " + dmgStat.result[2] + " / " + dmgStat.result[3])));
-                this.columns.push(new Column("Ausgehender Schaden", center("Ausgehender<br>Schaden<br>(Ø)"), dmgStat => {
+                let dmgTitle;
+                if (isDefense) {
+                    dmgTitle = "Eingehender<br>Schaden";
+                } else {
+                    dmgTitle = "Ausgehender<br>Schaden";
+                }
+                this.columns.push(new Column("Gesamtschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
                         target.damage.forEach(damage => {
@@ -1386,8 +1484,7 @@
             static views = {
                 "attack": Viewer.TableViewAngriffVerteidigung,
                 "defense": Viewer.TableViewAngriffVerteidigung,
-                "actions": Viewer.TableViewAktiveAktionen, // Alle Aktions-Typen,
-                "resources": Viewer.TableViewAlleAktionen, // HP/MP am Anfang der Runde, MP-Verbrauch
+                "all": Viewer.TableViewAlleAktionen, // HP/MP am Anfang der Runde, MP-Verbrauch
             }
 
             static renderColumnTable(table, statView) {
@@ -1442,19 +1539,19 @@
                                 const tbody = document.createElement("tbody");
                                 table.append(tbody);
 
-                                var curLevel;
-                                var curArea;
+                                var curLevelNr;
+                                var curAreaNr;
                                 var actionTR;
-                                var curRound;
+                                var curRoundNr;
                                 statResult.actions.forEach(action => {
                                     var border = "";
-                                    if (curLevel !== action.level || curArea !== action.area) {
+                                    if (curLevelNr !== action.level.nr || curAreaNr !== action.area.nr) {
                                         var style = "";
-                                        curLevel = action.level;
-                                        curArea = action.area;
-                                        curRound = null;
-                                        tbody.innerHTML += "<tr><td colspan=100 style='font-style: italic;padding-top:5px;color:lightgray;'>Level " + curLevel + " Kampf " + curArea + "</td></tr>";
-                                        tbody.innerHTML += "<tr colspan=100 style='border-top: 1px solid black;" + style + "font-style: italic;height:10px;'><td></td></tr>";
+                                        curLevelNr = action.level.nr;
+                                        curAreaNr = action.area.nr;
+                                        curRoundNr = null;
+                                        tbody.innerHTML += "<tr><td colspan=100 style='font-style: italic;padding-top:5px;color:lightgray;'>Level " + curLevelNr + " Kampf " + curAreaNr + "</td></tr>";
+                                        tbody.innerHTML += "<tr style='border-top: 1px solid black;" + style + "font-style: italic;height:10px;'><td colspan=100></td></tr>";
                                     } else {
                                         border = "12px solid transparent";
                                     }
@@ -1462,9 +1559,9 @@
                                     actionTR.innerHTML = action.src;
                                     const roundTd = document.createElement("td");
                                     roundTd.style.width = "1px";
-                                    if (curRound !== action.round) {
-                                        roundTd.innerHTML = "R" + action.round;
-                                        curRound = action.round;
+                                    if (curRoundNr !== action.round.nr) {
+                                        curRoundNr = action.round.nr;
+                                        roundTd.innerHTML = "R" + curRoundNr;
                                     }
                                     roundTd.style.color = "lightgray";
                                     roundTd.style.fontStyle = "italic";
@@ -1844,7 +1941,7 @@
 
                 // Attack - Verteidigung
                 const typeElement = document.createElement("span");
-                const [typeSelectContainer, typeSelectInput] = util.createSelectableElement(typeElement, [["attack", "Angriff"], ["defense", "Verteidigung"], ["actions", "Aktive Aktionen"], ["resources", "Alle Aktionen"]]);
+                const [typeSelectContainer, typeSelectInput] = util.createSelectableElement(typeElement, [["attack", "Angriff"], ["defense", "Verteidigung"], ["all", "Alle Aktionen"]]);
                 typeSelectInput.value = query.type;
                 typeSelectInput.onchange = function (value) {
                     query.type = typeSelectInput.value;
@@ -1864,8 +1961,6 @@
                     typeElement.innerHTML = "Angriff";
                 } else if (query.type === "defense") {
                     typeElement.innerHTML = "Verteidigung";
-                } else if (query.type === "actions") {
-                    typeElement.innerHTML = "Aktive Aktionen";
                 } else {
                     typeElement.innerHTML = "Alle Aktionen";
                 }
@@ -2289,41 +2384,65 @@
             return node.classList && node.classList.contains(className);
         }
 
-        static toBBCode(node) {
+        static getStyle(el, property, defaultSize) {
+            if (!el.tagName) return defaultSize;
+            return window.getComputedStyle(el, null).getPropertyValue(property);
+        }
+
+        static toBBCode(node, defaultSize) {
+
+            defaultSize = this.getStyle(node, "font-size", defaultSize);
+
             if (node.classList && node.classList.contains("bbignore")) return "";
-            var result = this.toBBCodeRaw(node);
+            var result = this.toBBCodeRaw(node, defaultSize);
             if (result.length !== 3) {
                 console.log("Keine Array-Länge von 3 zurückgegeben", node);
             }
-            if (node.style && node.style.textAlign === "center") {
-                result[0] = result[0] + "[center]";
-                result[2] = "[/center]" + result[2];
-            }
-            if (node.style && node.style.color && !this.hatClassName(node, "bbignoreColor")) {
-                result[0] = result[0] + "[color=" + node.style.color + "]";
-                result[2] = "[/color]" + result[2];
+            if (result[1].trim() !== "" && !result[1].includes("[table") && !result[1].includes("[tr") && !result[1].includes("[td") && !result[1].includes("[th") && !result[0].includes("[img")) {
+                if (node.style && node.style.textAlign === "center") {
+                    result[0] = result[0] + "[center]";
+                    result[2] = "[/center]" + result[2];
+                }
+                if (node.style && node.style.fontStyle === "italic") {
+                    result[0] = result[0] + "[i]";
+                    result[2] = "[/i]" + result[2];
+                }
+                if (this.getStyle(node, "font-weight") === "700") {
+                    result[0] = result[0] + "[b]";
+                    result[2] = "[/b]" + result[2];
+                }
+                let fontSize = this.getStyle(node, "font-size", defaultSize);
+                if (fontSize) {
+                    fontSize = fontSize.replace("px", "");
+                    result[0] = result[0] + "[size=" + (Math.round(fontSize) - 2) + "]";
+                    result[2] = "[/size]" + result[2];
+                }
+                if (node.style && node.style.color && !this.hatClassName(node, "bbignoreColor")) {
+                    result[0] = result[0] + "[color=" + node.style.color + "]";
+                    result[2] = "[/color]" + result[2];
+                }
             }
             return result.join("");
         }
 
-        static toBBCodeRaw(node) {
+        static toBBCodeRaw(node, defaultSize) {
             switch (node.tagName) {
                 case "TABLE":
-                    return ["[table" + (node.border ? " border=" + node.border : "") + "]", this.toBBCodeArray(node.childNodes), "[/table]"];
+                    return ["[table" + (node.border ? " border=" + node.border : "") + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/table]"];
                 case "TR":
-                    return ["[tr]", this.toBBCodeArray(node.childNodes), "[/tr]"];
+                    return ["[tr]", this.toBBCodeArray(node.childNodes, defaultSize), "[/tr]"];
                 case "TD":
                     if (node.colSpan > 1) {
-                        return ["[td colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes), "[/td]"];
+                        return ["[td colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
                     }
-                    return ["[td]", this.toBBCodeArray(node.childNodes), "[/td]"];
+                    return ["[td]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
                 case "TH":
                     if (node.colSpan > 1) {
-                        return ["[th colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes), "[/th]"];
+                        return ["[th colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
                     }
-                    return ["[th]", this.toBBCodeArray(node.childNodes), "[/th]"];
+                    return ["[th]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
                 case "SPAN":
-                    return ["", this.toBBCodeArray(node.childNodes), ""];
+                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
                 case "IMG":
                     return ["[img]", node.src, "[/img]"];
                 case "SELECT":
@@ -2333,26 +2452,26 @@
                         if (node.classList.contains("rep_monster")) {
                             return ["", "[beast:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
                         } else {
-                            return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes), "[/url]"];
+                            return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/url]"];
                         }
                     }
-                    return ["", this.toBBCodeArray(node.childNodes), ""];
+                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
                 case "THEAD":
                 case "TBODY": // ignore it
-                    return ["", this.toBBCodeArray(node.childNodes), ""];
+                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
                 case "BR":
                     return ["", "\n", ""];
                 default:
                     if (typeof node.tagName === 'undefined') {
-                        return ["", node.textContent, ""];
+                        return ["", node.textContent.replaceAll("\n", ""), ""];
                     } else {
                         console.error("Unbekannter TagName gefunden: '" + node.tagName + "'");
                     }
             }
         }
 
-        static toBBCodeArray(childNodes) {
-            return this.arrayMap(childNodes, a => this.toBBCode(a)).join("");
+        static toBBCodeArray(childNodes, defaultSize) {
+            return this.arrayMap(childNodes, a => this.toBBCode(a, defaultSize)).join("");
         }
     }
 
