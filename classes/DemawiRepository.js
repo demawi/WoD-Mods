@@ -6,8 +6,6 @@ class demawiRepository {
         return this[type];
     }
 
-    static clazz = {}
-
     static Storages = class {
 
         static IndexedDb = class {
@@ -26,7 +24,7 @@ class demawiRepository {
                     indizes = null;
                     readonly = true;
                 }
-                let objectStore = new clazz.Storages.ObjectStorage(storageId, key, indizes, readonly);
+                let objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
                 objectStore.indexedDb = this;
                 this.objectStores.push(objectStore);
                 return objectStore;
@@ -48,7 +46,7 @@ class demawiRepository {
                 const thisObject = this;
                 return new Promise((resolve, reject) => {
                     var request = indexedDB.open(thisObject.dbname, version);
-                    request.idx = Storages.IndexedDb.requestIdx++;
+                    request.idx = demawiRepository.Storages.IndexedDb.requestIdx++;
                     console.log("request created " + request.idx + "_" + version);
                     request.onsuccess = function (event) {
                         let dbConnection = event.target.result;
@@ -215,10 +213,5 @@ class demawiRepository {
         }
 
     }
-
-    static ___ = (function () {
-        demawiRepository.clazz.Storages = demawiRepository.Storages;
-        return null;
-    })();
 
 }
