@@ -1,4 +1,4 @@
-class demawi {
+class demawiRepository {
 
     static version = 1
 
