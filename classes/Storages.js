@@ -1,6 +1,14 @@
-class Storages {
+class demawi {
 
-    static IndexedDb = class {
+    static version = 1
+
+    static import(type, version) {
+        return demawi[type];
+    }
+
+    static Storages = class {
+
+        static IndexedDb = class {
         dbname;
         objectStores = [];
         dbConnection;
@@ -205,4 +213,5 @@ class Storages {
         }
     }
 
+}
 }
