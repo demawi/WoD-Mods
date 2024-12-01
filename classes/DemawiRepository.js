@@ -6,6 +6,8 @@ class demawiRepository {
         return this[type];
     }
 
+    static clazz = {}
+
     static Storages = class {
 
         static IndexedDb = class {
@@ -24,7 +26,7 @@ class demawiRepository {
                     indizes = null;
                     readonly = true;
                 }
-                let objectStore = new Storages.ObjectStorage(storageId, key, indizes, readonly);
+                let objectStore = new clazz.Storages.ObjectStorage(storageId, key, indizes, readonly);
                 objectStore.indexedDb = this;
                 this.objectStores.push(objectStore);
                 return objectStore;
@@ -212,5 +214,11 @@ class demawiRepository {
             }
         }
 
-}
+    }
+
+    static ___ = (function () {
+        demawiRepository.clazz.Storages = demawiRepository.Storages;
+        return null;
+    })();
+
 }
