@@ -3,7 +3,7 @@ class demawiRepository {
     static version = 1
 
     static import(type, version) {
-        return demawi[type];
+        return demawiRepository[type];
     }
 
     static Storages = class {
