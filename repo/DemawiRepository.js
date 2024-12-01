@@ -42,6 +42,14 @@ class demawiRepository {
                 return this.dbConnection;
             }
 
+            closeConnection(request, dbConnection) {
+                delete request.onerror;
+                delete request.onblocked;
+                delete request.onupgradeneeded;
+                delete dbConnection.onversionchange;
+                dbConnection.close();
+            }
+
             async dbConnect(version) {
                 const thisObject = this;
                 return new Promise((resolve, reject) => {
@@ -53,7 +61,7 @@ class demawiRepository {
                         console.log("DBconnect success", event);
                         let needNewStores = !thisObject.areAllObjectStoresSynced(dbConnection);
                         if (needNewStores) {
-                            dbConnection.close();
+                            thisObject.closeConnection(request, dbConnection);
                             console.log("Need Database to sync " + needNewStores);
                             resolve(thisObject.dbConnect(new Date().getTime())); // force upgrade
                         } else {
@@ -73,7 +81,7 @@ class demawiRepository {
                         console.log("DBconnect upgradeneeded", event);
                         let dbConnection = event.target.result;
                         await thisObject.syncObjectStores(dbConnection);
-                        dbConnection.close();
+                        thisObject.closeConnection(request, dbConnection);
                         resolve(thisObject.dbConnect());
                     }
                 });
