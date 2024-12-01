@@ -1,4 +1,4 @@
-export default class Storages {
+class Storages {
 
     static IndexedDb = class {
         dbname;
