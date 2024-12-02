@@ -9,13 +9,46 @@ class demawiRepository {
     static Storages = class {
 
         static IndexedDb = class {
+            modname;
             dbname;
             objectStores = [];
             dbConnection;
             static requestIdx = 0; // only for debugging
 
-            constructor(dbname) {
+            constructor(modname, dbname) {
+                this.modname = modname;
                 this.dbname = dbname;
+            }
+
+            /**
+             * Kopiert die aktuelle Datenbank auf den Zielort.
+             * @param dbNameTo
+             * @returns {Promise<void>}
+             */
+            async cloneTo(dbNameTo) {
+                const dbTo = new demawiRepository.Storages.IndexedDb(this.modname, dbNameTo);
+                const dbConnectionFrom = await this.getConnection();
+                const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
+                const objectStoresRead = [];
+                const objectStoresWrite = [];
+                for (const objectStoreName of objectStoreNames) {
+                    let transactionFrom = dbConnectionFrom.transaction(objectStoreName, "readonly");
+                    let objectStoreFrom = transactionFrom.objectStore(objectStoreName);
+                    dbTo.createObjectStore(objectStoreName, objectStoreFrom.keyPath);
+                    const readFrom = new demawiRepository.Storages.ObjectStorage(objectStoreName, objectStoreFrom.keyPath, null, true);
+                    readFrom.indexedDb = this;
+                    const readTo = new demawiRepository.Storages.ObjectStorage(objectStoreName, objectStoreFrom.keyPath, null, false);
+                    readTo.indexedDb = dbTo;
+                    objectStoresRead.push(readFrom);
+                    objectStoresWrite.push(readTo);
+                }
+                for (var i = 0, l = objectStoresRead.length; i < l; i++) {
+                    let readFrom = objectStoresRead[i];
+                    let writeTo = objectStoresWrite[i];
+                    for (const cur of await readFrom.getAll()) {
+                        await writeTo.setValue(cur);
+                    }
+                }
             }
 
             createObjectStore(storageId, key, indizes) {
@@ -36,8 +69,15 @@ class demawiRepository {
                 let thisObject = this;
                 // wenn sich die Datenbank-Version durch eine andere Seite verändert hat
                 this.dbConnection.onversionchange = function (event) {
-                    thisObject.dbConnection.close();
-                    alert("Die IndexDB hat sich geändert! Bitte die Seite einmal neuladen!");
+                    if (!thisObject.areAllObjectStoresSynced(thisObject.dbConnection)) {
+                        thisObject.dbConnection.close();
+                        thisObject.dbConnection = null;
+                        alert("Die IndexDB hat sich geändert! (" + thisObject.modname + ") Bitte die Seite einmal neuladen! (versionchange)");
+                    } else { // Das Schema hat sich nicht verändert, wir können also ungehindert weitermachen, wenn wir nur neu verbinden.
+                        thisObject.dbConnection.close();
+                        thisObject.dbConnection = null;
+                        thisObject.getConnection();
+                    }
                 };
                 return this.dbConnection;
             }
@@ -58,11 +98,10 @@ class demawiRepository {
                     console.log("request created " + request.idx + "_" + version);
                     request.onsuccess = function (event) {
                         let dbConnection = event.target.result;
-                        console.log("DBconnect success", event);
                         let needNewStores = !thisObject.areAllObjectStoresSynced(dbConnection);
+                        console.log("DBconnect success! (" + thisObject.dbname + ") Need update: " + needNewStores, event);
                         if (needNewStores) {
                             thisObject.closeConnection(request, dbConnection);
-                            console.log("Need Database to sync " + needNewStores);
                             resolve(thisObject.dbConnect(new Date().getTime())); // force upgrade
                         } else {
                             resolve(event.target.result);
@@ -74,7 +113,7 @@ class demawiRepository {
                     }
                     request.onblocked = function () {
                         console.log("DBconnect blocked", request.idx, event);
-                        alert("Please close all other tabs with this site open!");
+                        alert("Die IndexDB hat sich geändert! (" + thisObject.modname + ") Bitte die Seite einmal neuladen! (blocked)");
                         reject();
                     }
                     request.onupgradeneeded = async function (event) {
