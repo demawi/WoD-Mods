@@ -463,7 +463,7 @@ function onweaponskillselect(evt) {
         var selnode = me.options[selindex];
         if (selnode) {
             var itemclassid = selnode.getAttribute('data');
-            for (var i in oldsel.options) {
+            for (let i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1) && (el.getAttribute('data').indexOf(',' + itemclassid + ',') == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -471,7 +471,7 @@ function onweaponskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (let i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1) && (el.getAttribute('data').indexOf(',' + itemclassid + ',') == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -483,7 +483,7 @@ function onweaponskillselect(evt) {
     } else {
         selvalue = -1 * selvalue;
         if (selvalue & (mkt_strings.optionvalue_allpreroundskills * -1)) {
-            for (var i in oldsel.options) {
+            for (let i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_preskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -491,7 +491,7 @@ function onweaponskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (let i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_preskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -501,7 +501,7 @@ function onweaponskillselect(evt) {
             }
         }
         if (selvalue & (mkt_strings.optionvalue_allroundskills * -1)) {
-            for (var i in oldsel.options) {
+            for (let i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_roundskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -509,7 +509,7 @@ function onweaponskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (let i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_roundskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -519,7 +519,7 @@ function onweaponskillselect(evt) {
             }
         }
         if (selvalue & (mkt_strings.optionvalue_allhealskills * -1)) {
-            for (var i in oldsel.options) {
+            for (let i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_healskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -527,7 +527,7 @@ function onweaponskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (let i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_healskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -537,7 +537,7 @@ function onweaponskillselect(evt) {
             }
         }
         if (selvalue & (mkt_strings.optionvalue_allinitiativeskills * -1)) {
-            for (var i in oldsel.options) {
+            for (let i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_initiativeskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -545,7 +545,7 @@ function onweaponskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (let i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_initiativeskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -556,11 +556,11 @@ function onweaponskillselect(evt) {
         }
         if (selvalue & (mkt_strings.optionvalue_allskills * -1)) {
             stat.firstChild.data = '';
-            for (var i in oldsel.options) {
+            for (let i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 mkt_setDisplayState(el, 'block');
             }
-            for (var i in newsel.options) {
+            for (let i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 mkt_setDisplayState(el, 'block');
             }
@@ -1267,7 +1267,7 @@ function onammoskillselect(evt) {
         var selnode = me.options[selindex];
         if (selnode) {
             var itemclassids = selnode.getAttribute('data').split(",");
-            for (var i in oldsel.options) {
+            for (var i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 var ok = false;
                 for (var j in itemclassids) {
@@ -1303,7 +1303,7 @@ function onammoskillselect(evt) {
     } else {
         selvalue = -1 * selvalue;
         if (selvalue & (mkt_strings.optionvalue_allpreroundskills * -1)) {
-            for (var i in oldsel.options) {
+            for (var i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_preskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1311,7 +1311,7 @@ function onammoskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (var i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_preskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1321,7 +1321,7 @@ function onammoskillselect(evt) {
             }
         }
         if (selvalue & (mkt_strings.optionvalue_allroundskills * -1)) {
-            for (var i in oldsel.options) {
+            for (var i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_roundskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1329,7 +1329,7 @@ function onammoskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (var i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_roundskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1339,7 +1339,7 @@ function onammoskillselect(evt) {
             }
         }
         if (selvalue & (mkt_strings.optionvalue_allhealskills * -1)) {
-            for (var i in oldsel.options) {
+            for (var i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_healskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1347,7 +1347,7 @@ function onammoskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (var i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_healskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1357,7 +1357,7 @@ function onammoskillselect(evt) {
             }
         }
         if (selvalue & (mkt_strings.optionvalue_allinitiativeskills * -1)) {
-            for (var i in oldsel.options) {
+            for (var i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_initiativeskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1365,7 +1365,7 @@ function onammoskillselect(evt) {
                     mkt_setDisplayState(el, 'block');
                 }
             }
-            for (var i in newsel.options) {
+            for (var i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 if ((el.getAttribute('data').indexOf(mkt_strings.skilldata_initiativeskills) == -1) && (el.getAttribute('data').indexOf(mkt_strings.skilldata_all) == -1)) {
                     mkt_setDisplayState(el, 'none');
@@ -1376,11 +1376,11 @@ function onammoskillselect(evt) {
         }
         if (selvalue & (mkt_strings.optionvalue_allskills * -1)) {
             stat.firstChild.data = '';
-            for (var i in oldsel.options) {
+            for (var i = 0, l = oldsel.options.length; i < l; i++) {
                 var el = oldsel.options[i];
                 mkt_setDisplayState(el, 'block');
             }
-            for (var i in newsel.options) {
+            for (var i = 0, l = newsel.options.length; i < l; i++) {
                 var el = newsel.options[i];
                 mkt_setDisplayState(el, 'block');
             }
@@ -1454,7 +1454,7 @@ function onoldammoselect(evt) {
             }
         }
         classids = classids.split(",");
-        for (var i in newsel.options) {
+        for (var i = 0, l = newsel.options.length; i < l; i++) {
             var el = newsel.options[i];
             if (classids[1] == mkt_strings.skilldata_all) {
                 mkt_setDisplayState(el, 'block');
@@ -1488,7 +1488,7 @@ function onoldammoselect(evt) {
             var el = skillsel.options[i];
             mkt_setDisplayState(el, 'block');
         }
-        for (var i in newsel.options) {
+        for (var i = 0, l = newsel.options.length; i < l; i++) {
             var el = newsel.options[i];
             mkt_setDisplayState(el, 'block');
         }
@@ -1562,7 +1562,7 @@ function onnewammoselect(evt) {
             }
         }
         classids = classids.split(",");
-        for (var i in oldsel.options) {
+        for (var i = 0, l = oldsel.options.length; i < l; i++) {
             var el = oldsel.options[i];
             if (classids[1] == mkt_strings.skilldata_all) {
                 mkt_setDisplayState(el, 'block');
@@ -1596,7 +1596,7 @@ function onnewammoselect(evt) {
             var el = skillsel.options[i];
             mkt_setDisplayState(el, 'block');
         }
-        for (var i in oldsel.options) {
+        for (var i = 0, l = oldsel.options.length; i < l; i++) {
             var el = oldsel.options[i];
             mkt_setDisplayState(el, 'block');
         }
@@ -2006,6 +2006,8 @@ function mkt_start() {
         var tr2 = mkt_addRow(thetable);
         var tr3 = mkt_addRow(thetable);
         mkt_addCell(tr1, ' ');
+        var td = mkt_addCell(tr1, mkt_strings.label_skill);
+        td.setAttribute('style', 'width:220px;');
         var td = mkt_addCell(tr1, mkt_strings.label_old);
         td.setAttribute('style', 'width:220px;');
         var td = mkt_addCell(tr1, mkt_strings.label_socket);
@@ -2015,27 +2017,24 @@ function mkt_start() {
         td.setAttribute('style', 'width:220px;');
         var td = mkt_addCell(tr1, mkt_strings.label_socket);
         td.setAttribute('style', 'width:80px;');
-        mkt_addCell(tr1, ' ');
-        td = mkt_addCell(tr1, mkt_strings.label_skill);
-        td.setAttribute('style', 'width:220px;');
-        mkt_addCell(tr1, ' ');
+        mkt_addCell(tr1, ' '); // Ausführen
+
         mkt_addCell(tr2, mkt_strings.label_weapon);
+        mkt_addCell(tr2, selWeaponSkills);
         mkt_addCell(tr2, selWeaponOld);
         mkt_addCell(tr2, selWeaponOldSocks);
         mkt_addCell(tr2, mkt_strings.label_arrow);
         mkt_addCell(tr2, selWeaponNew);
         mkt_addCell(tr2, selWeaponNewSocks);
-        mkt_addCell(tr2, mkt_strings.label_for);
-        mkt_addCell(tr2, selWeaponSkills);
         mkt_addCell(tr2, btnWeaponChange);
+
         mkt_addCell(tr3, mkt_strings.label_ammo);
+        mkt_addCell(tr3, selammoSkills);
         mkt_addCell(tr3, selammoOld);
         mkt_addCell(tr3, ' ' /*selammoOldSocks*/); // prepared for config with socks in ammunition
         mkt_addCell(tr3, mkt_strings.label_arrow);
         mkt_addCell(tr3, selammoNew);
         mkt_addCell(tr3, ' ' /*selammoNewSocks*/); // prepared for config with socks in ammunition
-        mkt_addCell(tr3, mkt_strings.label_for);
-        mkt_addCell(tr3, selammoSkills);
         mkt_addCell(tr3, btnAmmoChange);
         thediv.appendChild(thetable);
 
