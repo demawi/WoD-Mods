@@ -5,6 +5,7 @@
 // @version        0.1
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -17,8 +18,10 @@
 (function () {
     'use strict';
 
+    const Storages = demawiRepository.import("Storages");
+
     class Mod {
-        static dbname = "wodKampfberichtArchiv"
+        static dbname = "wodDB";
 
         static async startMod() {
             const title = document.getElementsByTagName("h1")[0];
@@ -94,17 +97,17 @@
                 console.log("Current Report ", reportData.reportId, thisReport);
                 if (!thisReport) thisReport = reportData;
                 if (title.textContent.trim().startsWith("Kampfstatistik")) {
-                    thisReport.statistik = util.getPlainMainContent().outerHTML;
+                    thisReport.statistik = util.getPlainMainContent().documentElement.outerHTML;
                 } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
-                    thisReport.gegenstaende = util.getPlainMainContent().outerHTML;
+                    thisReport.gegenstaende = util.getPlainMainContent().documentElement.outerHTML;
                 } else if (title.textContent.trim().startsWith("Kampfbericht")) {
                     const form = document.getElementsByName("the_form")[0];
                     const levelNr = form.current_level.value;
                     thisReport.levelCount = document.getElementsByClassName("navigation levels")[0].children.length - 1;
                     if (!thisReport.levels) thisReport.levels = [];
-                    thisReport.levels[levelNr - 1] = util.getPlainMainContent().outerHTML;
+                    thisReport.levels[levelNr - 1] = util.getPlainMainContent().documentElement.outerHTML;
                 }
-                reportDB.setValue(reportData.reportId, thisReport);
+                reportDB.setValue(thisReport);
 
                 if (false) { // data dump
                     const allData = await reportDB.getAllData();
@@ -118,129 +121,11 @@
         }
     }
 
-    class Storages {
-
-        static IndexedDb = class {
-            storageId;
-            connection;
-            key;
-            indizes;
-
-            static async create(storageId, key, indizes) {
-                const result = new Storages.IndexedDb(storageId, key, indizes);
-                await result.openDB();
-                return result;
-            }
-
-            constructor(storageId, key, indizes) {
-                this.storageId = storageId;
-                this.key = key;
-                this.indizes = indizes;
-            }
-
-            async openDB() {
-                const thisObject = this;
-                return new Promise((resolve, reject) => {
-                    var request = indexedDB.open(Mod.dbname, 3);
-                    request.onsuccess = function (event) {
-                        console.log("DBconnect success", event);
-                        thisObject.connection = event.target.result;
-                        resolve();
-                    }
-                    request.onerror = function (event) {
-                        console.log("DBconnect error", event);
-                        reject();
-                    }
-                    request.onblocked = function () {
-                        console.log("DBconnect blocked", event);
-                        alert("Please close all other tabs with this site open!");
-                        reject();
-                    }
-                    request.onupgradeneeded = async function (event) {
-                        console.log("DBconnect upgradeneeded", event);
-                        await thisObject.onupgradeneeded(event);
-                        resolve();
-                    }
-                });
-            }
-
-            async setValue(id, dbObject) {
-                const thisObject = this;
-                return new Promise((resolve, reject) => {
-                    let transaction = thisObject.connection.transaction(this.storageId, "readwrite");
-                    let objectStore = transaction.objectStore(this.storageId);
-                    let request = objectStore.put(dbObject);
-                    request.onsuccess = function (event) {
-                        console.log("DBObject save success")
-                        resolve();
-                    };
-                    request.onerror = function (event) {
-                        console.log("DBObject save error", event);
-                        reject();
-                    }
-                });
-            }
-
-            async getValue(dbObjectId) {
-                const thisObject = this;
-                return new Promise((resolve, reject) => {
-                    let transaction = thisObject.connection.transaction(this.storageId, "readwrite");
-                    let objectStore = transaction.objectStore(this.storageId);
-                    const request = objectStore.get(dbObjectId);
-
-                    request.onsuccess = function (event) {
-                        const result = event.target.result;
-                        resolve(result);
-                    };
-                });
-            }
-
-            async onupgradeneeded(event) {
-                const oDb = event.target.result;
-                this.useDb(oDb);
-                if (event.oldVersion === 0) {
-                    try {
-                        let reportStore = oDb.createObjectStore(this.storageId, {
-                            keyPath: this.key
-                        });
-                        this.indizes.forEach(index => {
-                            reportStore.createIndex(index, index);
-                        })
-                    } catch (exception) {
-                        console.warn("objectStoreStatusReportList", exception);
-                    }
-                }
-            }
-
-            useDb(oDb) {
-                // Make sure to add a handler to be notified if another page requests a version
-                // change. We must close the database. This allows the other page to upgrade the database.
-                // If you don't do this then the upgrade won't happen until the user close the tab.
-                oDb.onversionchange = function (event) {
-                    console.log("onversionchange close db");
-                    oDb.close();
-                    console.log("db versionschange", event);
-                    alert("A new version of this page is ready. Please reload!");
-                };
-
-                oDb.onsuccess = function (event) {
-                    console.log("db success", event);
-                };
-
-                oDb.onError = function (event) {
-                    console.warn("db error", event);
-                };
-            }
-
-        }
-
-    }
-
     class MyStorage {
-        static reports;
+        static indexedDb = new Storages.IndexedDb("WoDReportArchieve", Mod.dbname);
+        static reports = this.indexedDb.createObjectStore("reports", "reportId");
 
         static async getReportDB() {
-            if (!this.reports) this.reports = await Storages.IndexedDb.create("reports", "reportId", ["world", "time", "title", "gruppe", "gruppe_id"]);
             return this.reports;
         }
 
@@ -331,16 +216,22 @@
             return node.classList && node.classList.contains(className);
         }
 
+        // Versucht soweit alle Elemente die nicht zum Main-Content gehören rauszufiltern.
         static getPlainMainContent() {
             const myDocument = document.cloneNode(true);
 
-            const remove = node => node.parentElement.removeChild(node);
-            remove(myDocument.getElementById("gadgettable-left-td"));
-            remove(myDocument.getElementById("gadgettable-right-td"));
+            const remove = node => {
+                if (node) node.parentElement.removeChild(node);
+            }
+            remove(myDocument.getElementById("gadgettable-left-td")); // existiert in nem Popup nicht
+            remove(myDocument.getElementById("gadgettable-right-td")); // existiert in nem Popup nicht
             const mainContent = myDocument.getElementsByClassName("gadget main_content lang-de")[0];
-            util.forEachSafe(mainContent.parentElement.children, cur => {
-                if (cur !== mainContent) remove(cur);
-            });
+            if (mainContent) { // existiert in nem Popup nicht
+                util.forEachSafe(mainContent.parentElement.children, cur => {
+                    if (cur !== mainContent) remove(cur);
+                });
+            }
+            remove(myDocument.getElementsByClassName("gadget popup")[0]);
 
             const removeNoWodNodes = node => {
                 util.forEachSafe(node.children, cur => {
@@ -354,7 +245,7 @@
             const tooltip = myDocument.getElementsByClassName("tooltip")[0];
             if (tooltip) remove(tooltip);
 
-            return myDocument.documentElement;
+            return myDocument;
         }
 
         static htmlExport() {
@@ -378,6 +269,15 @@
                 if (a.href) a.href = new URL(a.href).href;
             });
 
+            function createNewButton(text, href) {
+                const newButton = document.createElement("a");
+                newButton.classList = "button clickable";
+                newButton.value = text;
+                newButton.innerText = text;
+                newButton.href = href;
+                return newButton;
+            }
+
             function buttonReplaceWithElement(element, text, href) {
                 if (element) {
                     const newButton = document.createElement("a");
@@ -398,7 +298,11 @@
                 mainNavigationButton = myDocument.getElementsByName("items[0]")[0];
             }
             util.forEach(myDocument.getElementsByName(mainNavigationButton.name), a => {
-                buttonReplaceWithElement(a.parentElement.children[0], "Übersicht", "../");
+                if (a.parentElement.children[0].textContent === "Übersicht") { // im Popup gibt es keine Übersicht
+                    buttonReplaceWithElement(a.parentElement.children[0], "Übersicht", "../");
+                } else {
+                    a.parentElement.insertBefore(createNewButton("Übersicht", "../"), a.parentElement.children[0]);
+                }
             });
             buttonReplace("stats[0]", "Statistik", "Statistik.html");
             buttonReplace("items[0]", "Gegenstände", "Gegenstaende.html");
@@ -410,10 +314,12 @@
             var fileName;
 
             var curElement = myDocument.getElementsByName("current_level")[0];
+            console.log(myDocument);
             if (curElement) {
                 fileName = "Level" + curElement.value;
             } else {
                 curElement = myDocument.getElementsByName("disabled")[0];
+                if (!curElement) curElement = myDocument.getElementsByClassName("button_disabled")[0];
                 fileName = curElement.value.replace("ä", "ae");
             }
 

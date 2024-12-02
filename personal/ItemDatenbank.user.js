@@ -3,6 +3,7 @@
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
 // @include        http*://*.world-of-dungeons.*/wod/spiel/*
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
 // *** [WoD] Item-Datenbank                                  ***
@@ -16,12 +17,16 @@
     'use strict';
     let debug = false;
 
+    const Storages = demawiRepository.import("Storages");
+
     class Mod {
         static dbname = "wodDB";
         static currentDataVersion = 1;
         static currentItemDataVersion = 3; // durch eine Veränderung werden die Items neu aus den Sourcen beschrieben
 
         static async startMod() {
+            console.log("StartMode");
+            console.log("StartMode", Storages);
             const page = util.getWindowPage();
             // Links zu Items finden und markieren. Nahezu überall.
             if (page !== "item.php") await ItemTracking.start();
@@ -44,6 +49,7 @@
         }
 
         static async start() {
+            //await MyStorage.indexedDb.cloneTo("wodCopy");
             var link = document.getElementById("link");
             if (!link) {
                 if (document.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
@@ -1301,217 +1307,32 @@
 
     }
 
-    class Storages {
-
-        static IndexedDb = class {
-            dbConnection;
-            objectStores = [];
-            version = 1;
-            dbname;
-            static idx = 0;
-
-            constructor(dbname) {
-                this.dbname = dbname;
-            }
-
-            createObjectStore(storageId, key, indizes) {
-                let objectStore = new Storages.ObjectStorage(storageId, key, indizes);
-                objectStore.indexedDb = this;
-                this.objectStores.push(objectStore);
-                return objectStore;
-            }
-
-            async getConnection() {
-                if (this.dbConnection) return this.dbConnection;
-                this.dbConnection = await this.dbConnect();
-                this.useDb(this.dbConnection);
-                return this.dbConnection;
-            }
-
-            areAllObjectStoresInstalled(dbConnection) {
-                const installedNames = dbConnection.objectStoreNames; // Array
-                for (const objectStore of this.objectStores) {
-                    if (!installedNames.contains(objectStore.storageId)) {
-                        return false;
-                    }
-                }
-                return true;
-            }
-
-            async dbConnect(version) {
-                const thisObject = this;
-                return new Promise((resolve, reject) => {
-                    var request = indexedDB.open(thisObject.dbname, version);
-                    request.idx = Storages.IndexedDb.idx++;
-                    console.log("request created " + request.idx + "_" + version);
-                    request.onsuccess = function (event) {
-                        let dbConnection = event.target.result;
-                        console.log("DBconnect success", event);
-                        let needNewStores = !thisObject.areAllObjectStoresInstalled(dbConnection);
-                        if (needNewStores) {
-                            request.wewillblock = true;
-                            dbConnection.close();
-                            console.log("Need new Stores to install!!! " + needNewStores);
-                            resolve(thisObject.dbConnect(new Date().getTime())); // force upgrade
-                        } else {
-                            resolve(event.target.result);
-                        }
-                    }
-                    request.onerror = function (event) {
-                        console.log("DBconnect error", event);
-                        reject();
-                    }
-                    request.onblocked = function () {
-                        console.log("DBconnect blocked", request.idx, event);
-                        alert("Please close all other tabs with this site open!");
-                        reject();
-                    }
-                    request.onupgradeneeded = async function (event) {
-                        console.log("DBconnect upgradeneeded", event);
-                        await thisObject.onupgradeneeded(event);
-                        let conn = await thisObject.dbConnect();
-                        resolve(conn);
-                    }
-                });
-            }
-
-            async onupgradeneeded(event) {
-                const dbConnection = event.target.result;
-                try {
-                    this.objectStores.forEach(objectstore => {
-                        const storageId = objectstore.storageId;
-                        if (!dbConnection.objectStoreNames.contains(storageId)) {
-                            let newDbStore = dbConnection.createObjectStore(objectstore.storageId, {
-                                keyPath: objectstore.key
-                            });
-                            if (objectstore.indizes) {
-                                objectstore.indizes.forEach(index => {
-                                    newDbStore.createIndex(index, index);
-                                })
-                            }
-                        }
-                    });
-                } catch (exception) {
-                    console.warn("objectStoreStatusReportList", exception);
-                }
-                return true;
-            }
-
-            useDb(dbConnection) {
-                // Make sure to add a handler to be notified if another page requests a version
-                // change. We must close the database. This allows the other page to upgrade the database.
-                // If you don't do this then the upgrade won't happen until the user close the tab.
-                dbConnection.onversionchange = function (event) {
-                    console.log("onversionchange close db");
-                    dbConnection.close();
-                    console.log("db versionschange", event);
-                    alert("A new version of this page is ready. Please reload!");
-                };
-            }
-        }
-
-        static ObjectStorage = class {
-            storageId;
-            key;
-            indizes;
-            indexedDb;
-
-            constructor(storageId, key, indizes) {
-                this.storageId = storageId;
-                this.key = key;
-                this.indizes = indizes;
-            }
-
-            async connect(withWrite) {
-                let connection = await this.indexedDb.getConnection();
-                let transaction = connection.transaction(this.storageId, withWrite ? "readwrite" : "readonly");
-                return transaction.objectStore(this.storageId);
-            }
-
-            async setValue(dbObject) {
-                dbObject.id = dbObject.name.toLocaleLowerCase().trim();
-                const thisObject = this;
-                return new Promise(async (resolve, reject) => {
-                    let objectStore = await thisObject.connect(true);
-                    let request = objectStore.put(dbObject);
-                    request.onsuccess = function (event) {
-                        resolve();
-                    };
-                    request.onerror = function (event) {
-                        reject();
-                    }
-                });
-            }
-
-            async delete(dbObjectId) {
-                const thisObject = this;
-                return new Promise(async (resolve, reject) => {
-                    let objectStore = await thisObject.connect(true);
-                    let request = objectStore.delete(dbObjectId);
-                    request.onsuccess = function (event) {
-                        resolve();
-                    };
-                    request.onerror = function (event) {
-                        reject();
-                    }
-                });
-            }
-
-            async getValue(dbObjectId) {
-                dbObjectId = dbObjectId.toLocaleLowerCase().trim();
-                const thisObject = this;
-                return new Promise(async (resolve, reject) => {
-                    let objectStore = await thisObject.connect(false);
-                    const request = objectStore.get(dbObjectId);
-                    request.onsuccess = function (event) {
-                        const result = event.target.result;
-                        resolve(result);
-                    };
-                });
-            }
-
-            async contains(dbObjectId) {
-                const thisObject = this;
-                return new Promise(async (resolve, reject) => {
-                    let objectStore = await thisObject.connect(false);
-                    const request = objectStore.getKey(dbObjectId);
-                    request.onsuccess = function (event) {
-                        const result = event.target.result;
-                        resolve(!!result);
-                    };
-                });
-            }
-
-            async getAll() {
-                const thisObject = this;
-                return new Promise(async (resolve, reject) => {
-                    let connection = await thisObject.indexedDb.getConnection();
-                    let transaction = connection.transaction(this.storageId, "readwrite");
-                    let objectStore = transaction.objectStore(this.storageId);
-                    const request = objectStore.getAll();
-
-                    request.onsuccess = function (event) {
-                        const result = event.target.result;
-                        resolve(result);
-                    };
-                });
-            }
-        }
-
-    }
-
     class MyStorage {
-        static indexedDb = new Storages.IndexedDb(Mod.dbname);
-        static itemSources = this.indexedDb.createObjectStore("itemSources", "id");
-        static items = this.indexedDb.createObjectStore("items", "id");
+        static adjust = function (objStore) {
+            let resultGetValue = objStore.getValue;
+            objStore.getValue = async function (dbObjectId) {
+                dbObjectId = dbObjectId.toLocaleLowerCase().trim();
+                return await resultGetValue.call(objStore, dbObjectId);
+            }
+            let resultSetValue = objStore.setValue;
+            objStore.setValue = async function (dbObject) {
+                dbObject.id = dbObject.name.toLocaleLowerCase().trim();
+                await resultSetValue.call(objStore, dbObject);
+            }
+            return objStore;
+        }
+        static indexedDb = new Storages.IndexedDb("ItemDB", Mod.dbname);
+        static itemSources = this.adjust(this.indexedDb.createObjectStore("itemSources", "id"));
+        static items = this.adjust(this.indexedDb.createObjectStore("items", "id"));
 
-        //static test = this.indexedDb.createObjectStore("test", "id");
+        // static test = this.indexedDb.createObjectStore("test", "id");
 
         static getItemSourceDB() {
             return this.itemSources;
         }
 
         static getItemDB() {
+
             return this.items;
         }
 

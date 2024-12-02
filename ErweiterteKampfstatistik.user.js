@@ -10,6 +10,7 @@
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
 // @include        http*://*/wod/spiel/*dungeon/combat_report.php*
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -22,7 +23,10 @@
 (function() {
     'use strict';
 
+    const Storages = demawiRepository.import("Storages");
+
     class Mod {
+        static dbname = "wodDB";
         static version = "0.19";
         static stand = "17.11.2024";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
@@ -35,12 +39,13 @@
 
         // Einstiegspunkt der Anwendung
         static async startMod() {
+            let thisObject = this;
             if (WoD.istSeite_Kampfbericht()) { // Einzelseite
                 Mod.outputAnchor = Mod.createOutputAnchor();
                 Mod.runSave(async function () {
                     // cur_rep_id für Dungeons, report bei Schlachten
                     const reportId = WoD.getReportId();
-                    await Storage.loadThisReport(reportId);
+                    thisObject.thisReport = await MyStorage.getReportDB().getValue(reportId);
 
                     var levelData = ReportParser.readKampfberichtAndStoreIntoReport(document, Mod.thisReport, reportId);
                     if (levelData) {
@@ -53,7 +58,7 @@
                         }
                         Mod.outputAnchor.setTitle(hinweisText);
                         Mod.thisLevelDatas = [levelData];
-                        await Storage.saveThisReport();
+                        await MyStorage.getReportDB().setValue(thisObject.thisReport);
                     }
                 });
             }
@@ -61,7 +66,7 @@
                 Mod.outputAnchor = Mod.createOutputAnchor();
                 Mod.runSave(async function () {
                     const reportId = WoD.getReportId();
-                    await Storage.loadThisReport(reportId);
+                    thisObject.thisReport = await MyStorage.getReportDB().getValue(reportId);
 
                     if (Mod.thisReport.levelCount) {
                         const reportProgress = Mod.getReportProgress();
@@ -75,7 +80,7 @@
                     } else {
                         Mod.outputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
                     }
-                    Storage.validateAllReports(); // no await
+                    MyStorage.validateAllReports(); // no await
                 });
             }
         }
@@ -796,7 +801,7 @@
                             }
                         } else {
                             console.log("Aktion nicht zuweisbar", td);
-                            window.alert("Aktion nicht zuweisbar!");
+                            if (typeof testEnvironment !== "undefined") window.alert("Aktion nicht zuweisbar!");
                         }
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
@@ -985,6 +990,8 @@
                 return "Gift";
             else if (stringLine.includes("Manaschaden"))
                 return "Mana";
+            else if (stringLine.includes("Arkaner Schaden"))
+                return "Arkan";
             console.error("DamageType kann nicht bestimmt werden: " + stringLine);
             return "???";
         }
@@ -1119,6 +1126,10 @@
             }
         }
 
+        static searchSkill(element) {
+            return util.arraySearch(element.children, elem => elem.tagName === "A" && elem.href.includes("/skill/"));
+        }
+
         static Action(actionTR, initiative, action, target) {
             var actionText = action.innerText;
             var who;
@@ -1207,6 +1218,15 @@
                     } else { // Fähigkeit in Klammern
                         var matcher = actionText.match(/(greift per Fernkampf an|greift im Nahkampf an|greift magisch an|greift sozial an|greift hinterhältig an|verseucht|entschärft|wirkt als Naturgewalt auf|wird ausgelöst auf|erwirkt eine Explosion gegen) \(/);
                         if (!matcher) {
+                            fertigkeit = {};
+                            fertigkeit.type = action.childNodes[1].textContent;
+                            let actionHref = this.searchSkill(action);
+                            fertigkeit.name = actionHref.textContent;
+                            fertigkeit.typeRef = actionHref.outerHTML;
+                            matcher = actionText.match(/\((.d*)\)/);
+                            if (matcher) {
+                                fertigkeit.wurf = matcher[1];
+                            } else fertigkeit.wurf = 0;
                             console.error("Unbekannter fertigkeit.type gefunden! " + actionText);
                         } else {
                             var index = matcher.index;
@@ -2128,59 +2148,32 @@
         }
     }
 
-
-    class Storage {
-        // feste Punkte im Storage die auf andere IDs im Storage verweisen
-        static data = null;
-        static reportIds = null;
-
-        // Die einzige Methode mit GM.setValue, merkt sich die Ids in einem festen Ankerpunkt im Storage
-        // id => data wird direkt auf den Root des GM-Storages geschrieben.
-        // Die id wird sich unter einer Map unter der referenceMapId gespeichert.
-        // So können Daten direkt und schnell ohne großen Overhead direkt abgerufen werden, aber wir haben
-        // dennoch weiterhin einen Überblick über alle IDs über die entsprechenden Anker-Kontexte.
-        // wenn 'data' undefined ist, wird das Objekt unter der zugehörigen ID gelöscht.
-        static async storeData(referenceMapId, id, data, metaData) {
-            if (!metaData) metaData = true;
-            var thisData = this[referenceMapId];
-            if (!thisData) {
-                thisData = await GM.getValue(referenceMapId, {});
-                if (!thisData) thisData = {};
-                this[referenceMapId] = thisData;
+    class MyStorage {
+        static adjust = function (objStore) {
+            let resultGetValue = objStore.getValue;
+            objStore.getValue = async function (dbObjectId) {
+                let result = await resultGetValue.call(objStore, dbObjectId);
+                if (!result) result = {reportId: dbObjectId};
+                return result;
             }
-            if (data) {
-                thisData[id] = metaData;
-                await GM.setValue(referenceMapId, thisData);
-            } else { // delete
-                if (thisData[id]) {
-                    delete thisData[id];
-                    await GM.setValue(referenceMapId, thisData);
-                }
+            let resultSetValue = objStore.setValue;
+            objStore.setValue = async function (dbObject) {
+                await resultSetValue.call(objStore, dbObject);
             }
-            await GM.setValue(id, data);
+            return objStore;
         }
+        static indexedDb = new Storages.IndexedDb("WoDStats+", Mod.dbname);
+        static reports = this.adjust(this.indexedDb.createObjectStore("reportStats", "reportId"));
 
-        static async gmSetValue(id, data) {
-            await this.storeData("data", id, data);
-        }
-
-        static async gmSetReport(id, report) {
-            await this.storeData("reportIds", id, report, report ? report.metaData : null);
-        }
-
-        static async gmGetReport(id) {
-            const result = await GM.getValue(id);
-            if (!result) return {};
-            // Nicht die aktuell verwendete Report-Version entdeckt => Der Report wird verworfen.
-            if (!result.metaData || !result.metaData.dataVersion || result.metaData.dataVersion !== Mod.currentReportDataVersion) {
-                console.log("Report enthält alte Daten und wird verworfen", result);
-                await this.gmSetReport(id); // delete
-                return {};
-            }
-            return result;
+        /**
+         * @returns {Storages.ObjectStorage}
+         */
+        static getReportDB() {
+            return this.reports;
         }
 
         static async validateAllReports() {
+            return;
             if (!this.reportIds) this.reportIds = await GM.getValue("reportIds", {});
             var somethingDeleted = false;
             var compareDate = new Date();
@@ -2194,24 +2187,6 @@
                 }
             }
             if (somethingDeleted) await this.gmSetValue("reportIds", this.allReports);
-        }
-
-        static async loadThisReport(reportId) {
-            const storeId = "report_" + reportId;
-            const result = await this.gmGetReport(storeId);
-            Mod.thisReport = result;
-            //console.log("Loaded report", result);
-        }
-
-        static async saveThisReport() {
-            const storeId = "report_" + Mod.thisReport.id;
-            Mod.thisReport.metaData = {
-                dataVersion: Mod.currentReportDataVersion,
-                time: new Date().getTime()
-            };
-            console.log("Saved report: ", storeId, Mod.thisReport);
-            await this.gmSetReport(storeId, Mod.thisReport);
-            //console.log("Stored report", thisReport);
         }
 
     }
