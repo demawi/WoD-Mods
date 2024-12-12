@@ -13,7 +13,7 @@
 // *** Danke! demawi                                         ***
 // *************************************************************
 
-(function() {
+(function () {
     'use strict';
     let debug = false;
 
@@ -54,6 +54,7 @@
             if (!link) {
                 if (document.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
                     let itemName = document.querySelector("form input[name='name']").value;
+                    console.log("Gegenstand existiert nicht '" + itemName + "'");
                     await MyStorage.notExistingItem(itemName.trim());
                 }
                 return;
@@ -75,7 +76,28 @@
             const item = await ItemParser.getItemDataFromSource(sourceItem);
             await MyStorage.getItemDB().setValue(item);
             console.log("Gegenstandsseite", sourceItem, item);
-            //ItemParser.rewriteAllItemsFromSource();
+            ItemParser.rewriteAllItemsFromSource();
+        }
+    }
+
+    class ItemAutoLoader {
+        static async start() {
+            const item = await this.findNext();
+            if (item) {
+                console.log("Auto-Load Item: " + item.name);
+                const iframe = document.createElement("iframe");
+                iframe.src = WoD.getItemUrl(item.name);
+                iframe.style.display = "none";
+                document.body.append(iframe);
+            }
+        }
+
+        static async findNext() {
+            const allItems = await MyStorage.getItemSourceDB().getAll();
+            for (const sourceItem of allItems) {
+                if (sourceItem.invalid) continue;
+                if (!sourceItem.details) return sourceItem;
+            }
         }
     }
 
@@ -113,6 +135,7 @@
 
                     if (index > 0) {
                         const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
+                        if (sourceItem && sourceItem.invalid) continue;
                         if (!sourceItem || !sourceItem.details) missingItemsFound++;
                         if (!sourceItem) addedItems++;
                         await MyStorage.indexItem(itemName, itemLinkElement, sourceItem);
@@ -134,6 +157,7 @@
             setInterval(async function () {
                 checkSiteForItems();
             }, 10000);
+            ItemAutoLoader.start();
         }
     }
 
@@ -318,13 +342,12 @@
                         const itemSpan = document.createElement("span");
                         const href = document.createElement("a");
                         itemSpan.append(href);
-                        const url = "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURIComponent(item.name);
+                        const url = WoD.getItemUrl(item.name);
                         href.href = url;
                         href.target = "ItemView";
                         href.innerHTML = item.name;
 
                         if (itemDBSearch.checked) {
-                            console.log("slots" + item.data.edelslots);
                             for (let i = 0, l = item.data.edelslots; i < l; i++) {
                                 if (itemSpan.children.length < 2) {
                                     const abstand = document.createElement("span");
@@ -728,14 +751,14 @@
             static "Bonus - Fertigkeit" = (container) => this.effects2Kriterium(container, "fertigkeit", ["<Fertigkeit>", ...Object.values(ItemSearch.SearchDomains.FERTIGKEITEN)])
             static "Bonus - Talentklasse" = (container) => this.effects2Kriterium(container, "talentklasse", ["<Talentklasse>", ...ItemSearch.SearchDomains.TALENTKLASSEN])
 
-            static "Bonus - Angriff" = (container) => this.effects2Kriterium(container, "angriff", ["<Angriff>", ...ItemSearch.SearchDomains.ANGRIFFSARTEN])
-            static "Bonus - Parade" = (container) => this.effects2Kriterium(container, "parade", ["<Parade>", ...ItemSearch.SearchDomains.ANGRIFFSARTEN])
+            static "Bonus - Angriff" = (container) => this.effects2Kriterium(container, "angriff", ["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN])
+            static "Bonus - Parade" = (container) => this.effects2Kriterium(container, "parade", ["<Parade>", ...ItemSearch.SearchDomains.PARADETYPEN])
             static "Bonus - Schaden" = function (container) {
                 const select1 = ItemSearch.UI.createSelect(["<Schadensart>", ...ItemSearch.SearchDomains.SCHADENSARTEN]);
                 container.append(select1);
                 const select2 = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
                 container.append(select2);
-                const select3 = ItemSearch.UI.createSelect(["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSARTEN]);
+                const select3 = ItemSearch.UI.createSelect(["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN]);
                 container.append(select3);
                 const select4 = ItemSearch.UI.createSelect(["<a/z>", ...ItemSearch.SearchDomains.SCHADENSBONITYP]);
                 container.append(select4);
@@ -841,6 +864,9 @@
             static fetchDataForAuswahllisten() {
                 if (!this.GEGENSTANDSKLASSEN) {
                     this.GEGENSTANDSKLASSEN = WoD.getAuswahlliste("item_?item_class");
+                    this.GEGENSTANDSKLASSEN.push("Duellbelohnung");
+                    this.GEGENSTANDSKLASSEN.push("Einzigartige Duellbelohnung");
+                    this.GEGENSTANDSKLASSEN.sort();
                     this.FERTIGKEITEN = WoD.getAuswahlliste("item_?any_skill");
                     this.EIGENSCHAFTEN = WoD.getAuswahlliste("item_?bonus_attr");
                     this.TALENTKLASSEN = WoD.getAuswahlliste("item_?any_skillclass");
@@ -868,12 +894,13 @@
                 "Schütze": "Sü",
             }
             static SCHADENSBONITYP = ["Zusätzlich (weder a noch z)", "Nur bei Anwendung (a)", "Nur wenn schon vorhanden (z)"];
-            static ANGRIFFSARTEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt"];
+            static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle entschärfen"];
+            static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen"];
             static BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
             static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
             static JEGLICHE_HAND = ["Beide Hände", "Waffenhand", "Schildhand", "Einhändig"];
 
-            static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Blitzschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Säureschaden", "Psychologischer Schaden", "Arkaner Schaden"];
+            static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Blitzschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Säureschaden", "Psychologischer Schaden", "Arkaner Schaden", "Falle entschärfen"];
         }
 
 
@@ -1005,6 +1032,13 @@
 
         static matches(item) {
             const result = this.#matches(item);
+            if (false && item.data && item.data.bedingungen) {
+                console.log(item);
+                for (const [name, comp] of Object.entries(item.data.bedingungen)) {
+                    if (comp.comp === "bis") return true;
+                }
+                return false;
+            }
             if (this.debug) console.log("Matches", result);
             return result;
         }
@@ -1038,8 +1072,12 @@
         static async rewriteAllItemsFromSource() {
             let itemSources = await MyStorage.getItemSourceDB().getAll();
             for (const itemSource of itemSources) {
-                let item = await this.getItemDataFromSource(itemSource);
-                await MyStorage.getItemDB().setValue(item);
+                if (itemSource.invalid) {
+                    await MyStorage.getItemDB().deleteValue(itemSource.name);
+                } else {
+                    let item = await this.getItemDataFromSource(itemSource);
+                    await MyStorage.getItemDB().setValue(item);
+                }
             }
         }
 
@@ -1319,6 +1357,11 @@
                 dbObject.id = dbObject.name.toLocaleLowerCase().trim();
                 await resultSetValue.call(objStore, dbObject);
             }
+            let resultDeleteValue = objStore.deleteValue;
+            objStore.deleteValue = async function (dbObjectId) {
+                dbObjectId = dbObjectId.toLocaleLowerCase().trim();
+                await resultDeleteValue.call(objStore, dbObjectId);
+            }
             return objStore;
         }
         static indexedDb = new Storages.IndexedDb("ItemDB", Mod.dbname);
@@ -1341,6 +1384,7 @@
             item.invalid = true;
             await this.getItemSourceDB().setValue(item);
         }
+
 
         static async indexItem(itemName, element, sourceItem) {
             const missingElement = element.parentElement.className === "missingWrapper" && element.parentElement.children.length > 1 && element.parentElement.children[1];
@@ -1385,6 +1429,10 @@
     class WoD {
         static AUSWAHL_IDS = [3, 4, 5, 6, 7, 10, 11];
 
+        static getItemUrl(itemName) {
+            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURIComponent(itemName);
+        }
+
         static getSuchfeld() {
             return this.getSuchInput("item_?name");
         }
@@ -1415,7 +1463,7 @@
 
     class util {
         static forEach(array, fn) {
-            for(var i=0,l=array.length;i<l;i++) {
+            for (var i = 0, l = array.length; i < l; i++) {
                 fn(array[i]);
             }
         }
@@ -1482,15 +1530,6 @@
             return pathname[pathname.length - 1];
         }
 
-        static createUploadLink(data, filename) {
-            var result = document.createElement('a');
-            var blob = new Blob([data], {type: 'text/plain'});
-            result.href = window.URL.createObjectURL(blob);
-            result.download = filename;
-            result.dataset.downloadurl = ['text/plain', result.download, result.href].join(':');
-            result.draggable = true;
-            return result;
-        }
     }
 
     Mod.startMod();

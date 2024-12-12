@@ -6,6 +6,43 @@ class demawiRepository {
         return this[type];
     }
 
+    static File = class {
+        static forDownload(filename, data) {
+            const blob = new Blob([data], {type: 'text/plain'});
+            const fileURL = URL.createObjectURL(blob);
+            const downloadLink = document.createElement('a');
+            downloadLink.href = fileURL;
+            downloadLink.download = filename;
+            downloadLink.click();
+            URL.revokeObjectURL(fileURL);
+        }
+
+        static createDownloadLink(filename, data) {
+            const blob = new Blob([data], {type: 'text/plain'});
+            const downloadLink = document.createElement('a');
+            downloadLink.href = window.URL.createObjectURL(blob);
+            downloadLink.download = filename;
+            downloadLink.dataset.downloadurl = ['text/plain', downloadLink.download, downloadLink.href].join(':');
+            downloadLink.draggable = true;
+            return downloadLink;
+        }
+
+        static createUploadForRead(callback) {
+            const result = document.createElement("input");
+            result.type = "file";
+            result.onchange = function () {
+                const file = result.files[0];
+                const reader = new FileReader();
+                reader.onload = function () {
+                    callback(reader.result);
+                };
+                reader.readAsText(file);
+            }
+            return result;
+        }
+
+    }
+
     static Storages = class {
 
         static IndexedDb = class {
@@ -37,10 +74,10 @@ class demawiRepository {
                     dbTo.createObjectStore(objectStoreName, objectStoreFrom.keyPath);
                     const readFrom = new demawiRepository.Storages.ObjectStorage(objectStoreName, objectStoreFrom.keyPath, null, true);
                     readFrom.indexedDb = this;
-                    const readTo = new demawiRepository.Storages.ObjectStorage(objectStoreName, objectStoreFrom.keyPath, null, false);
-                    readTo.indexedDb = dbTo;
+                    const writeTo = new demawiRepository.Storages.ObjectStorage(objectStoreName, objectStoreFrom.keyPath, null, false);
+                    writeTo.indexedDb = dbTo;
                     objectStoresRead.push(readFrom);
-                    objectStoresWrite.push(readTo);
+                    objectStoresWrite.push(writeTo);
                 }
                 for (var i = 0, l = objectStoresRead.length; i < l; i++) {
                     let readFrom = objectStoresRead[i];
@@ -49,6 +86,104 @@ class demawiRepository {
                         await writeTo.setValue(cur);
                     }
                 }
+            }
+
+            async exportToJson() {
+                const idbDatabase = await this.getConnection();
+                return new Promise((resolve, reject) => {
+                    const exportObject = {}
+                    if (idbDatabase.objectStoreNames.length === 0) {
+                        resolve(JSON.stringify(exportObject))
+                    } else {
+                        const transaction = idbDatabase.transaction(
+                            idbDatabase.objectStoreNames,
+                            'readonly'
+                        )
+
+                        transaction.addEventListener('error', reject)
+
+                        for (const storeName of idbDatabase.objectStoreNames) {
+                            const allObjects = []
+                            transaction
+                                .objectStore(storeName)
+                                .openCursor()
+                                .addEventListener('success', event => {
+                                    const cursor = event.target.result
+                                    if (cursor) {
+                                        // Cursor holds value, put it into store data
+                                        allObjects.push(cursor.value)
+                                        cursor.continue()
+                                    } else {
+                                        // No more values, store is done
+                                        exportObject[storeName] = allObjects
+
+                                        // Last store was handled
+                                        if (
+                                            idbDatabase.objectStoreNames.length ===
+                                            Object.keys(exportObject).length
+                                        ) {
+                                            resolve(JSON.stringify(exportObject))
+                                        }
+                                    }
+                                })
+                        }
+                    }
+                })
+            }
+
+            async importFromJson(json) {
+                const idbDatabase = await this.getConnection();
+                return new Promise((resolve, reject) => {
+                    const transaction = idbDatabase.transaction(
+                        idbDatabase.objectStoreNames,
+                        'readwrite'
+                    )
+                    transaction.addEventListener('error', reject)
+
+                    var importObject = JSON.parse(json)
+                    for (const storeName of idbDatabase.objectStoreNames) {
+                        let count = 0
+                        for (const toAdd of importObject[storeName]) {
+                            const request = transaction.objectStore(storeName).add(toAdd)
+                            request.addEventListener('success', () => {
+                                count++;
+                                if (count === importObject[storeName].length) {
+                                    // Added all objects for this store
+                                    delete importObject[storeName]
+                                    if (Object.keys(importObject).length === 0) {
+                                        // Added all object stores
+                                        resolve()
+                                    }
+                                }
+                            })
+                        }
+                    }
+                })
+            }
+
+            async clearDatabase() {
+                const idbDatabase = await this.getConnection();
+                return new Promise((resolve, reject) => {
+                    const transaction = idbDatabase.transaction(
+                        idbDatabase.objectStoreNames,
+                        'readwrite'
+                    )
+                    transaction.addEventListener('error', reject)
+
+                    let count = 0
+                    for (const storeName of idbDatabase.objectStoreNames) {
+                        transaction
+                            .objectStore(storeName)
+                            .clear()
+                            .addEventListener('success', () => {
+                                count++
+                                if (count === idbDatabase.objectStoreNames.length) {
+                                    // Cleared all object stores
+                                    resolve()
+                                }
+                            })
+                    }
+                })
             }
 
             createObjectStore(storageId, key, indizes) {
@@ -200,7 +335,7 @@ class demawiRepository {
                 });
             }
 
-            async delete(dbObjectId) {
+            async deleteValue(dbObjectId) {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
                     let objectStore = await thisObject.connect(true);

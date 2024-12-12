@@ -103,7 +103,11 @@
                 } else if (title.textContent.trim().startsWith("Kampfbericht")) {
                     const form = document.getElementsByName("the_form")[0];
                     const levelNr = form.current_level.value;
-                    thisReport.levelCount = document.getElementsByClassName("navigation levels")[0].children.length - 1;
+
+                    let navigationLevels = document.getElementsByClassName("navigation levels")[0];
+                    if (navigationLevels) {
+                        thisReport.levelCount = (navigationLevels.children.length - 1);
+                    }
                     if (!thisReport.levels) thisReport.levels = [];
                     thisReport.levels[levelNr - 1] = util.getPlainMainContent().documentElement.outerHTML;
                 }
