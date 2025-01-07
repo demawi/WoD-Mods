@@ -40,7 +40,6 @@ class demawiRepository {
             }
             return result;
         }
-
     }
 
     static Storages = class {
@@ -393,7 +392,113 @@ class demawiRepository {
                 return await this.indexedDb.doesObjectStoreExist(this);
             }
         }
+    }
 
+    static BBCodeExporter = class {
+        static hatClassName(node, className) {
+            return node.classList && node.classList.contains(className);
+        }
+
+        static getStyle(el, property, defaultSize) {
+            if (!el.tagName) return defaultSize;
+            return window.getComputedStyle(el, null).getPropertyValue(property);
+        }
+
+        static toBBCode(node, defaultSize) {
+            defaultSize = this.getStyle(node, "font-size", defaultSize);
+
+            if (node.classList && node.classList.contains("bbignore")) return "";
+            var result = this.toBBCodeRaw(node, defaultSize);
+            console.log(result)
+            if (result.length !== 3) {
+                console.log("Interner Fehler: Keine Array-Länge von 3 zurückgegeben", node);
+            }
+            if (result[1].trim() !== "" && !result[1].includes("[table") && !result[1].includes("[tr") && !result[1].includes("[td") && !result[1].includes("[th") && !result[0].includes("[img")) {
+                if (node.style && node.style.textAlign === "center") {
+                    result[0] = result[0] + "[center]";
+                    result[2] = "[/center]" + result[2];
+                }
+                if (node.style && node.style.fontStyle === "italic") {
+                    result[0] = result[0] + "[i]";
+                    result[2] = "[/i]" + result[2];
+                }
+                if (this.getStyle(node, "font-weight") === "700") {
+                    result[0] = result[0] + "[b]";
+                    result[2] = "[/b]" + result[2];
+                }
+                let fontSize = this.getStyle(node, "font-size", defaultSize);
+                if (fontSize) {
+                    fontSize = fontSize.replace("px", "");
+                    result[0] = result[0] + "[size=" + (Math.round(fontSize) - 2) + "]";
+                    result[2] = "[/size]" + result[2];
+                }
+                if (node.style && node.style.color && !this.hatClassName(node, "bbignoreColor")) {
+                    result[0] = result[0] + "[color=" + node.style.color + "]";
+                    result[2] = "[/color]" + result[2];
+                }
+            }
+            return result.join("");
+        }
+
+        static toBBCodeRaw(node, defaultSize) {
+            switch (node.tagName) {
+                case "TABLE":
+                    return ["[table" + (node.border ? " border=" + node.border : "") + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/table]"];
+                case "TR":
+                    return ["[tr]", this.toBBCodeArray(node.childNodes, defaultSize), "[/tr]"];
+                case "TD":
+                    if (node.colSpan > 1) {
+                        return ["[td colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
+                    }
+                    return ["[td]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
+                case "TH":
+                    if (node.colSpan > 1) {
+                        return ["[th colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                    }
+                    return ["[th]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                case "DIV":
+                case "SPAN":
+                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
+                case "IMG":
+                    return ["[img]", node.src, "[/img]"];
+                case "SELECT":
+                    return ["", "", ""];
+                case "A":
+                    if (node.href.startsWith("http")) {
+                        if (node.classList.contains("rep_monster")) {
+                            return ["", "[beast:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
+                        } else {
+                            return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/url]"];
+                        }
+                    }
+                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
+                case "THEAD":
+                case "TBODY": // ignore it
+                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
+                case "BR":
+                    return ["", "\n", ""];
+                default:
+                    if (typeof node.tagName === 'undefined') {
+                        return ["", node.textContent.replaceAll("\n", ""), ""];
+                    } else {
+                        console.error("Unbekannter TagName gefunden: '" + node.tagName + "'");
+                    }
+            }
+        }
+
+        static toBBCodeArray(childNodes, defaultSize) {
+            return demawiRepository.util.arrayMap(childNodes, a => this.toBBCode(a, defaultSize)).join("");
+        }
+    }
+
+    static util = class {
+        static arrayMap(list, fn) {
+            var result = Array();
+            for (var i = 0, l = list.length; i < l; i++) {
+                result.push(fn(list[i]));
+            }
+            return result;
+        }
     }
 
 }
