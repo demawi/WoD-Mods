@@ -26,60 +26,7 @@
         static async startMod() {
             const title = document.getElementsByTagName("h1")[0];
             if (title.textContent.trim() === "Kampfberichte") {
-                const reportDB = await MyStorage.getReportDB();
-                const tbody = document.getElementsByClassName("content_table")[0].children[0];
-                console.log("tbody", tbody.children.length);
-                for (var i = 1, l = tbody.children.length; i < l; i++) {
-                    const curTR = tbody.children[i];
-                    const inputs = curTR.getElementsByTagName("input");
-                    var reportId;
-                    for (var k = 0, kl = inputs.length; k < kl; k++) {
-                        const curInput = inputs[k];
-                        if (curInput.name.startsWith("report_id")) {
-                            reportId = curInput.value;
-                            break;
-                        }
-                    }
-                    const thisReport = await reportDB.getValue(reportId);
-
-                    const reportStatus = document.createElement("td");
-                    curTR.append(reportStatus);
-
-                    if (!thisReport) {
-                        reportStatus.innerHTML += "Fehlt komplett";
-                    } else {
-                        var haben = 0;
-                        var brauchen = 0;
-                        if (thisReport && thisReport.statistik) {
-                            haben++;
-                        } else {
-                            brauchen++;
-                            reportStatus.innerHTML += " S";
-                        }
-                        if (thisReport && thisReport.gegenstaende) {
-                            haben++;
-                        } else {
-                            brauchen++;
-                            reportStatus.innerHTML += " G";
-                        }
-                        if (!thisReport || !thisReport.levels) {
-                            brauchen++;
-                            reportStatus.innerHTML += " Lx";
-                        } else {
-                            for (var li = 0, ll = thisReport.levelCount; li < ll; li++) {
-                                if (thisReport.levels[li]) {
-                                    haben++;
-                                } else {
-                                    brauchen++;
-                                    reportStatus.innerHTML += " L" + (li + 1);
-                                }
-                            }
-                        }
-                        if (brauchen === 0) {
-                            reportStatus.innerHTML += "Komplett";
-                        }
-                    }
-                }
+                MainPage.start();
             } else {
                 const button = document.createElement("span");
                 button.classList.add("nowod");
@@ -125,11 +72,250 @@
         }
     }
 
+    class MainPage {
+        static anchor;
+        static wodContent;
+        static title;
+        static statExecuter
+
+        static async start() {
+            const title = document.getElementsByTagName("h1")[0];
+            const wodContent = document.getElementsByClassName("content_table")[0];
+            const anchor = document.createElement("div");
+            this.anchor = anchor;
+            wodContent.parentElement.insertBefore(this.anchor, wodContent);
+            wodContent.parentElement.removeChild(wodContent);
+            this.anchor.append(wodContent);
+            this.wodContent = wodContent;
+
+            const thisObject = this;
+            const button = document.createElement("span");
+            button.classList.add("nowod");
+            button.innerHTML = " (Archiv)";
+            button.style.fontSize = "12px";
+            button.style.cursor = "pointer";
+            button.onclick = async function () {
+                console.log("contains: " + anchor.contains(wodContent))
+                if (anchor.contains(wodContent)) {
+                    if(!thisObject.statExecuter) {
+                        thisObject.statExecuter = unsafeWindow.statExecuter || function () {}
+                    }
+                    await MainPage.showOverview();
+                    //title.innerText = "Kampfberichte-Archiv";
+                } else {
+                    MainPage.showWodOverview();
+                    //title.innerText = "Kampfberichte";
+                }
+            }
+            title.appendChild(button);
+            this.title = title;
+
+            await this.fillOutCompletion();
+        }
+
+        static async createTable() {
+            const table = document.createElement("table");
+            table.style.width = "100%";
+            table.classList.add("content_table");
+            const tbody = document.createElement("tbody");
+            table.append(tbody);
+            const trHead = document.createElement("tr");
+            trHead.className = "header";
+            tbody.append(trHead);
+            let th = document.createElement("th");
+            trHead.append(th);
+            th.innerText = "Datum";
+            th = document.createElement("th");
+            trHead.append(th);
+            th.innerText = "Dungeon";
+            const allReports = await MyStorage.getReportDB().getAll();
+            allReports.reverse();
+            let switcher = false;
+            allReports.forEach(a => {
+                //if(a.gruppe !== "Freizeit-Helden") return;
+                switcher = !switcher;
+                const tr = document.createElement("tr");
+                tr.className = switcher ? "row0" : "row1";
+                tbody.append(tr);
+                const dateTD = document.createElement("td");
+                tr.append(dateTD);
+                dateTD.innerText = a.time;
+                const nameTD = document.createElement("td");
+                tr.append(nameTD);
+                nameTD.innerText = a.title;
+                const actionsTD = document.createElement("td");
+                tr.append(actionsTD);
+                MainPage.createReportActions(a, actionsTD);
+            });
+            return table;
+        }
+
+        static async showOverview() {
+            this.anchor.removeChild(this.anchor.children[0]);
+            this.anchor.append(await MainPage.createTable());
+            await this.fillOutCompletion();
+        }
+
+        static async showWodOverview() {
+            this.anchor.removeChild(this.anchor.children[0]);
+            this.anchor.append(this.wodContent);
+        }
+
+        static async showSite(report, reportSiteHTML, kampfbericht, kampfstatistik) {
+            this.anchor.removeChild(this.anchor.children[0]);
+            console.log("AnchorLength" + this.anchor.children.length);
+            const temp = document.createElement("div");
+            temp.innerHTML = reportSiteHTML;
+            this.anchor.append(temp);
+            this.title.scrollIntoView();
+            console.log("statE", this.statExecuter);
+            if (this.statExecuter) {
+                await this.statExecuter(kampfbericht, kampfstatistik);
+            }
+            const inputs = temp.getElementsByTagName("input");
+            for (var i = 0, l = inputs.length; i < l; i++) {
+                const input = inputs[i];
+                if (input.name !== "disabled") {
+                    input.onclick = function (e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        switch (input.value) {
+                            case "Übersicht":
+                                MainPage.showOverview();
+                                break;
+                            case "Statistik":
+                                MainPage.showSite(report, report.statistik, false, true);
+                                break;
+                            case "Gegenstände":
+                                MainPage.showSite(report, report.gegenstaende);
+                                break;
+                            case "Bericht":
+                                MainPage.showSite(report, report.levels[0], true, false);
+                                break;
+                            default:
+                                const matches = input.value.match(/Level.*(\d+)/)
+                                if (matches) {
+                                    MainPage.showSite(report, report.levels[matches[1] - 1], true, false);
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+
+        }
+
+        static createReportActions(report, result) {
+            const reportId = document.createElement("input");
+            result.append(reportId);
+            reportId.value = report.reportId;
+            reportId.type = "hidden";
+            reportId.name = "report_id[0]";
+            reportId.onclick = function (e) {
+                e.preventDefault();
+                MainPage.showSite(report, report.statistik, false, true);
+            }
+
+            const statistik = document.createElement("input");
+            result.append(statistik);
+            statistik.value = "Statistik";
+            statistik.type = "submit";
+            statistik.className = "button clickable";
+            statistik.onclick = function (e) {
+                e.preventDefault();
+                MainPage.showSite(report, report.statistik, false, true);
+            }
+
+            const gegenstaende = document.createElement("input");
+            result.append(gegenstaende);
+            gegenstaende.value = "Gegenstände";
+            gegenstaende.type = "submit";
+            gegenstaende.className = "button clickable";
+            gegenstaende.onclick = function (e) {
+                e.preventDefault();
+                MainPage.showSite(report, report.gegenstaende);
+            }
+
+            const bericht = document.createElement("input");
+            result.append(bericht);
+            bericht.value = "Bericht";
+            bericht.type = "submit";
+            bericht.className = "button clickable";
+            bericht.onclick = function (e) {
+                e.preventDefault();
+                MainPage.showSite(report, report.levels[0], true, false);
+            }
+
+            return result;
+        }
+
+        static async fillOutCompletion() {
+            console.log("fillOutCompletion", document.getElementsByClassName("content_table")[0]);
+            const reportDB = await MyStorage.getReportDB();
+            const tbody = document.getElementsByClassName("content_table")[0].children[0];
+            let curTR;
+            for (var i = 1, l = tbody.children.length; i < l; i++) {
+                curTR = tbody.children[i];
+                const inputs = curTR.getElementsByTagName("input");
+                var reportId;
+                for (var k = 0, kl = inputs.length; k < kl; k++) {
+                    const curInput = inputs[k];
+                    if (curInput.name.startsWith("report_id")) {
+                        reportId = curInput.value;
+                        break;
+                    }
+                }
+                console.log("reportId", reportId);
+                if(!reportId) continue;
+                const thisReport = await reportDB.getValue(reportId);
+
+                const reportStatus = document.createElement("td");
+                curTR.append(reportStatus);
+                console.log("fillout: ", reportId, thisReport, curTR);
+
+                if (!thisReport) {
+                    reportStatus.innerHTML += "Fehlt komplett";
+                } else {
+                    var haben = 0;
+                    var brauchen = 0;
+                    if (thisReport && thisReport.statistik) {
+                        haben++;
+                    } else {
+                        brauchen++;
+                        reportStatus.innerHTML += " S";
+                    }
+                    if (thisReport && thisReport.gegenstaende) {
+                        haben++;
+                    } else {
+                        brauchen++;
+                        reportStatus.innerHTML += " G";
+                    }
+                    if (!thisReport || !thisReport.levels) {
+                        brauchen++;
+                        reportStatus.innerHTML += " Lx";
+                    } else {
+                        for (var li = 0, ll = thisReport.levelCount; li < ll; li++) {
+                            if (thisReport.levels[li]) {
+                                haben++;
+                            } else {
+                                brauchen++;
+                                reportStatus.innerHTML += " L" + (li + 1);
+                            }
+                        }
+                    }
+                    if (brauchen === 0) {
+                        reportStatus.innerHTML += "Komplett";
+                    }
+                }
+            }
+        }
+    }
+
     class MyStorage {
         static indexedDb = new Storages.IndexedDb("WoDReportArchieve", Mod.dbname);
         static reports = this.indexedDb.createObjectStore("reports", "reportId");
 
-        static async getReportDB() {
+        static getReportDB() {
             return this.reports;
         }
 
