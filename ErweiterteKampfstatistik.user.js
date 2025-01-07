@@ -24,13 +24,14 @@
     'use strict';
 
     const Storages = demawiRepository.import("Storages");
+    const BBCodeExporter = demawiRepository.import("BBCodeExporter");
 
     class Mod {
         static dbname = "wodDB";
         static version = "0.19";
         static stand = "17.11.2024";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
-        static currentReportDataVersion = 6;
+        static currentReportDataVersion = 7;
 
         static thisReport;
         static thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
@@ -38,20 +39,26 @@
         static runSave;
 
         // Einstiegspunkt der Anwendung
-        static async startMod() {
+        static async startMod(kampfbericht, kampfstatistik) {
             let thisObject = this;
-            if (WoD.istSeite_Kampfbericht()) { // Einzelseite
+            console.log("startMod: Statistiklsd", kampfbericht, kampfstatistik)
+            unsafeWindow.statExecuter = this.startMod;
+            if (kampfbericht || WoD.istSeite_Kampfbericht()) { // Einzelseite
                 Mod.outputAnchor = Mod.createOutputAnchor();
                 Mod.runSave(async function () {
                     // cur_rep_id für Dungeons, report bei Schlachten
                     const reportId = WoD.getReportId();
                     thisObject.thisReport = await MyStorage.getReportDB().getValue(reportId);
+                    console.log("ReportId: ", reportId, thisObject.thisReport);
 
-                    var levelData = ReportParser.readKampfberichtAndStoreIntoReport(document, Mod.thisReport, reportId);
+                    var levelData = ReportParser.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
                     if (levelData) {
                         var roundCount = levelData.roundCount;
 
                         var hinweisText = ": " + roundCount + " Runden";
+                        if (levelData.areas.length > 0) {
+                            hinweisText += " [" + util.arrayMap(levelData.areas, area => area.rounds.length).join(", ") + "]";
+                        }
                         const reportProgress = Mod.getReportProgress();
                         if (reportProgress.missingReports.length > 0) {
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
@@ -62,13 +69,15 @@
                     }
                 });
             }
-            if (WoD.istSeite_Kampfstatistik()) { // Übersichtsseite
+            if (kampfstatistik || WoD.istSeite_Kampfstatistik()) { // Übersichtsseite
                 Mod.outputAnchor = Mod.createOutputAnchor();
                 Mod.runSave(async function () {
                     const reportId = WoD.getReportId();
                     thisObject.thisReport = await MyStorage.getReportDB().getValue(reportId);
 
-                    if (Mod.thisReport.levelCount) {
+                    console.log("ReportId: ", reportId, thisObject.thisReport);
+
+                    if (thisObject.thisReport.levelCount) {
                         const reportProgress = Mod.getReportProgress();
 
                         var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
@@ -76,7 +85,7 @@
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                         }
                         Mod.outputAnchor.setTitle(hinweisText);
-                        Mod.thisLevelDatas = Mod.thisReport.levelDatas;
+                        Mod.thisLevelDatas = thisObject.thisReport.levelDatas;
                     } else {
                         Mod.outputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
                     }
@@ -443,17 +452,18 @@
                 }
             },
             "dmgType": {
-                name: "SchadensTyp",
-                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                name: "Schadensart",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget, damage) => {
                     statRoot.hadDmgType = true;
                     let subStats = SearchEngine.getStat(curStats, queryFilter, damage === true ? "Ohne Schaden" : damage.type, "sub", "dmgType");
                     if (!subStats) return false;
+                    return subStats;
                 }
             },
 
         }
 
-        static StatSearch(statQuery, levelDataArray) {
+        static doQuery(statQuery, levelDataArray) {
             const wantHeroes = statQuery.side === "heroes";
             const wantDefense = statQuery.type === "defense";
             const wantAll = statQuery.type === "all";
@@ -469,9 +479,9 @@
                     curStats.statRoot = statRoot;
                     const filterKriterium = SearchEngine.FilterKriterien[queryFilter.spec];
                     if (!filterKriterium) {
-                        alert("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
+                        throw error("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
                     }
-                    const subStats = filterKriterium.apply(statRoot, curStats, queryFilter, action, target, statTarget);
+                    const subStats = filterKriterium.apply(statRoot, curStats, queryFilter, action, target, statTarget, damage);
                     if (!subStats) return subStats;
                     SearchEngine.createActionClassification(curStats, subStats, action, target, statTarget, queryFilter.spec);
                     if (!subStats.actionUnit && curStats.actionUnit) {
@@ -533,6 +543,7 @@
             for (var levelNr = 1, levelCount = levelDataArray.length; levelNr <= levelCount; levelNr++) {
                 const finalLevelNr = levelNr;
                 const level = levelDataArray[levelNr - 1];
+                if (!level) continue;
                 level.nr = levelNr;
                 if (!level) continue;
                 const areas = level.areas;
@@ -545,6 +556,7 @@
                     for (var roundNr = 0, l = rounds.length; roundNr < l; roundNr++) {
                         var round = rounds[roundNr];
                         round.nr = roundNr + 1;
+                        let actionForStats = Array();
                         if (wantAll) {
                             if (wantHeroes) {
                                 round.helden.forEach(unit => {
@@ -570,28 +582,37 @@
                                     doAnalysis(stats, filter, action);
                                 });
                             }
-
-                            round.actions.vorrunde.forEach(action => {
-                                action.level = level;
-                                action.area = area;
-                                action.round = round;
+                            (round.actions.vorrunde || []).forEach(action => {
                                 action.type = "vorrunde";
+                                actionForStats.push(action);
                             });
 
-                            (round.actions.overtime || []).forEach(action => {
-                                action.level = level;
-                                action.area = area;
-                                action.round = round;
-                                action.type = "overtime";
+                            (round.actions.regen || []).forEach(action => {
+                                action.type = "regen";
+                                actionForStats.push(action);
+                            });
+
+                            (round.actions.initiative || []).forEach(action => {
+                                action.type = "initiative";
+                                actionForStats.push(action);
+                            });
+
+                            (round.actions.runde || []).forEach(action => {
+                                action.type = "action";
+                                actionForStats.push(action);
+                            });
+                        } else {
+                            round.actions.runde.forEach(action => {
+                                action.type = "action";
+                                actionForStats.push(action);
                             });
                         }
 
-                        round.actions.runde.forEach(action => {
+                        actionForStats.forEach(action => {
                             var isHero = action.unit.id.isHero;
                             action.level = level;
                             action.area = area;
                             action.round = round;
-                            action.type = "action";
 
                             if (wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero)) {
                                 SearchEngine.addUnitId(action, action.unit);
@@ -695,6 +716,7 @@
         static readKampfberichtAndStoreIntoReport(container, report, reportId) {
             var levelNr;
             var levelCount;
+            console.log("Reporting", reportId, report);
             if (reportId.startsWith("schlacht_")) {
                 levelNr = 1;
                 report.levelCount = 1;
@@ -757,7 +779,7 @@
             area;
             helden;
 
-            actions; // aufgeteilt in vorrunde, regen, runde
+            actions; // aufgeteilt in vorrunde, regen, initiative, runde
             monster;
 
             constructor(nr, roundTD) {
@@ -781,8 +803,9 @@
                 if (!this.helden) this.emptyRound(); // keine kampfbereiten Helden, keine Aktionen
                 this.monster = ReportParser.GruppenStatus(statusTables[1], false);
                 if (!this.monster) this.emptyRound(); // keine kampfbereiten Gegner, keine Aktionen
+                var initiative = Array();
                 var vorrunde = Array();
-                var overtime = Array();
+                var regen = Array();
                 var runde = Array();
                 let actionsElement = roundTD.getElementsByTagName("table")[2].querySelectorAll("tr");
                 for (var k = 0, kl = actionsElement.length; k < kl; k++) {
@@ -796,7 +819,7 @@
                             // einfache Beschreibung ohne Einheit-Verlinkung: Der Düsterwolf scheint noch etwas träge, offenbar muss er sich erst noch sammeln.
                         } else {
                             let unit = td.childNodes[0];
-                            if(unit.tagName === "SPAN") {
+                            if (unit.tagName === "SPAN") {
                                 unit = unit.children[0];
                             }
                             if (unit.tagName === "A") { // regen oder initiative
@@ -813,29 +836,28 @@
                         }
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
-                            const action = ReportParser.Action(currentAction, null, currentAction.children[1], currentAction.children[2]);
-                            vorrunde.push(action);
+                            ReportParser.Action(currentAction, null, currentAction.children[1], currentAction.children[2]).forEach(a => vorrunde.push(a));
                         } else { // Runden-Aktion
-                            const action = ReportParser.Action(currentAction, currentAction.children[0], currentAction.children[1], currentAction.children[2]);
-                            if (!action.fertigkeit) {
-                                console.error("Keine Fertigkeit gefunden: ", currentAction);
-                            }
-                            runde.push(action);
+                            ReportParser.Action(currentAction, currentAction.children[0], currentAction.children[1], currentAction.children[2]).forEach(a => {
+                                runde.push(a)
+                            });
                         }
                     }
                 }
                 this.actions = {
+                    initiative: initiative,
                     vorrunde: vorrunde,
-                    overtime: overtime,
-                    runde: runde
+                    regen: regen,
+                    runde: runde,
                 };
             }
 
             emptyRound() {
                 return {
+                    initiative: Array(),
                     vorrunde: Array(),
-                    overtime: Array(),
-                    runde: Array()
+                    regen: Array(),
+                    runde: Array(),
                 };
             }
         }
@@ -943,8 +965,18 @@
                 const curUnit = unitArray[i];
                 if (curUnit.id.name === unitId.name && curUnit.id.index === unitId.index) {
                     return curUnit;
+                } else if (this.unitNameOhneGestalt(curUnit.id.name) === this.unitNameOhneGestalt(unitId.name) && curUnit.id.index === unitId.index) { // evtl. Gestaltwechsel!? z.B. "Dunkles Erwachen"
+                    return curUnit;
                 }
             }
+        }
+
+        static unitNameOhneGestalt(unitName) {
+            let matches = unitName.match(/\((.*gestalt)\)/);
+            if (matches) {
+                return unitName.replace(" (" + matches[1] + ")", "");
+            }
+            return unitName;
         }
 
         //im Target kann auch "sich" stehen, das wird dann entsprechend durch die zusätzliche Angabe "unitId" ersetzt.
@@ -1053,11 +1085,12 @@
             return damage;
         }
 
-        static fertigkeitParse(actionElement) {
+        static actionParse(actionElement) {
             const fertigkeit = {};
             const childNodes = actionElement.childNodes;
             const items = Array();
             var unit;
+            const wuerfe = Array();
             util.forEach(actionElement.childNodes, curNode => {
                     switch (curNode.tagName) {
                         case "IMG":
@@ -1085,7 +1118,20 @@
                             if (curNode.style.fontSize === "0.65em") {
                                 //unitIdx = curNode.textContent;
                             } else if (curNode.className === "rep_mana_cost") {
-                                fertigkeit.mp = curNode.textContent.match(/(.\d*) MP/)[1];
+                                fertigkeit.mp = curNode.textContent.match(/(\d*) MP/)[1];
+                            } else if (curNode.className === "rep_gain") { // z.B. "Dunkles Erwachen"
+                                let mpGain = curNode.textContent.match(/\.(\d*) MP/);
+                                if (mpGain) {
+                                    fertigkeit.mpGain = mpGain[1];
+                                } else {
+                                    let hpGain = curNode.textContent.match(/\.(\d*) HP/);
+                                    if (hpGain) {
+                                        fertigkeit.hpGain = hpGain[1];
+                                    } else {
+                                        error("Rep_Gain kann nicht aufgelöst werden", curNode.textContent);
+                                    }
+                                }
+
                             } else if (curNode.onmouseover && curNode.children[0].tagName === "A") { // Unit-Wrap z.B. für Helfer
                                 unit = this.unitLookup(this.getUnitIdFromElement(curNode.children[0]));
                             } else {
@@ -1096,7 +1142,7 @@
                         case "":
                         case undefined: {
                             let text = curNode.textContent.trim();
-                            if(!unit) {
+                            if (!unit) {
                                 // only flavour text without unit reference
                                 unit = {
                                     name: "? Ereignis",
@@ -1110,61 +1156,81 @@
                                 break;
                             }
                             if (text.length < 2) break; // skip
-                            let wurfMatcher = text.match(/[\/\(](\d*)[\/\)]/);
-                            if (wurfMatcher) { // wurf
-                                fertigkeit.wurf = wurfMatcher[1];
-                            } else {
-                                text = text.replace("(", "").replace(")", "").trim();
-                                switch (text) {
-                                    case "auf":
-                                        break;
-                                    case "wird getragen von": // z.B. Weißzahnturm Lvl4 wirkt auf 2 Charaktere
-                                        // Debuff: "Den Alchemisten tragen"
-                                    case "wirkt":
-                                        fertigkeit.type = "Wirkung";
-                                        break;
-                                    case "heilt mittels":
-                                        fertigkeit.type = "Heilung";
-                                        break;
-                                    case "greift per Fernkampf an":
-                                        fertigkeit.type = "Fernkampf";
-                                        break;
-                                    case "greift im Nahkampf an":
-                                        fertigkeit.type = "Nahkampf";
-                                        break;
-                                    case "greift magisch an":
-                                        fertigkeit.type = "Zauber";
-                                        break;
-                                    case "greift sozial an":
-                                        fertigkeit.type = "Sozial";
-                                        break;
-                                    case "greift hinterhältig an":
-                                        fertigkeit.type = "Hinterhalt";
-                                        break;
-                                    case "verseucht":
-                                        fertigkeit.type = "Krankheit";
-                                        break;
-                                    case "entschärft":
-                                        fertigkeit.type = "Falle entschärfen";
-                                        break;
-                                    case "wirkt als Naturgewalt auf":
-                                        fertigkeit.type = "Naturgewalt";
-                                        break;
-                                    case "wird ausgelöst auf":
-                                        fertigkeit.type = "Falle";
-                                        break;
-                                    case "erwirkt eine Explosion gegen":
-                                        fertigkeit.type = "Explosion";
-                                        break;
-                                    case "ruft herbei mittels":
-                                        fertigkeit.type = "Herbeirufung";
-                                        break;
-                                    default:
-                                        console.error("Unbekannter Fertigkeits-Typ(1) ", "'" + text + "'", actionElement);
-                                        throw Error("Unbekannter Fertigkeits-Typ!");
-                                        break;
+                            const textArray = text.replaceAll("(", "").replaceAll(")", "").trim().split("/");
+                            textArray.forEach(curText => {
+                                let wurfMatcher = curText.match(/^(.*?)(\d+)(\.)?$/);
+                                if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
+                                    fertigkeit.type = "Fernkampf";
+                                } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen")) { // z.B. "Dunkles Erwachen"
+                                    fertigkeit.type = "Nahkampf";
                                 }
-                            }
+                                if (wurfMatcher) { // wurf
+                                    let wo = wurfMatcher[1];
+                                    if (wo !== "") {
+                                        wo = wo.replace(":", "").trim();
+                                    }
+                                    wuerfe.push({
+                                        value: wurfMatcher[2],
+                                        dest: wo,
+                                    })
+                                } else {
+                                    curText = curText.replace("(", "").replace(")", "").trim();
+                                    switch (curText) {
+                                        case "auf":
+                                        case "":
+                                            break;
+                                        case "ruft voller Schmerzen um Hilfe...": // z.B. Dungeon "Urlaub in den Bergen"
+                                        case "hält sein Opfer fest gefangen und verursacht tiefe Wunden...": // z.B. Dungeon "Urlaub in den Bergen" (verursacht wohl Schaden)
+                                        case "befindet sich in eurer Gefangenschaft - er wird kontrolliert von:": // z.B. Dungeon "Katz und Maus"
+                                        case "wird getragen von": // z.B. Weißzahnturm Lvl4 wirkt auf 2 Charaktere
+                                        // Debuff: "Den Alchemisten tragen"
+                                        case "wirkt":
+                                            fertigkeit.type = "Wirkung";
+                                            break;
+                                        case "heilt mittels":
+                                            fertigkeit.type = "Heilung";
+                                            break;
+                                        case "greift per Fernkampf an":
+                                            fertigkeit.type = "Fernkampf";
+                                            break;
+                                        case "greift im Nahkampf an":
+                                            fertigkeit.type = "Nahkampf";
+                                            break;
+                                        case "greift magisch an":
+                                            fertigkeit.type = "Zauber";
+                                            break;
+                                        case "greift sozial an":
+                                            fertigkeit.type = "Sozial";
+                                            break;
+                                        case "greift hinterhältig an":
+                                            fertigkeit.type = "Hinterhalt";
+                                            break;
+                                        case "verseucht":
+                                            fertigkeit.type = "Krankheit";
+                                            break;
+                                        case "entschärft":
+                                            fertigkeit.type = "Falle entschärfen";
+                                            break;
+                                        case "wirkt als Naturgewalt auf":
+                                            fertigkeit.type = "Naturgewalt";
+                                            break;
+                                        case "wird ausgelöst auf":
+                                            fertigkeit.type = "Falle";
+                                            break;
+                                        case "erwirkt eine Explosion gegen":
+                                            fertigkeit.type = "Explosion";
+                                            break;
+                                        case "ruft herbei mittels":
+                                            fertigkeit.type = "Herbeirufung";
+                                            break;
+                                        default:
+                                            console.error("Unbekannter Fertigkeits-Typ(1) ", "'" + curText + "'", actionElement);
+                                            throw Error("Unbekannter Fertigkeits-Typ!(1)");
+                                            break;
+                                    }
+                                }
+                            });
+
                             break;
                         }
                         default:
@@ -1181,13 +1247,24 @@
                         fertigkeit.type = "Krankheit";
                         break;
                     default:
-                        console.error("Unbekannter Fertigkeits-Typ(2)", actionElement);
+                        console.error("Unbekannter Fertigkeits-Typ(2)", fertigkeit, actionElement);
                         fertigkeit.type = "Unbekannt: " + fertigkeit.name;
-                        throw Error("Unbekannter Fertigkeits-Typ", fertigkeit, actionElement);
+                        error("Unbekannter Fertigkeits-Typ", fertigkeit, actionElement);
                         break;
                 }
             }
-            return [fertigkeit, unit];
+            const fertigkeiten = Array();
+            if (wuerfe.length <= 1) {
+                fertigkeit.wurf = wuerfe[0];
+                fertigkeiten.push(fertigkeit);
+            } else {
+                wuerfe.forEach(wurf => {
+                    const temp = util.cloneObject(fertigkeit);
+                    temp.wurf = wurf;
+                    fertigkeiten.push(temp);
+                })
+            }
+            return [fertigkeiten, unit];
         }
 
         static Action(actionTR, initiative, action, target) {
@@ -1195,7 +1272,7 @@
             var who;
             var wurf;
             var mp;
-            var unit = this.unitLookup(this.getUnitIdFromElement(action.children[0]));
+            const [fertigkeiten, unit] = this.actionParse(action);
             // Parse Targets
             var curTargetUnit
             var currentTarget
@@ -1246,19 +1323,24 @@
             }
 
             // Action
-            var [fertigkeit, unit] = this.fertigkeitParse(action);
-            var result = {
+            const actions = Array();
+            var myAction = {
                 name: unit.id.name, // nur fürs Testen
                 unit: unit,
-                fertigkeit: fertigkeit,
                 targets: targets,
                 src: actionTR.outerHTML,
             };
-            if (!unit.isHero) {
-                //console.log(action, result);
+            if (fertigkeiten.length === 1) {
+                myAction.fertigkeit = fertigkeiten[0];
+                actions.push(myAction);
+            } else {
+                fertigkeiten.forEach(fertigkeit => {
+                    const temp = util.cloneObject(myAction);
+                    temp.fertigkeit = fertigkeiten[0];
+                    actions.push(temp);
+                });
             }
-            //console.log(result);
-            return result;
+            return actions;
         }
 
         static searchWirkungen(parentElement, name) {
@@ -1493,7 +1575,7 @@
                         if (!action.fertigkeit) {
                             console.error("Fertigkeit nicht gefunden: ", action);
                         }
-                        aw.push(Number(action.fertigkeit.wurf));
+                        aw.push(Number(action.fertigkeit.wurf.value));
                     });
                     return center(util.arrayAvg(aw, null, 2) + "<br>(" + util.arrayMin(aw) + " - " + util.arrayMax(aw) + ")");
                 });
@@ -1632,6 +1714,10 @@
                                     roundTd.style.color = "lightgray";
                                     roundTd.style.fontStyle = "italic";
                                     actionTR.insertBefore(roundTd, actionTR.children[0]);
+                                    console.log(action)
+                                    if (action.type === "vorrunde") {
+                                        actionTR.children[1].innerHTML = "Vorrunde";
+                                    }
                                     actionTR.children[0].style.paddingLeft = "10px";
                                     actionTR.children[0].style.paddingRight = "10px";
                                     actionTR.style.borderTop = border;
@@ -1743,7 +1829,7 @@
 
             // Löscht den alten Table und erstellt den neuen
             refresh() {
-                this.statView.result = SearchEngine.StatSearch(this.statView.query, this.levelDatas);
+                this.statView.result = SearchEngine.doQuery(this.statView.query, this.levelDatas);
                 this.statView.query.possibleFilter = QueryModel.FilterTypes[this.statView.query.type];
 
                 //Löscht die vorangelegten Einträge, welche keine Treffer hatten
@@ -1866,7 +1952,7 @@
                         toBBCodeButtonContainer.removeChild(toBBCodeDone);
                         toBBCodeButtonContainer.append(toBBCodeButton);
                     }, 1500);
-                    navigator.clipboard.writeText(util.toBBCode(table));
+                    navigator.clipboard.writeText(BBCodeExporter.toBBCode(table));
                 }
 
                 this.anchor.appendChild(table);
@@ -2277,6 +2363,10 @@
             return div.firstChild;
         }
 
+        static cloneObject(obj) {
+            return JSON.parse(JSON.stringify(obj));
+        }
+
         static cloneElement(elem) {
             return this.createElementFromHTML(elem.outerHTML);
         }
@@ -2403,99 +2493,6 @@
             }
         }
 
-        static hatClassName(node, className) {
-            return node.classList && node.classList.contains(className);
-        }
-
-        static getStyle(el, property, defaultSize) {
-            if (!el.tagName) return defaultSize;
-            return window.getComputedStyle(el, null).getPropertyValue(property);
-        }
-
-        static toBBCode(node, defaultSize) {
-
-            defaultSize = this.getStyle(node, "font-size", defaultSize);
-
-            if (node.classList && node.classList.contains("bbignore")) return "";
-            var result = this.toBBCodeRaw(node, defaultSize);
-            if (result.length !== 3) {
-                console.log("Keine Array-Länge von 3 zurückgegeben", node);
-            }
-            if (result[1].trim() !== "" && !result[1].includes("[table") && !result[1].includes("[tr") && !result[1].includes("[td") && !result[1].includes("[th") && !result[0].includes("[img")) {
-                if (node.style && node.style.textAlign === "center") {
-                    result[0] = result[0] + "[center]";
-                    result[2] = "[/center]" + result[2];
-                }
-                if (node.style && node.style.fontStyle === "italic") {
-                    result[0] = result[0] + "[i]";
-                    result[2] = "[/i]" + result[2];
-                }
-                if (this.getStyle(node, "font-weight") === "700") {
-                    result[0] = result[0] + "[b]";
-                    result[2] = "[/b]" + result[2];
-                }
-                let fontSize = this.getStyle(node, "font-size", defaultSize);
-                if (fontSize) {
-                    fontSize = fontSize.replace("px", "");
-                    result[0] = result[0] + "[size=" + (Math.round(fontSize) - 2) + "]";
-                    result[2] = "[/size]" + result[2];
-                }
-                if (node.style && node.style.color && !this.hatClassName(node, "bbignoreColor")) {
-                    result[0] = result[0] + "[color=" + node.style.color + "]";
-                    result[2] = "[/color]" + result[2];
-                }
-            }
-            return result.join("");
-        }
-
-        static toBBCodeRaw(node, defaultSize) {
-            switch (node.tagName) {
-                case "TABLE":
-                    return ["[table" + (node.border ? " border=" + node.border : "") + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/table]"];
-                case "TR":
-                    return ["[tr]", this.toBBCodeArray(node.childNodes, defaultSize), "[/tr]"];
-                case "TD":
-                    if (node.colSpan > 1) {
-                        return ["[td colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
-                    }
-                    return ["[td]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
-                case "TH":
-                    if (node.colSpan > 1) {
-                        return ["[th colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
-                    }
-                    return ["[th]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
-                case "SPAN":
-                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
-                case "IMG":
-                    return ["[img]", node.src, "[/img]"];
-                case "SELECT":
-                    return ["", "", ""];
-                case "A":
-                    if (node.href.startsWith("http")) {
-                        if (node.classList.contains("rep_monster")) {
-                            return ["", "[beast:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
-                        } else {
-                            return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/url]"];
-                        }
-                    }
-                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
-                case "THEAD":
-                case "TBODY": // ignore it
-                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
-                case "BR":
-                    return ["", "\n", ""];
-                default:
-                    if (typeof node.tagName === 'undefined') {
-                        return ["", node.textContent.replaceAll("\n", ""), ""];
-                    } else {
-                        console.error("Unbekannter TagName gefunden: '" + node.tagName + "'");
-                    }
-            }
-        }
-
-        static toBBCodeArray(childNodes, defaultSize) {
-            return this.arrayMap(childNodes, a => this.toBBCode(a, defaultSize)).join("");
-        }
     }
 
     function error(errorMsg, ...additionals) {
