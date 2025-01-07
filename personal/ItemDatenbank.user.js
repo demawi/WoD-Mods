@@ -18,6 +18,7 @@
     let debug = false;
 
     const Storages = demawiRepository.import("Storages");
+    const BBCodeExporter = demawiRepository.import("BBCodeExporter");
 
     class Mod {
         static dbname = "wodDB";
@@ -67,8 +68,7 @@
             const details = document.getElementById("details").innerHTML;
 
             const all = document.getElementsByTagName("h1")[0];
-            var itemName = all.getElementsByTagName("a")[0].textContent.trim();
-            if (itemName[itemName.length - 1] === "!") itemName = itemName.substring(0, itemName.length - 1);
+            var itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
             const sourceItem = this.createItem(itemName);
             sourceItem.details = details;
             sourceItem.link = link;
@@ -76,7 +76,7 @@
             const item = await ItemParser.getItemDataFromSource(sourceItem);
             await MyStorage.getItemDB().setValue(item);
             console.log("Gegenstandsseite", sourceItem, item);
-            ItemParser.rewriteAllItemsFromSource();
+            //ItemParser.rewriteAllItemsFromSource();
         }
     }
 
@@ -172,6 +172,15 @@
 
                 const [missingSearch, missingSearchLabel] = util.createCheckboxInTd(searchContainerTitle, "missingSearch", "");
 
+                const toBBCodeButton = document.createElement("span");
+                toBBCodeButton.style.fontSize = "12px";
+                toBBCodeButton.style.cursor = "copy";
+                toBBCodeButton.innerHTML = "[bb]";
+                toBBCodeButton.style.marginLeft = "2px";
+                toBBCodeButton.style.color = "darkgrey";
+                toBBCodeButton.classList.add("bbignore");
+                searchContainerTitle.append(toBBCodeButton);
+
                 async function updateMissingButton() {
                     const allItems = await MyStorage.getItemSourceDB().getAll();
                     var itemsToLoad = 0;
@@ -206,6 +215,10 @@
                 searchContainer.parentElement.insertBefore(resultContainer, originalResultTable);
                 searchContainer.parentElement.removeChild(originalResultTable);
                 resultContainer.append(originalResultTable);
+
+                toBBCodeButton.onclick = function () {
+                    navigator.clipboard.writeText(BBCodeExporter.toBBCode(resultContainer));
+                }
 
                 WoD.getSuchfeld().onkeydown = function (event) {
                     // Enter abfangen und den aktuellen Such-Button auslösen
@@ -689,6 +702,21 @@
                 }
             }
 
+            static "Verbrauchsgut" = (container) => {
+                const select1 = ItemSearch.UI.createSelect(["<Verbrauchsgut>", "JA", "nein"]);
+                container.append(select1);
+                return {
+                    matches: function (item) {
+                        if (select1.value === "") return true;
+                        if (select1.value === "JA") {
+                            return item.data?.isVG;
+                        } else {
+                            return !item.data?.isVG;
+                        }
+                    },
+                }
+            }
+
             static "Gegenstandsklasse" = (container) => {
                 const select1 = ItemSearch.UI.createSelect(["<Gegenstandsklasse>", ...ItemSearch.SearchDomains.GEGENSTANDSKLASSEN]);
                 container.append(select1);
@@ -1032,6 +1060,13 @@
 
         static matches(item) {
             const result = this.#matches(item);
+            if (false) {
+                for (var i = 0, l = item.data.bedingungen2.length; i < l; i++) {
+                    const bedingung = item.data.bedingungen2[i];
+                    if (bedingung.includes("Geister")) return true;
+                }
+                return false;
+            }
             if (false && item.data && item.data.bedingungen) {
                 console.log(item);
                 for (const [name, comp] of Object.entries(item.data.bedingungen)) {
@@ -1179,6 +1214,10 @@
                             gegenstandsklassen.push(a.textContent.trim());
                         });
                         data.gegenstandsklassen = gegenstandsklassen;
+                        break;
+                    }
+                    case "Anwendungen insgesamt": {
+                        data.isVG = tr.children[1].textContent.trim() !== "unbegrenzt";
                         break;
                     }
                     case "Fertigkeiten": {
