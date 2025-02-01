@@ -28,8 +28,8 @@
 
     class Mod {
         static dbname = "wodDB";
-        static version = "0.19";
-        static stand = "17.11.2024";
+        static version = "0.20";
+        static stand = "01.02.2025";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
         static currentReportDataVersion = 7;
 
