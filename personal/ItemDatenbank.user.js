@@ -923,7 +923,7 @@
             }
             static SCHADENSBONITYP = ["Zusätzlich (weder a noch z)", "Nur bei Anwendung (a)", "Nur wenn schon vorhanden (z)"];
             static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle entschärfen"];
-            static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen"];
+            static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen", "Hinterhalt"];
             static BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
             static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
             static JEGLICHE_HAND = ["Beide Hände", "Waffenhand", "Schildhand", "Einhändig"];
