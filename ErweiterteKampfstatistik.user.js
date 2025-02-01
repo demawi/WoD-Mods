@@ -344,7 +344,7 @@
                 }
             },
             "enemy_position": {
-                name: "Position",
+                name: "Gegner-Position",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
                     return SearchEngine.getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
                 }
@@ -396,7 +396,7 @@
                 }
             },
             "skillType": {
-                name: "FertigkeitsTyp",
+                name: "AngriffsTyp",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
                     return SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.type, "sub", "skillType");
                 }
@@ -419,6 +419,7 @@
                     console.log("isso", action, curStats.actionClassification(action));
                     if (!curStats.actionClassification(action).fromMe) return;
                     let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
+                    if (!subStats) return;
                     subStats.title = statTarget.fertigkeit.typeRef;
                     return subStats;
                 }
@@ -818,6 +819,7 @@
                         if (td.childNodes.length === 1) {
                             // einfache Beschreibung ohne Einheit-Verlinkung: Der Düsterwolf scheint noch etwas träge, offenbar muss er sich erst noch sammeln.
                         } else {
+                            if (td.textContent.startsWith("Das Yeti-Kind")) continue; // z.B. Urlaub in den Bergen
                             let unit = td.childNodes[0];
                             if (unit.tagName === "SPAN") {
                                 unit = unit.children[0];
@@ -1152,32 +1154,52 @@
                                     isHero: false,
                                     isEreignis: true,
                                 }
-                                fertigkeit.type = "Ereignis";
-                                break;
+                                fertigkeit.unit = unit;
                             }
                             if (text.length < 2) break; // skip
-                            const textArray = text.replaceAll("(", "").replaceAll(")", "").trim().split("/");
+
+                            const textArray = text.trim().split("/");
                             textArray.forEach(curText => {
-                                let wurfMatcher = curText.match(/^(.*?)(\d+)(\.)?$/);
+                                curText = curText.trim();
+                                let wurfMatcher = curText.match(/^(\D*)?(\d+)[\.\)]?$/);
                                 if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
                                     fertigkeit.type = "Fernkampf";
-                                } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen")) { // z.B. "Dunkles Erwachen"
+                                } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen") || curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) { // z.B. "Dunkles Erwachen"
                                     fertigkeit.type = "Nahkampf";
+                                } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
+                                    || curText.startsWith("aus, sie dörrt Körper und Geist aus und lässt euch geschwächt zurück.") // Goldene Dracheneier
+                                ) {
+                                    fertigkeit.type = "Naturgewalt";
+                                } else if (curText.startsWith("auf sein Ziel und brüllt mit harter Stimme: DU gehörst mir!") || curText.startsWith("deutet mit seiner Waffe auf einen Gegner und brüllt mit harter Stimme: DU gehörst mir!") // "Sagenumwobener Zwergenstieg"
+                                    || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
+                                ) {
+                                    fertigkeit.type = "Sozial";
+                                    if(curText.startsWith("sind einfach überall!")) {
+                                        wuerfe.push({
+                                            value: 40,
+                                        })
+                                    }
                                 }
                                 if (wurfMatcher) { // wurf
                                     let wo = wurfMatcher[1];
-                                    if (wo !== "") {
+                                    if (wo && wo.endsWith(":")) {
                                         wo = wo.replace(":", "").trim();
                                     }
                                     wuerfe.push({
                                         value: wurfMatcher[2],
                                         dest: wo,
                                     })
-                                } else {
+                                } else if (!fertigkeit.type) {
                                     curText = curText.replace("(", "").replace(")", "").trim();
                                     switch (curText) {
                                         case "auf":
                                         case "":
+                                        case "Das": // z.B. "Urlaub in den Bergen"
+                                        case "Der": // "Sagenumwobener Zwergenstieg"
+                                        case "mit seiner Waffe deutet": // "Sagenumwobener Zwergenstieg"
+                                        case "geht von": // Goldene Dracheneier
+                                        case "Mit seinem": // Goldene Dracheneier
+                                        case "entreißt": // Goldene Dracheneier
                                             break;
                                         case "ruft voller Schmerzen um Hilfe...": // z.B. Dungeon "Urlaub in den Bergen"
                                         case "hält sein Opfer fest gefangen und verursacht tiefe Wunden...": // z.B. Dungeon "Urlaub in den Bergen" (verursacht wohl Schaden)
@@ -2035,11 +2057,7 @@
             }
 
             getFilterDisplayLabel(query, queryFilter) {
-                var result = queryFilter.spec;
-                for (const [filter, filterName] of Object.entries(query.possibleFilter)) {
-                    result = result.replaceAll(filter, filterName);
-                }
-                result = result.replaceAll("_", "-").replaceAll("enemy", "Gegner");
+                let result = SearchEngine.FilterKriterien[queryFilter.spec].name;
                 if (queryFilter.selection) {
                     result += " (" + queryFilter.selection.join(", ") + ")";
                 }
