@@ -1477,7 +1477,7 @@
         }
 
         static getLinkForFertigkeit(fertigkeit) {
-            return "<a href='/wod/spiel/hero/skill.php?name=" + fertigkeit + "&is_popup=1' onclick=\"return wo('/wod/spiel/hero/skill.php?name=Reaktion&session_hero_id=373802&IS_POPUP=1');\">" + fertigkeit + "</a>";
+            return "<a href='/wod/spiel/hero/skill.php?name=" + fertigkeit + "&is_popup=1' onclick=\"return wo('/wod/spiel/hero/skill.php?name=" + fertigkeit + "&session_hero_id=373802&IS_POPUP=1');\">" + fertigkeit + "</a>";
         }
 
         static getSuchInput(nameSchema) {
