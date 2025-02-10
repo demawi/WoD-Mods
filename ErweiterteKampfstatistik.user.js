@@ -1133,7 +1133,18 @@
                                         error("Rep_Gain kann nicht aufgelöst werden", curNode.textContent);
                                     }
                                 }
-
+                            } else if (curNode.className === "rep_loss") { // z.B. "Dunkles Erwachen"
+                                let mpGain = curNode.textContent.match(/\.(\d*) MP/);
+                                if (mpGain) {
+                                    fertigkeit.mpGain = -mpGain[1];
+                                } else {
+                                    let hpGain = curNode.textContent.match(/\.(\d*) HP/);
+                                    if (hpGain) {
+                                        fertigkeit.hpGain = -hpGain[1];
+                                    } else {
+                                        error("Rep_Loss kann nicht aufgelöst werden", curNode.textContent);
+                                    }
+                                }
                             } else if (curNode.onmouseover && curNode.children[0].tagName === "A") { // Unit-Wrap z.B. für Helfer
                                 unit = this.unitLookup(this.getUnitIdFromElement(curNode.children[0]));
                             } else {
