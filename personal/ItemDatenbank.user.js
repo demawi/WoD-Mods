@@ -76,6 +76,7 @@
             const item = await ItemParser.getItemDataFromSource(sourceItem);
             await MyStorage.getItemDB().setValue(item);
             console.log("Gegenstandsseite", sourceItem, item);
+
             //ItemParser.rewriteAllItemsFromSource();
         }
     }
@@ -427,6 +428,16 @@
                 when: "Bonus - Schaden",
                 toHTML: AutoColumns.default3SpaltenOutput
             }
+            static "Rüstung (Besitzer)" = {
+                pfad: "effects.owner.ruestung",
+                when: "Bonus - Rüstung",
+                toHTML: AutoColumns.default3SpaltenOutput
+            }
+            static "Rüstung (Betroffener)" = {
+                pfad: "effects.target.ruestung",
+                when: "Bonus - Rüstung",
+                toHTML: AutoColumns.default3SpaltenOutput
+            }
             static "Parade (Besitzer)" = {
                 pfad: "effects.owner.parade",
                 when: "Bonus - Parade",
@@ -667,6 +678,7 @@
 
     class ItemSearch {
 
+
         static SuchKriterien = class SuchKriterien {
             static "Klasse" = (container) => {
                 const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...Object.keys(ItemSearch.SearchDomains.KLASSEN)]);
@@ -696,7 +708,23 @@
                                 if (trageort === curTrageort) return true;
                             }
                             return false;
+                        } else if (select1.value === "Waffenhand/Einhändig") {
+                            for (const curTrageort of ItemSearch.SearchDomains.WAFFENHAND_EINHAENDIG) {
+                                if (trageort === curTrageort) return true;
+                            }
+                            return false;
+                        } else if (select1.value === "Schildhand/Einhändig") {
+                            for (const curTrageort of ItemSearch.SearchDomains.SCHILDHAND_EINHAENDIG) {
+                                if (trageort === curTrageort) return true;
+                            }
+                            return false;
+                        } else if (select1.value === "Waffenhand/Schildhand/Einhändig") {
+                            for (const curTrageort of ItemSearch.SearchDomains.WAFFENHAND_SCHILDHAND_EINHAENDIG) {
+                                if (trageort === curTrageort) return true;
+                            }
+                            return false;
                         }
+
                         return trageort === select1.value;
                     },
                 }
@@ -725,6 +753,9 @@
                         if (select1.value === "") return true;
                         const klassen = item.data?.gegenstandsklassen;
                         if (klassen) {
+                            if (select1.value === "Veredelungsart: Keine Waffe, keine Rüstung") {
+                                return util.twoListMatch(klassen, ItemSearch.SearchDomains.VEREDELUNGSART_SCHADEN_OHNE_WAFFE);
+                            }
                             return klassen.includes(select1.value);
                         }
                         return false;
@@ -743,6 +774,21 @@
                             return fertigkeiten.includes(select1.value);
                         }
                         return false;
+                    },
+                }
+            }
+
+            static "Besitzer/Betroffener" = (container) => {
+                const selectBesitzerBetroffener = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
+                container.append(selectBesitzerBetroffener);
+                return {
+                    matches: function (item) {
+                        if (selectBesitzerBetroffener.value === "Besitzer") {
+                            return item.effects.owner;
+                        } else if (selectBesitzerBetroffener.value === "Betroffener") {
+                            console.log(item.effects.target);
+                            return item.effects.target;
+                        }
                     },
                 }
             }
@@ -775,65 +821,119 @@
                 }
             }
 
+            static "Veredelbar" = (container) => {
+                const textFrom = util.createTextInput("50px");
+                const textTo = util.createTextInput("50px");
+                textFrom.value = 1;
+                container.append(textFrom);
+                container.append(util.span(" - "));
+                container.append(textTo);
+                return {
+                    matches: function (item) {
+                        if (textFrom.value === "") textFrom.value = 1;
+                        var from = textFrom.value.trim();
+                        var to = textTo.value.trim();
+                        if (from === "") from = null;
+                        if (to === "") to = null;
+                        if (!from && !to) return true;
+                        if (from && to && to < from) return false; // keine Klassen eingeschlossen
+                        const anzahlEdelslots = Number(item.data?.edelslots || 0);
+                        if (from !== null && Number(from) > anzahlEdelslots) return false;
+                        if (to !== null && Number(to) < anzahlEdelslots) return false;
+                        return true;
+                    },
+                }
+            }
+
             static "Bonus - Eigenschaft" = (container) => this.effects2Kriterium(container, "eigenschaft", ["<Eigenschaft>", ...Object.values(ItemSearch.SearchDomains.EIGENSCHAFTEN)])
             static "Bonus - Fertigkeit" = (container) => this.effects2Kriterium(container, "fertigkeit", ["<Fertigkeit>", ...Object.values(ItemSearch.SearchDomains.FERTIGKEITEN)])
             static "Bonus - Talentklasse" = (container) => this.effects2Kriterium(container, "talentklasse", ["<Talentklasse>", ...ItemSearch.SearchDomains.TALENTKLASSEN])
 
             static "Bonus - Angriff" = (container) => this.effects2Kriterium(container, "angriff", ["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN])
             static "Bonus - Parade" = (container) => this.effects2Kriterium(container, "parade", ["<Parade>", ...ItemSearch.SearchDomains.PARADETYPEN])
-            static "Bonus - Schaden" = function (container) {
-                const select1 = ItemSearch.UI.createSelect(["<Schadensart>", ...ItemSearch.SearchDomains.SCHADENSARTEN]);
-                container.append(select1);
-                const select2 = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
-                container.append(select2);
-                const select3 = ItemSearch.UI.createSelect(["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN]);
-                container.append(select3);
-                const select4 = ItemSearch.UI.createSelect(["<a/z>", ...ItemSearch.SearchDomains.SCHADENSBONITYP]);
-                container.append(select4);
+            static "Bonus - Schaden" = (container) => this.schadenRuestung(container, true);
+            static "Bonus - Rüstung" = (container) => this.schadenRuestung(container, false);
+
+            static schadenRuestung(container, schadenValue) {
+                const selectSchadensart = ItemSearch.UI.createSelect(["<Schadensart>", ...ItemSearch.SearchDomains.SCHADENSARTEN]);
+                container.append(selectSchadensart);
+                const selectBesitzerBetroffener = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
+                container.append(selectBesitzerBetroffener);
+                const selectAngriffstyp = ItemSearch.UI.createSelect(["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN]);
+                container.append(selectAngriffstyp);
+                const selectAZ = ItemSearch.UI.createSelect(["<a/z>", ...ItemSearch.SearchDomains.SCHADENSBONITYP]);
+                if (schadenValue) container.append(selectAZ);
 
                 return {
                     matches: function (item) {
-                        if (select1.value === "" && select2.value === "" && select3.value === "" && select4.value === "") return true;
+                        if (selectSchadensart.value === "" && selectBesitzerBetroffener.value === "" && selectAngriffstyp.value === "" && selectAZ.value === "") return true;
+
                         var result = Array();
-                        if (select2.value === "Besitzer" || select2.value === "") {
-                            const cur = item.effects?.owner?.schaden;
+
+                        if (selectBesitzerBetroffener.value === "Besitzer" || selectBesitzerBetroffener.value === "") {
+                            const cur = schadenValue ? item.effects?.owner?.schaden : item.effects?.owner?.ruestung;
+                            if (cur) result.push(...cur);
+                            if (selectSchadensart.value !== "" && item.data?.wirkung?.type) {
+                                result.push({
+                                    bonus: "+1 / +1 / +1",
+                                    damageType: item.data?.wirkung?.type,
+                                    attackType: "(alle) (a)", // ist tendenziell abhängig von den Fähigkeiten
+                                });
+                            }
+                        }
+                        if (selectBesitzerBetroffener.value === "Betroffener" || selectBesitzerBetroffener.value === "") {
+                            const cur = schadenValue ? item.effects?.target?.schaden : item.effects?.target?.ruestung;
                             if (cur) result.push(...cur);
                         }
-                        if (select2.value === "Betroffener" || select2.value === "") {
-                            const cur = item.effects?.target?.schaden;
-                            if (cur) result.push(...cur);
-                        }
-                        var next = Array();
-                        if (select1.value !== "") {
-                            result.forEach(cur => {
-                                if (cur.damageType === select1.value) {
-                                    next.push(cur);
-                                }
-                            });
-                            result = next;
-                            next = Array();
-                        }
-                        if (select4.value !== "") {
-                            result.forEach(cur => {
+
+                        result = result.filter(cur => {
+                            function enthaelt(str) {
+                                return cur.bonus.includes(str) || cur.attackType.includes(str)
+                            }
+
+                            function angriffsTyp(str) {
+                                if (!str || str === "") return true;
+                                return cur.attackType.includes("alle") || cur.attackType.includes(str);
+                            }
+
+                            if (selectSchadensart.value !== "" && cur.damageType !== selectSchadensart.value) {
+                                return false;
+                            }
+                            if (selectAngriffstyp.value !== "" && !angriffsTyp(selectAngriffstyp.value)) {
+                                return false;
+                            }
+                            if (schadenValue && selectAZ.value !== "") {
                                 var matches = false;
-                                switch (select4.value) {
+                                switch (selectAZ.value) {
                                     case ItemSearch.SearchDomains.SCHADENSBONITYP[0]:
-                                        matches = !cur.bonus.includes("(a)") && !cur.attackType.includes("(a)") && !cur.bonus.includes("(z)") && !cur.attackType.includes("(z)");
+                                        matches = !enthaelt("(z)");
                                         break;
                                     case ItemSearch.SearchDomains.SCHADENSBONITYP[1]:
-                                        matches = cur.bonus.includes("(a)") || cur.attackType.includes("(a)");
+                                        matches = !enthaelt("(a)") && !enthaelt("(z)");
                                         break;
                                     case ItemSearch.SearchDomains.SCHADENSBONITYP[2]:
-                                        matches = cur.bonus.includes("(z)") || cur.attackType.includes("(z)");
+                                        matches = enthaelt("(a)") && !enthaelt("(z)");
+                                        break;
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[3]:
+                                        matches = enthaelt("(a)");
+                                        break;
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[4]:
+                                        matches = enthaelt("(z)") && enthaelt("(a)");
+                                        break;
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[5]:
+                                        matches = !enthaelt("(a)");
+                                        break;
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[6]:
+                                        matches = enthaelt("(z)");
+                                        break;
+                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[7]:
+                                        matches = enthaelt("(z)") && !enthaelt("(a)");
                                         break;
                                 }
-                                if (matches) {
-                                    next.push(cur);
-                                }
-                            });
-                            result = next;
-                            next = Array();
-                        }
+                                if (!matches) return false;
+                            }
+                            return true;
+                        });
                         return result.length > 0;
                     },
                 }
@@ -894,6 +994,7 @@
                     this.GEGENSTANDSKLASSEN = WoD.getAuswahlliste("item_?item_class");
                     this.GEGENSTANDSKLASSEN.push("Duellbelohnung");
                     this.GEGENSTANDSKLASSEN.push("Einzigartige Duellbelohnung");
+                    this.GEGENSTANDSKLASSEN.push("Veredelungsart: Keine Waffe, keine Rüstung");
                     this.GEGENSTANDSKLASSEN.sort();
                     this.FERTIGKEITEN = WoD.getAuswahlliste("item_?any_skill");
                     this.EIGENSCHAFTEN = WoD.getAuswahlliste("item_?bonus_attr");
@@ -921,12 +1022,21 @@
                 "Schamane": "Sm",
                 "Schütze": "Sü",
             }
-            static SCHADENSBONITYP = ["Zusätzlich (weder a noch z)", "Nur bei Anwendung (a)", "Nur wenn schon vorhanden (z)"];
+            static SCHADENSBONITYP = ["Alle Trigger: (a) egal, kein (z)", "Trigger-Additiv: kein (a), kein (z)", "Trigger-Anwendung: (a), kein (z)", "Anwendung: (a), (z) egal", "Anwendung: (a), (z)", "Additiv: kein (a), (z) egal", "Additiv: (a) egal, (z)", "Additiv: kein (a), (z)"];
             static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle entschärfen"];
             static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen", "Hinterhalt"];
             static BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
-            static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
+
+            static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Waffenhand/Einhändig", "Schildhand/Einhändig", "Waffenhand/Schildhand/Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
             static JEGLICHE_HAND = ["Beide Hände", "Waffenhand", "Schildhand", "Einhändig"];
+            static WAFFENHAND_EINHAENDIG = ["Waffenhand", "Einhändig"];
+            static SCHILDHAND_EINHAENDIG = ["Schildhand", "Einhändig"];
+            static WAFFENHAND_SCHILDHAND_EINHAENDIG = ["Waffenhand", "Schildhand", "Einhändig"];
+
+            static VEREDELUNGSART_WAFFE = ["Veredelungsart: Metallwaffe", "Veredelungsart: Holzwaffe"];
+            static VEREDELUNGSART_RUESTUNG_TEXTIL = ["Veredelungsart: Felle", "Veredelungsart: Lederbekleidung", "Veredelungsart: Metallrüstung", "Veredelungsart: Textilien"];
+            static VEREDELUNGSART_SCHADEN_OHNE_WAFFE = ["Veredelungsart: Chitin", "Veredelungsart: Knochen", "Veredelungsart: Holzgegenstand", "Veredelungsart: Steingegenstand", "Veredelungsart: Schriftstück", "Veredelungsart: Zierrat"];
+            // noch offen: , "Veredelungsart: Geschosse"
 
             static SCHADENSARTEN = ["Schneidschaden", "Hiebschaden", "Stichschaden", "Eisschaden", "Feuerschaden", "Blitzschaden", "Giftschaden", "Heiliger Schaden", "Manaschaden", "Säureschaden", "Psychologischer Schaden", "Arkaner Schaden", "Falle entschärfen"];
         }
@@ -1038,9 +1148,9 @@
                 result.style.display = "inline-block";
                 result.style.verticalAlign = "top";
                 options.forEach(opt => {
-                    const value = opt.startsWith("<") ? "" : opt.replaceAll(":", "");
                     const autoSelected = opt.startsWith(":") ? "selected" : "";
-                    result.innerHTML += "<option value='" + value + "' " + autoSelected + ">" + opt.replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll(":", "") + "</option>";
+                    const value = opt.startsWith("<") ? "" : (opt.startsWith(":") ? opt.substring(1) : opt);
+                    result.innerHTML += "<option value='" + value + "' " + autoSelected + ">" + opt.replaceAll("<", "&lt;").replaceAll(">", "&gt;") + "</option>";
                 });
                 return result;
             }
@@ -1105,6 +1215,7 @@
         }
 
         static async rewriteAllItemsFromSource() {
+            console.log("rewriteAllItemsFromSource");
             let itemSources = await MyStorage.getItemSourceDB().getAll();
             for (const itemSource of itemSources) {
                 if (itemSource.invalid) {
@@ -1214,6 +1325,22 @@
                             gegenstandsklassen.push(a.textContent.trim());
                         });
                         data.gegenstandsklassen = gegenstandsklassen;
+                        break;
+                    }
+                    case "Wirkung": {
+                        const value = tr.children[1].textContent.trim();
+                        if (value !== "-") {
+                            const matches = value.match(/(Stufe \d*,\d*)?[\n]?(.*)/);
+                            let stufe = matches[1];
+                            if (stufe) stufe = stufe.match(/Stufe (\d*).*/)[1];
+                            let type = matches[2];
+                            if (type) type = type.trim();
+                            if (type === "") type = null;
+                            data.wirkung = {
+                                type: type,
+                                value: stufe,
+                            }
+                        }
                         break;
                     }
                     case "Anwendungen insgesamt": {
@@ -1505,6 +1632,13 @@
             for (var i = 0, l = array.length; i < l; i++) {
                 fn(array[i]);
             }
+        }
+
+        static twoListMatch(list1, list2) {
+            for (const cur of list1) {
+                if (list2.includes(cur)) return true;
+            }
+            return false;
         }
 
         static getSelectedOptions(selectInput) {
