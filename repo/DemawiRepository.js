@@ -467,6 +467,13 @@ class demawiRepository {
                     if (node.href.startsWith("http")) {
                         if (node.classList.contains("rep_monster")) {
                             return ["", "[beast:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
+                        } else if (node.href.includes("item.php")) {
+                            const urlParams = new URLSearchParams(node.href);
+                            return ["", "[item:" + decodeURIComponent(urlParams.get("name")) + "]", ""];
+                        } else if (node.href.includes("/skill/")) {
+                            return ["", "[skill:" + decodeURIComponent(node.href.match(/\/skill\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
+                        } else if (node.href.includes("/item/")) {
+                            return ["", "[item:" + decodeURIComponent(node.href.match(/\/item\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
                         } else {
                             return ["[url=" + node.href + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/url]"];
                         }
