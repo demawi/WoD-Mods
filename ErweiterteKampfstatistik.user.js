@@ -10,6 +10,8 @@
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
 // @include        http*://*/wod/spiel/*dungeon/combat_report.php*
+// @include        http*://*/wod/spiel/event/play.php*
+// @include        http*://*/wod/spiel/event/eventlist.php*
 // @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
@@ -38,11 +40,21 @@
         static outputAnchor;
         static runSave;
 
-        // Einstiegspunkt der Anwendung
+        // Einstiegspunkt der Anwendung, Parameter können von externen Anwendungen gesetzt werden
         static async startMod(kampfbericht, kampfstatistik) {
             let thisObject = this;
             console.log("startMod: Statistiklsd", kampfbericht, kampfstatistik)
             unsafeWindow.statExecuter = this.startMod;
+            if (WoD.istSeite_AbenteuerUebungsplatz()) {
+                let levelData = ReportParser.readKampfbericht(document);
+                if(levelData) {
+                    Mod.outputAnchor = Mod.createOutputAnchor();
+                    Mod.thisLevelDatas = [levelData];
+                    var roundCount = levelData.roundCount;
+                    var hinweisText = ": " + roundCount + " Runden";
+                    Mod.outputAnchor.setTitle(hinweisText);
+                }
+            }
             if (kampfbericht || WoD.istSeite_Kampfbericht()) { // Einzelseite
                 Mod.outputAnchor = Mod.createOutputAnchor();
                 Mod.runSave(async function () {
@@ -141,6 +153,9 @@
         static createOutputAnchor() {
             // Ausgabe
             var headings = document.getElementsByTagName("h2");
+            if (!headings.textContent || headings.textContent === "") { // im Abenteuer
+                headings = document.getElementsByTagName("h1");
+            }
             var content = document.createElement("div");
             content.classList.add("nowod");
             content.hidden = true;
@@ -258,6 +273,7 @@
                         subDomainEntry["Sozial"] = this.createStat();
                         subDomainEntry["Hinterhalt"] = this.createStat();
                         subDomainEntry["Explosion"] = this.createStat();
+                        subDomainEntry["Verschrecken"] = this.createStat();
                     }
                     previousStats[subDomain] = subDomainEntry;
                 }
@@ -1079,9 +1095,15 @@
                 return;
             }
             if (damageLineElement.tagName === "SPAN") { // hat Anfälligkeit
-                //console.log("Anfälligkeit gefunden "+damageLineElement.textContent);
+                console.log("Anfälligkeit gefunden " + damageLineElement.onmouseover);
                 const dmgVorher = damageLineElement.onmouseover.toString().match(/verursacht: <b>(\d*)<\/b>/)[1];
-                const dmgNachher = damageLineElement.onmouseover.toString().match(/Anfälligkeit.* <b>(\d*)<\/b>/)[1];
+                let dmgNachher = damageLineElement.onmouseover.toString().match(/Anfälligkeit.* <b>(\d*)<\/b>/);
+                if (dmgNachher) {
+                    dmgNachher = dmgNachher[1];
+                } else {
+                    dmgNachher = damageLineElement.onmouseover.toString().match(/Unempfindlichkeit.* <b>(\d*)<\/b>/)[1];
+                    dmgNachher = -Number(dmgNachher);
+                }
                 damage.resistenz = Number(dmgVorher) - Number(dmgNachher) - damage.ruestung;
             }
             return damage;
@@ -1185,11 +1207,13 @@
                                     || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
                                 ) {
                                     fertigkeit.type = "Sozial";
-                                    if(curText.startsWith("sind einfach überall!")) {
+                                    if (curText.startsWith("sind einfach überall!")) {
                                         wuerfe.push({
                                             value: 40,
                                         })
                                     }
+                                } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe") || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")) {
+                                    fertigkeit.type = "Ereignis";
                                 }
                                 if (wurfMatcher) { // wurf
                                     let wo = wurfMatcher[1];
@@ -1255,6 +1279,9 @@
                                             break;
                                         case "ruft herbei mittels":
                                             fertigkeit.type = "Herbeirufung";
+                                            break;
+                                        case "verschreckt":
+                                            fertigkeit.type = "Verschrecken";
                                             break;
                                         default:
                                             console.error("Unbekannter Fertigkeits-Typ(1) ", "'" + curText + "'", actionElement);
@@ -2273,7 +2300,7 @@
     }
 
     class WoD {
-        //  testet, ob wir uns auf der Berichtseite befinden   *
+        //  testet, ob wir uns auf der Berichtseite befinden
         static istSeite_Kampfbericht() {
             var result = false;
             var heading = document.getElementsByTagName("h1")[0];
@@ -2285,7 +2312,7 @@
             return result;
         }
 
-        //  testet, ob wir uns auf der Statistik-Seite befinden   *
+        //  testet, ob wir uns auf der Statistik-Seite befinden
         static istSeite_Kampfstatistik() {
             var result = false;
             var heading = document.getElementsByTagName("h1")[0];
@@ -2294,6 +2321,15 @@
             if (text.indexOf("Kampfstatistik") !== -1) result = true;
             //console.log("Kampfstatistik-Seite");
 
+            return result;
+        }
+
+        //  testet, ob wir uns auf dem Abenteuer-Übungsplatz befinden
+        static istSeite_AbenteuerUebungsplatz() {
+            var result = false;
+            var heading = document.getElementsByTagName("h1")[0];
+            var text = heading.textContent;
+            if (text.indexOf("Abenteuer Übungsplatz der Akademie Trutz und Wehr") !== -1) result = true;
             return result;
         }
 
