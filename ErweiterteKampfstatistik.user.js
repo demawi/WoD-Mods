@@ -47,7 +47,7 @@
             unsafeWindow.statExecuter = this.startMod;
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
                 let levelData = ReportParser.readKampfbericht(document);
-                if(levelData) {
+                if (levelData) {
                     Mod.outputAnchor = Mod.createOutputAnchor();
                     Mod.thisLevelDatas = [levelData];
                     var roundCount = levelData.roundCount;
@@ -153,7 +153,7 @@
         static createOutputAnchor() {
             // Ausgabe
             var headings = document.getElementsByTagName("h2");
-            if (!headings.textContent || headings.textContent === "") { // im Abenteuer
+            if (WoD.istSeite_AbenteuerUebungsplatz()) { // im Abenteuer
                 headings = document.getElementsByTagName("h1");
             }
             var content = document.createElement("div");
