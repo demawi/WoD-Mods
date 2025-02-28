@@ -484,6 +484,8 @@ class demawiRepository {
                     return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
                 case "BR":
                     return ["", "\n", ""];
+                case "B":
+                    return ["[b]", this.toBBCodeArray(node.childNodes, defaultSize), "[/b]"];
                 default:
                     if (typeof node.tagName === 'undefined') {
                         return ["", node.textContent.replaceAll("\n", ""), ""];
