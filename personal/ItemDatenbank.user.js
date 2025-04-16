@@ -19,6 +19,7 @@
 
     const Storages = demawiRepository.import("Storages");
     const BBCodeExporter = demawiRepository.import("BBCodeExporter");
+    const File = demawiRepository.import("File");
 
     class Mod {
         static dbname = "wodDB";
@@ -1541,7 +1542,6 @@
         }
 
         static getItemDB() {
-
             return this.items;
         }
 

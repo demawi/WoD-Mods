@@ -60,7 +60,7 @@
                 Mod.runSave(async function () {
                     // cur_rep_id für Dungeons, report bei Schlachten
                     const reportId = WoD.getReportId();
-                    thisObject.thisReport = await MyStorage.getReportDB().getValue(reportId);
+                    thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
                     console.log("ReportId: ", reportId, thisObject.thisReport);
 
                     var levelData = ReportParser.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
@@ -77,7 +77,7 @@
                         }
                         Mod.outputAnchor.setTitle(hinweisText);
                         Mod.thisLevelDatas = [levelData];
-                        await MyStorage.getReportDB().setValue(thisObject.thisReport);
+                        await MyStorage.getReportStatsDB().setValue(thisObject.thisReport);
                     }
                 });
             }
@@ -85,7 +85,7 @@
                 Mod.outputAnchor = Mod.createOutputAnchor();
                 Mod.runSave(async function () {
                     const reportId = WoD.getReportId();
-                    thisObject.thisReport = await MyStorage.getReportDB().getValue(reportId);
+                    thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
 
                     console.log("ReportId: ", reportId, thisObject.thisReport);
 
@@ -1197,6 +1197,8 @@
                                 let wurfMatcher = curText.match(/^(\D*)?(\d+)[\.\)]?$/);
                                 if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
                                     fertigkeit.type = "Fernkampf";
+                                } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
+                                    fertigkeit.type = "Fernkampf";
                                 } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen") || curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) { // z.B. "Dunkles Erwachen"
                                     fertigkeit.type = "Nahkampf";
                                 } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
@@ -1214,6 +1216,10 @@
                                     }
                                 } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe") || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")) {
                                     fertigkeit.type = "Ereignis";
+                                } else if (curText.startsWith("Mit ungeahnter Wucht lösen sich Teile der schwarzen Substanz von Dnobs Körper und fliegen in alle Richtungen")) { // Herz der Schatten
+                                    fertigkeit.type = "Fernkampf";
+                                } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")) {
+                                    fertigkeit.type = "Wirkung";
                                 }
                                 if (wurfMatcher) { // wurf
                                     let wo = wurfMatcher[1];
@@ -2355,35 +2361,31 @@
             }
             let resultSetValue = objStore.setValue;
             objStore.setValue = async function (dbObject) {
+                dbObject.ts = new Date().getTime();
                 await resultSetValue.call(objStore, dbObject);
             }
             return objStore;
         }
         static indexedDb = new Storages.IndexedDb("WoDStats+", Mod.dbname);
-        static reports = this.adjust(this.indexedDb.createObjectStore("reportStats", "reportId"));
+        static reportStats = this.adjust(this.indexedDb.createObjectStore("reportStats", "reportId"));
 
         /**
          * @returns {Storages.ObjectStorage}
          */
-        static getReportDB() {
-            return this.reports;
+        static getReportStatsDB() {
+            return this.reportStats;
         }
 
         static async validateAllReports() {
-            return;
-            if (!this.reportIds) this.reportIds = await GM.getValue("reportIds", {});
-            var somethingDeleted = false;
-            var compareDate = new Date();
-            compareDate.setDate(compareDate.getDate() - 30);
-            for (const [reportId, metaData] of Object.entries(this.reportIds)) {
-                if (metaData.dataVersion !== Mod.currentReportDataVersion || metaData.time && metaData.time < compareDate.getTime()) {
-                    console.log("Report veraltet und wird verworfen", reportId);
-                    delete this.reportIds[reportId];
-                    await this.gmSetReport(reportId);
-                    somethingDeleted = true;
+            //console.log("validateAllReports");
+            const reportDB = this.getReportStatsDB()
+            let compareDate = new Date();
+            compareDate.setDate(compareDate.getDate() - 8); // x-Tage lang vorhalten
+            for (const report of await reportDB.getAll()) {
+                if (!report.ts || report.ts < compareDate.getTime()) {
+                    await reportDB.deleteValue(report.reportId);
                 }
             }
-            if (somethingDeleted) await this.gmSetValue("reportIds", this.allReports);
         }
 
     }
