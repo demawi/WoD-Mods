@@ -42,6 +42,16 @@ class demawiRepository {
         }
     }
 
+    /**
+     * WoD-DBs:
+     * Inhaber:
+     * ItemDatenbank (wodDB.items[w], wodDB.itemSources[w])
+     * KampfberichtArchiv (wodDB.reports[w])
+     * ErweiterteKampfstatistik (wodDB.reportStats[w])
+     *
+     * Lesend:
+     *
+     */
     static Storages = class {
 
         static IndexedDb = class {
@@ -57,7 +67,7 @@ class demawiRepository {
             }
 
             /**
-             * Kopiert die aktuelle Datenbank auf den Zielort.
+             * Kopiert die aktuelle Datenbank komplett in eine andere Datenbank.
              * @param dbNameTo
              * @returns {Promise<void>}
              */
@@ -87,7 +97,18 @@ class demawiRepository {
                 }
             }
 
-            async exportToJson() {
+            /**
+             * Exportiert alle Objekte aus allen Object-Stores in ein JSON-Resultat.
+             * {
+             *     store1: [
+             *
+             *     ],
+             *     store2: [
+             *
+             *     ]
+             * }
+             */
+            async exportToJson(storeNames) {
                 const idbDatabase = await this.getConnection();
                 return new Promise((resolve, reject) => {
                     const exportObject = {}
@@ -99,9 +120,19 @@ class demawiRepository {
                             'readonly'
                         )
 
-                        transaction.addEventListener('error', reject)
+                        transaction.addEventListener('error', reject);
+                        let storeNamesToLoad = [];
+                        if (!storeNames) storeNamesToLoad = idbDatabase.objectStoreNames;
+                        else {
+                            for (const storeName of idbDatabase.objectStoreNames) {
+                                if (storeNames.includes(storeName)) {
+                                    storeNamesToLoad.push(storeName);
+                                }
+                            }
+                        }
+                        console.log("StoresToLoad: ", storeNamesToLoad);
 
-                        for (const storeName of idbDatabase.objectStoreNames) {
+                        for (const storeName of storeNamesToLoad) {
                             const allObjects = []
                             transaction
                                 .objectStore(storeName)
@@ -117,11 +148,8 @@ class demawiRepository {
                                         exportObject[storeName] = allObjects
 
                                         // Last store was handled
-                                        if (
-                                            idbDatabase.objectStoreNames.length ===
-                                            Object.keys(exportObject).length
-                                        ) {
-                                            resolve(JSON.stringify(exportObject))
+                                        if (storeNamesToLoad.length === Object.keys(exportObject).length) {
+                                            resolve(_.util.JSONstringify(exportObject));
                                         }
                                     }
                                 })
@@ -130,6 +158,9 @@ class demawiRepository {
                 })
             }
 
+            /**
+             * Import ein JSON-Objekt komplett in die Objekt-Stores.
+             */
             async importFromJson(json) {
                 const idbDatabase = await this.getConnection();
                 return new Promise((resolve, reject) => {
@@ -394,6 +425,56 @@ class demawiRepository {
         }
     }
 
+    static WoD = class {
+        static getMainForm() {
+           return document.getElementsByName("the_form")[0];
+        }
+
+        static getValueFromMainForm(valueType) {
+            const form = _.WoD.getMainForm();
+            if (!form) return;
+            return form[valueType].value;
+        }
+
+        static getMyWorld() {
+            return _.WoD.getValueFromMainForm("wod_post_world");
+        }
+
+        static getMyGroup() {
+            return _.WoD.getValueFromMainForm("gruppe_name");
+        }
+
+        static getMyGroupId() {
+            return _.WoD.getValueFromMainForm("gruppe_id");
+        }
+
+        static getMyHeroId() {
+            return _.WoD.getValueFromMainForm("session_hero_id");
+        }
+
+        static getMyHeroName() {
+            return _.WoD.getValueFromMainForm("heldenname");
+        }
+
+        static getMyUserName() {
+            return _.WoD.getValueFromMainForm("spielername");
+        }
+
+        /**
+         * z.B. "Heute 12:13" => "12.12.2024 12:13"
+         */
+        static getTimeString(timeString) {
+            if (timeString.includes("Heute")) {
+                timeString = timeString.replace("Heute", _.util.formatDate(new Date()));
+            } else if (timeString.includes("Gestern")) {
+                const date = new Date();
+                date.setDate(date.getDate() - 1);
+                timeString = timeString.replace("Gestern", _.util.formatDate(date));
+            }
+            return timeString;
+        }
+    }
+
     static BBCodeExporter = class {
         static hatClassName(node, className) {
             return node.classList && node.classList.contains(className);
@@ -496,7 +577,7 @@ class demawiRepository {
         }
 
         static toBBCodeArray(childNodes, defaultSize) {
-            return demawiRepository.util.arrayMap(childNodes, a => this.toBBCode(a, defaultSize)).join("");
+            return _.util.arrayMap(childNodes, a => this.toBBCode(a, defaultSize)).join("");
         }
     }
 
@@ -508,6 +589,78 @@ class demawiRepository {
             }
             return result;
         }
-    }
 
+        static formatDate(date) {
+            var result = "";
+            var a = date.getDate();
+            if (a < 10) result += "0";
+            result += a + ".";
+            a = date.getMonth() + 1;
+            if (a < 10) result += "0";
+            result += a + ".";
+            result += (date.getFullYear());
+            return result;
+        }
+
+        static JSONstringify(data) {
+            _.util.JSONstringifyCount(data);
+            let result = "{";
+            for (const [key, value] of Object.entries(data)) {
+                if (result.length > 1) result += ",";
+                result += '"' + key + '":' + _.util.JSONstringifyArray(value);
+            }
+            result += "}";
+            return result;
+        }
+
+        static JSONstringifyArray(data) {
+            let result = "[";
+            for (var indx = 0; indx < data.length - 1; indx++) {
+                result += _.util.JSONstringifyOriginal(data[indx], null, 4) + ",";
+            }
+            result += _.util.JSONstringifyOriginal(data[data.length - 1], null, 4) + "]";
+            return result;
+        }
+
+        static JSONstringifyOriginal(arg1, arg2, arg3) {
+            try {
+                return JSON.stringify(arg1, arg2, arg3); // JSON.stringify(arg1, arg2, arg3);
+            } catch (e) {
+                console.log(e.message, arg1);
+            }
+        }
+
+        static JSONstringifyCount(data) {
+            console.log("Stringify", data);
+            let result = 0;
+            for (const [key, value] of Object.entries(data)) {
+                let temp = _.util.JSONstringifyArrayCount(value);
+                console.log(key + ": " + temp);
+                result += temp;
+            }
+            console.log("StringifyCount", data, result);
+            return result;
+        }
+
+        static JSONstringifyArrayCount(data) {
+            let result = 0;
+            for (var indx = 0; indx < data.length - 1; indx++) {
+                result += _.util.JSONstringifyOriginalCount(data[indx], null, 4);
+            }
+            result += _.util.JSONstringifyOriginalCount(data[data.length - 1], null, 4);
+            return result;
+        }
+
+        static JSONstringifyOriginalCount(arg1, arg2, arg3) {
+            try {
+                const result = JSON.stringify(arg1, arg2, arg3).length;
+                //console.log(arg1.id+ ": " + result);
+                return result; // JSON.stringify(arg1, arg2, arg3);
+            } catch (e) {
+                console.log(e.message, arg1);
+            }
+        }
+    }
 }
+
+_ = demawiRepository;
