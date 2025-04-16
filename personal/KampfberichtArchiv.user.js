@@ -19,6 +19,7 @@
     'use strict';
 
     const Storages = demawiRepository.import("Storages");
+    const _WoD = demawiRepository.import("WoD");
 
     class Mod {
         static dbname = "wodDB";
@@ -271,7 +272,7 @@
 
                 const reportStatus = document.createElement("td");
                 curTR.append(reportStatus);
-                console.log("fillout: ", reportId, thisReport, curTR);
+                //console.log("fillout: ", reportId, thisReport, curTR);
 
                 if (!thisReport) {
                     reportStatus.innerHTML += "Fehlt komplett";
@@ -312,7 +313,7 @@
     }
 
     class MyStorage {
-        static indexedDb = new Storages.IndexedDb("WoDReportArchieve", Mod.dbname);
+        static indexedDb = new Storages.IndexedDb("WoDReportArchiv", Mod.dbname);
         static reports = this.indexedDb.createObjectStore("reports", "reportId");
 
         static getReportDB() {
@@ -328,21 +329,14 @@
         static getFullReportData() {
             const form = document.getElementsByName("the_form")[0];
             const titleSplit = document.getElementsByTagName("h2")[0].textContent.split("-");
-            var timeString = titleSplit[0].trim();
-            if (timeString.includes("Heute")) {
-                timeString = timeString.replace("Heute", util.formatDate(new Date()));
-            } else if (timeString.includes("Gestern")) {
-                const date = new Date();
-                date.setDate(date.getDate() - 1);
-                timeString = timeString.replace("Gestern", util.formatDate(date));
-            }
+            const timeString = _WoD.getTimeString(titleSplit[0].trim());
             return {
                 reportId: form["report_id[0]"].value,
-                world: form.wod_post_world.value, // wod_post_world = "WA";
+                world: _WoD.getMyWorld(),
                 time: timeString,
                 title: titleSplit[1].trim(), // Bei einem Dungeon z.B. der Dungeonname
-                gruppe: form.gruppe_name.value,
-                gruppe_id: form.gruppe_id.value,
+                gruppe: _WoD.getMyGroup(),
+                gruppe_id: _WoD.getMyGroupId(),
             };
         }
 
@@ -373,18 +367,6 @@
             var pathname = window.location.pathname.split("/");
             var pageSection = pathname[pathname.length - 2];
             return pathname[pathname.length - 1];
-        }
-
-        static formatDate(date) {
-            var result = "";
-            var a = date.getDate();
-            if (a < 10) result += "0";
-            result += a + ".";
-            a = date.getMonth() + 1;
-            if (a < 10) result += "0";
-            result += a + ".";
-            result += (date.getFullYear());
-            return result;
         }
 
         static forEach(array, fn) {
