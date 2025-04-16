@@ -34,16 +34,17 @@
             button.style.fontSize = "12px";
             button.style.cursor = "pointer";
             button.onclick = function () {
-                Mod.exportKonfig();
+                Mod.exportKonfig(ueberschrift);
             }
             ueberschrift.append(button);
         }
 
-        static exportKonfig() {
+        static exportKonfig(ueberschrift) {
+            var profilName = ueberschrift.childNodes[0].textContent.substring(8);
             const result = this.getKonfig();
             console.log(result);
             const resultStr = JSON.stringify(result);
-            const name = _WoD.getMyHeroName() + "_XXX" + ".json";
+            const name = _WoD.getMyHeroName() + "_" + profilName + ".json";
             _File.forDownload(name, resultStr);
         }
 
@@ -92,7 +93,7 @@
                 // Wenn disabled: skip
                 if (configNodes[i].querySelector('.disabled')) continue;
                 var skill = configNodes[i].querySelector('.wod-list-item-label-skill').textContent.trim();
-                if(skill === "Klicke hier, um eine Fertigkeit auszuwählen.") continue;
+                if (skill === "Klicke hier, um eine Fertigkeit auszuwählen.") continue;
                 var item = this.getItemName(configNodes[i].querySelector('.wod-list-item-label-item').textContent.trim());
                 var ammo = configNodes[i].querySelector('.wod-list-item-label-ammo').textContent.trim();
                 var positions = configNodes[i].querySelector('.wod-list-item-label-positions').textContent.trim();
