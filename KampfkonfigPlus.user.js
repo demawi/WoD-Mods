@@ -30,6 +30,8 @@
         }
 
         static addButtons() {
+            console.log("addbuttons");
+            console.log(document.getElementsByTagName("h1"));
             const ueberschrift = document.getElementsByTagName("h1")[1];
             const profileName = ueberschrift.textContent.substring(8);
             const button = document.createElement("span");
