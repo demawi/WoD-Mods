@@ -26,13 +26,19 @@
 
         static async startMod() {
             console.log("Kampfkonfig found!");
+            console.log("Object: ", unsafeWindow.eval("new WodAction()"));
             this.addButtons();
         }
 
         static addButtons() {
-            console.log("addbuttons");
-            console.log(document.getElementsByTagName("h1"));
-            const ueberschrift = document.getElementsByTagName("h1")[1];
+            let ueberschrift;
+            for (const cur of document.getElementsByTagName("h1")) {
+                console.log(cur.textContent);
+                if (cur.textContent.startsWith("Profil:")) {
+                    ueberschrift = cur;
+                    break;
+                }
+            }
             const profileName = ueberschrift.textContent.substring(8);
             const button = document.createElement("span");
             button.classList.add("nowod");
@@ -68,13 +74,13 @@
 
         static getItemReferenceLookup(object) {
             let name = object.name;
-            if (WOD_ITEM_AUTO.name === object.name) return [WOD_ITEM_AUTO, true];
-            if (WOD_ITEM_NONE.name === object.name) return [WOD_ITEM_NONE, true];
+            if (unsafeWindow.WOD_ITEM_AUTO.name === object.name) return [unsafeWindow.WOD_ITEM_AUTO, true];
+            if (unsafeWindow.WOD_ITEM_NONE.name === object.name) return [unsafeWindow.WOD_ITEM_NONE, true];
             if (name.startsWith("!!")) name = name.substring(3);
             if (name.endsWith("(Lager)")) name = name.substring(0, name.length - 8);
             const id = object.id;
-            for (const key in THE_ENV.items) {
-                const current = THE_ENV.items[key];
+            for (const key in unsafeWindow.THE_ENV.items) {
+                const current = unsafeWindow.THE_ENV.items[key];
                 if (id === current.id) return [current, true];
             }
             // Gegenstand nicht gefunden
@@ -87,8 +93,8 @@
 
         static getSkillReferenceLookup(object, objectFactory) {
             const name = object.name;
-            for (const key in THE_ENV.skills) {
-                const current = THE_ENV.skills[key];
+            for (const key in unsafeWindow.THE_ENV.skills) {
+                const current = unsafeWindow.THE_ENV.skills[key];
                 if (name === current.name) return [current, true];
             }
             // Skill aktuell nicht gelernt
@@ -98,16 +104,17 @@
         }
 
         static refreshView(optCfg) {
+            console.log("refresh");
             // Save cfg-parameters
-            const url = WOD_CFG.ui_orders.form.element.attributes.action.value;
-            const fig_type = WOD_CFG.ui_orders.fig_type.element.value;
-            const fig_id = WOD_CFG.ui_orders.fig_id.element.value;
-            const is_popup = WOD_CFG.ui_orders.is_popup.element.value;
-            const world = WOD_CFG.ui_orders.world.element.value;
-            const session_hero_id = WOD_CFG.ui_orders.session_hero_id.element.value;
+            const url = this.getWOD_CFG().ui_orders.form.element.attributes.action.value;
+            const fig_type = this.getWOD_CFG().ui_orders.fig_type.element.value;
+            const fig_id = this.getWOD_CFG().ui_orders.fig_id.element.value;
+            const is_popup = this.getWOD_CFG().ui_orders.is_popup.element.value;
+            const world = this.getWOD_CFG().ui_orders.world.element.value;
+            const session_hero_id = this.getWOD_CFG().ui_orders.session_hero_id.element.value;
             const php_session_name = '';
             const php_session_id = '';
-            if (optCfg) wodSetCfg(optCfg);
+            if (optCfg) unsafeWindow.wodSetCfg(optCfg);
 
             // refresh
             const table = document.getElementById("wod-orders");
@@ -115,7 +122,7 @@
 
             // wod_orders_init( url, fig_type, fig_id, is_popup, world, session_hero_id, php_session_name, php_session_id);
             // wod_orders_init( '/wod/spiel/hero/skillconfig.php', 'figur', 373802, 0, 'WA', '373802', '', '' )
-            wod_orders_init(url, fig_type, fig_id, is_popup, world, session_hero_id, php_session_name, php_session_id);
+            unsafeWindow.wod_orders_init(url, fig_type, fig_id, is_popup, world, session_hero_id, php_session_name, php_session_id);
             this.addButtons();
         }
 
@@ -138,15 +145,22 @@
          * ohne "ui_orders"-Funktionen/DOM-Elemente
          */
         static getWodConfig() {
-            const result = new WodConfig();
-            for (const key in WOD_CFG) {
-                result[key] = WOD_CFG[key];
+            const result = new unsafeWindow.WodConfig();
+            for (const key in this.getWOD_CFG()) {
+                result[key] = this.getWOD_CFG()[key];
             }
             delete result.ui_orders;
             return result;
         }
 
+        static getWOD_CFG() {
+            return unsafeWindow.WOD_CFG;
+        }
+
     }
 
-    Mod.startMod();
+    // Damit das Skript im FF nicht zu früh läuft.
+    setTimeout(() => {
+        Mod.startMod();
+    }, 100);
 })();

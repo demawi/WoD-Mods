@@ -54,7 +54,8 @@ class demawiRepository {
          * toObjects aufgerufen.
          */
         static parse(json, objectFactory) {
-            return this.toObjects(JSON.parse(json), objectFactory || {});
+            const jsonParse = unsafeWindow.JSON.parse(json);
+            return this.toObjects(jsonParse, objectFactory || {});
         }
 
         /**
@@ -80,8 +81,8 @@ class demawiRepository {
                     let newObject;
                     try {
                         newObject = eval("new " + object._class + "()");
-                    } catch(e) {
-                        newObject = eval("new unsafeWindow." + object._class + "()");
+                    } catch (e) {
+                        newObject = unsafeWindow.eval("new " + object._class + "()");
                     }
                     for (const key in object) {
                         if (key === "_class") continue;
