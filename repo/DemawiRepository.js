@@ -77,7 +77,12 @@ class demawiRepository {
                         if (finishParsing) return newObject;
                     }
                     // Über die ObjektFactory wurde kein neues Objekt erzeugt...
-                    let newObject = eval("new " + object._class + "()");
+                    let newObject;
+                    try {
+                        newObject = eval("new " + object._class + "()");
+                    } catch(e) {
+                        newObject = eval("new unsafeWindow." + object._class + "()");
+                    }
                     for (const key in object) {
                         if (key === "_class") continue;
                         newObject[key] = this.toObjects(object[key], objectFactory);
