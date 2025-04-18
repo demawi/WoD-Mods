@@ -6,6 +6,99 @@ class demawiRepository {
         return this[type];
     }
 
+    /**
+     * Speichert zusätzlich Klasseninformationen von Objekten. Dafür wird ein zusätzliches "_class"-Attribut zu den Objekten gespeichert.
+     * Beim Laden werden die Objekte entsprechend wieder hergestellt.
+     */
+    static JSON2 = class {
+        static stringify(object, objectChanger) {
+            if (Array.isArray(object)) {
+                let result = "[";
+                for (let idx = 0; idx < object.length; idx++) {
+                    if (result.length > 1) result += ",";
+                    result += this.stringify(object[idx], objectChanger);
+                }
+                return result + "]";
+            } else if (typeof object === "object") {
+                if (object === null) {
+                    return JSON.stringify(object);
+                } else if (object.constructor) {
+                    if (objectChanger) object = objectChanger(object);
+                    let result = "{";
+                    for (const key in object) {
+                        const value = object[key];
+                        if (value === undefined || typeof value === "function") continue;
+                        if (result.length > 1) result += ",";
+                        result += "\"" + key + "\":" + this.stringify(value, objectChanger);
+                    }
+                    if (result.length > 1) result += ",";
+                    result += "\"_class\":" + JSON.stringify(object.constructor.name);
+                    return result + "}";
+                } else {
+                    let result = "{";
+                    for (const key in object) {
+                        const value = object[key];
+                        if (value === undefined || typeof value === "function") continue;
+                        if (result.length > 1) result += ",";
+                        result += "\"" + key + "\":" + this.stringify(value, objectChanger);
+                    }
+                    return result + "}";
+                }
+            } else {
+                return JSON.stringify(object);
+            }
+        }
+
+        /**
+         * Zunächst werden die Objekte per Standard-JSON wieder hergestellt. Danach wird
+         * toObjects aufgerufen.
+         */
+        static parse(json, objectFactory) {
+            return this.toObjects(JSON.parse(json), objectFactory || {});
+        }
+
+        /**
+         * Wertet das zusätzlichen "_class"-Attribut aus und ersetzt die Standard-Objekten mit
+         * den entsprechend instanziierten Objekten.
+         * Die 'objectFactory' bietet die Möglichkeit beim Auswerten des "_class"-Attributs, selbst
+         * die Instanziierung vorzunehmen.
+         */
+        static toObjects(object, objectFactory) {
+            if (Array.isArray(object)) {
+                for (let idx = 0; idx < object.length; idx++) {
+                    object[idx] = this.toObjects(object[idx], objectFactory);
+                }
+            } else if (typeof object === "object") {
+                if (!object) {
+                    // nothing to do
+                } else if (object._class) {
+                    if (objectFactory[object._class]) {
+                        const [newObject, finishParsing] = objectFactory[object._class](object);
+                        if (finishParsing) return newObject;
+                    }
+                    // Über die ObjektFactory wurde kein neues Objekt erzeugt...
+                    let newObject = eval("new " + object._class + "()");
+                    for (const key in object) {
+                        if (key === "_class") continue;
+                        newObject[key] = this.toObjects(object[key], objectFactory);
+                    }
+                    return newObject;
+                } else {
+                    for (const key in object) {
+                        object[key] = this.toObjects(object[key], objectFactory);
+                    }
+                }
+            } else {
+                // nothing to do
+            }
+            return object;
+        }
+
+        static toObject(object) {
+
+        }
+    }
+
     static File = class {
         static forDownload(filename, data) {
             const blob = new Blob([data], {type: 'text/plain'});
@@ -27,18 +120,22 @@ class demawiRepository {
             return downloadLink;
         }
 
-        static createUploadForRead(callback) {
-            const result = document.createElement("input");
-            result.type = "file";
-            result.onchange = function () {
-                const file = result.files[0];
-                const reader = new FileReader();
-                reader.onload = function () {
-                    callback(reader.result);
-                };
-                reader.readAsText(file);
-            }
-            return result;
+        static async createUploadForRead() {
+
+            return new Promise((result, reject) => {
+                const fileInput = document.createElement("input");
+                fileInput.type = "file";
+                fileInput.onchange = function () {
+                    const file = fileInput.files[0];
+                    const reader = new FileReader();
+                    reader.onload = function () {
+                        result(reader.result);
+                    };
+                    reader.readAsText(file);
+                }
+                fileInput.click();
+            })
+            //return result;
         }
     }
 
@@ -427,7 +524,7 @@ class demawiRepository {
 
     static WoD = class {
         static getMainForm() {
-           return document.getElementsByName("the_form")[0];
+            return document.getElementsByName("the_form")[0];
         }
 
         static getValueFromMainForm(valueType) {
