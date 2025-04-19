@@ -1,3 +1,6 @@
+/**
+ * WoD-spezifische (WoD-Klasse) und WoD-spezifische technische Klassen mit entsprechenden Hilfsmethoden.
+ */
 class demawiRepository {
 
     static version = "1.0.2";
@@ -105,6 +108,9 @@ class demawiRepository {
         }
     }
 
+    /**
+     * Hilfemethoden für Down- und Uploads
+     */
     static File = class {
         static forDownload(filename, data) {
             const blob = new Blob([data], {type: 'text/plain'});
@@ -528,6 +534,9 @@ class demawiRepository {
         }
     }
 
+    /**
+     * Hilfemethoden um allgemeine Informationen von WoD zu erhalten (Name, Gruppe etc.)
+     */
     static WoD = class {
         static getMainForm() {
             return document.getElementsByName("the_form")[0];
@@ -578,6 +587,9 @@ class demawiRepository {
         }
     }
 
+    /**
+     * Hilfsmethoden für den BBCode-Export (Z.B. lässt sich ein DOM-Element exportieren)
+     */
     static BBCodeExporter = class {
         static hatClassName(node, className) {
             return node.classList && node.classList.contains(className);
@@ -684,6 +696,9 @@ class demawiRepository {
         }
     }
 
+    /**
+     * Allgemeine nicht WoD-spezifische Hilfsmethoden.
+     */
     static util = class {
         static arrayMap(list, fn) {
             var result = Array();
