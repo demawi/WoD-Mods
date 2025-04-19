@@ -3,8 +3,8 @@
 // @namespace      demawi
 // @description    Erweiterungen für die Kampfkonfigs. Aktuell nur JSON-Export/Import.
 // @version        1.0
-// @include        https://*.world-of-dungeons.de/wod/spiel/hero/skillconf_nojs.php*
-// @include        https://*.world-of-dungeons.de/wod/spiel/hero/skillconfig.php*
+// @include        http*://*.world-of-dungeons.de/wod/spiel/hero/skillconf_nojs.php*
+// @include        http*://*.world-of-dungeons.de/wod/spiel/hero/skillconfig.php*
 // @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.2
 // ==/UserScript==
 // *************************************************************
