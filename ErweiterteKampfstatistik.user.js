@@ -239,6 +239,12 @@
             }
         }
 
+        static findFirstHeldenLevel(levelDataArray) {
+            for(const level of levelDataArray) {
+                if(level) return level;
+            }
+        }
+
         static getStat(previousStats, queryFilter, id, subDomain, typeInitialize) {
             if (subDomain === "sub") {
                 var subIds = previousStats.subIds;
@@ -257,7 +263,7 @@
                     // Um immer die gleichen Reihenfolge anzulegen
                     if (typeInitialize === "herounit") {
                         let levelDataArray = previousStats.statRoot.levelDataArray;
-                        levelDataArray[0].areas[0].rounds[0].helden.forEach(held => {
+                        this.findFirstHeldenLevel(levelDataArray).areas[0].rounds[0].helden.forEach(held => {
                             subDomainEntry[held.id.name] = this.createStat();
                         });
                     } else if (typeInitialize === "position") {

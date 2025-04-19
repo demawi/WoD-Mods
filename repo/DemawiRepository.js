@@ -1,6 +1,6 @@
 class demawiRepository {
 
-    static version = 1.1
+    static version = "1.0.2";
 
     static import(type, version) {
         return this[type];

@@ -5,7 +5,7 @@
 // @version        1.0
 // @include        https://*.world-of-dungeons.de/wod/spiel/hero/skillconf_nojs.php*
 // @include        https://*.world-of-dungeons.de/wod/spiel/hero/skillconfig.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.1
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.2
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Kampfkonfig Plus                                  ***
@@ -25,15 +25,17 @@
     class Mod {
 
         static async startMod() {
-            console.log("Kampfkonfig found!");
-            console.log("Object: ", unsafeWindow.eval("new WodAction()"));
-            this.addButtons();
+            console.log("KampfkonfigPlus found!");
+            WodKonfig.addButtons();
         }
 
+    }
+
+    class WodKonfig {
         static addButtons() {
+            const _this = this;
             let ueberschrift;
             for (const cur of document.getElementsByTagName("h1")) {
-                console.log(cur.textContent);
                 if (cur.textContent.startsWith("Profil:")) {
                     ueberschrift = cur;
                     break;
@@ -46,7 +48,7 @@
             button.style.fontSize = "12px";
             button.style.cursor = "pointer";
             button.onclick = function () {
-                Mod.exportKonfig(profileName);
+                _this.exportKonfig(profileName);
             }
             const button2 = document.createElement("span");
             button2.classList.add("nowod");
@@ -54,7 +56,7 @@
             button2.style.fontSize = "12px";
             button2.style.cursor = "pointer";
             button2.onclick = function () {
-                Mod.importKonfig(profileName);
+                _this.importKonfig(profileName);
             }
             ueberschrift.append(button);
             ueberschrift.append(button2);
@@ -104,7 +106,6 @@
         }
 
         static refreshView(optCfg) {
-            console.log("refresh");
             // Save cfg-parameters
             const url = this.getWOD_CFG().ui_orders.form.element.attributes.action.value;
             const fig_type = this.getWOD_CFG().ui_orders.fig_type.element.value;
@@ -156,10 +157,9 @@
         static getWOD_CFG() {
             return unsafeWindow.WOD_CFG;
         }
-
     }
 
-    // Damit das Skript im FF nicht zu früh läuft.
+    // Damit das Skript im FF nicht vor dem Skript der Hauptseite läuft.
     setTimeout(() => {
         Mod.startMod();
     }, 100);
