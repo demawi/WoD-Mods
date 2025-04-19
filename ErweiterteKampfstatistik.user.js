@@ -43,7 +43,7 @@
         // Einstiegspunkt der Anwendung, Parameter können von externen Anwendungen gesetzt werden
         static async startMod(kampfbericht, kampfstatistik) {
             let thisObject = this;
-            console.log("startMod: Statistiklsd", kampfbericht, kampfstatistik)
+            console.log("StartMod: KampfstatistikStatistik", kampfbericht, kampfstatistik);
             unsafeWindow.statExecuter = this.startMod;
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
                 let levelData = ReportParser.readKampfbericht(document);

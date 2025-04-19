@@ -25,6 +25,7 @@
         static dbname = "wodDB";
 
         static async startMod() {
+            console.log("StartMod: KampfberichtArchiv");
             const title = document.getElementsByTagName("h1")[0];
             if (title.textContent.trim() === "Kampfberichte") {
                 MainPage.start();

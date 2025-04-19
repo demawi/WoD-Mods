@@ -25,7 +25,7 @@
     class Mod {
 
         static async startMod() {
-            console.log("KampfkonfigPlus found!");
+            console.log("StartMod: KampfkonfigPlus");
             WodKonfig.addButtons();
         }
 

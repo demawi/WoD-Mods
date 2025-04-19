@@ -17,9 +17,9 @@
     'use strict';
     let debug = false;
 
-    const Storages = demawiRepository.import("Storages");
+    const _Storages = demawiRepository.import("Storages");
     const BBCodeExporter = demawiRepository.import("BBCodeExporter");
-    const File = demawiRepository.import("File");
+    const _File = demawiRepository.import("File");
 
     class Mod {
         static dbname = "wodDB";
@@ -27,8 +27,7 @@
         static currentItemDataVersion = 3; // durch eine Veränderung werden die Items neu aus den Sourcen beschrieben
 
         static async startMod() {
-            console.log("StartMode");
-            console.log("StartMode", Storages);
+            console.log("StartMod: ItemDB");
             const page = util.getWindowPage();
             // Links zu Items finden und markieren. Nahezu überall.
             if (page !== "item.php") await ItemTracking.start();
@@ -1531,7 +1530,7 @@
             }
             return objStore;
         }
-        static indexedDb = new Storages.IndexedDb("ItemDB", Mod.dbname);
+        static indexedDb = new _Storages.IndexedDb("ItemDB", Mod.dbname);
         static itemSources = this.adjust(this.indexedDb.createObjectStore("itemSources", "id"));
         static items = this.adjust(this.indexedDb.createObjectStore("items", "id"));
 
