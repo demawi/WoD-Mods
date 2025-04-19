@@ -100,7 +100,9 @@
                 if (name === current.name) return [current, true];
             }
             // Skill aktuell nicht gelernt
-            object.name = "⚠️ Unbekannte Fertigkeit: " + object.name;
+            if (object.name !== "(unbekannte Fertigkeit)") {
+                object.name = "⚠️ Unbekannte Fertigkeit: " + object.name;
+            }
             console.log("Can't find skill: '" + name + "'");
             return [object, false];
         }
