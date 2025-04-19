@@ -63,7 +63,7 @@
                     thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
                     console.log("ReportId: ", reportId, thisObject.thisReport);
 
-                    var levelData = ReportParser.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
+                    var [levelData, levelNr] = ReportParser.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
                     if (levelData) {
                         var roundCount = levelData.roundCount;
 
@@ -76,7 +76,8 @@
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                         }
                         Mod.outputAnchor.setTitle(hinweisText);
-                        Mod.thisLevelDatas = [levelData];
+                        Mod.thisLevelDatas = [];
+                        Mod.thisLevelDatas[levelNr - 1] = levelData;
                         await MyStorage.getReportStatsDB().setValue(thisObject.thisReport);
                     }
                 });
@@ -750,7 +751,7 @@
                 report.levelDatas = [];
             }
             report.levelDatas[levelNr - 1] = levelData;
-            return levelData;
+            return [levelData, levelNr];
         }
 
         static readKampfbericht(container) {
@@ -1199,6 +1200,11 @@
                                     fertigkeit.type = "Fernkampf";
                                 } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
                                     fertigkeit.type = "Fernkampf";
+                                } else if (curText.startsWith("Eine Flasche mit billigem Fusel nähert sich euch auf einer wirklich beeindruckenden Bahn. Kopf runter!")) { // "Offene Rechnung"
+                                    fertigkeit.type = "Fernkampf";
+                                    wuerfe.push({
+                                        value: 100, // ??
+                                    })
                                 } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen") || curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) { // z.B. "Dunkles Erwachen"
                                     fertigkeit.type = "Nahkampf";
                                 } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
@@ -1220,6 +1226,8 @@
                                     fertigkeit.type = "Fernkampf";
                                 } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")) {
                                     fertigkeit.type = "Wirkung";
+                                } else if (curText.startsWith("Weitere Menschen schließen sich der Gruppe an")) { // offene Rechnung, Herbeirufung
+                                    fertigkeit.type = "Ereignis";
                                 }
                                 if (wurfMatcher) { // wurf
                                     let wo = wurfMatcher[1];
