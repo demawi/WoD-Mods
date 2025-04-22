@@ -21,6 +21,7 @@
     const _WoD = demawiRepository.import("WoD");
     const _util = demawiRepository.import("util");
     const _UI = demawiRepository.import("UI");
+    const _File = demawiRepository.import("File");
 
     class Mod {
         static dbname = "wodDB";
@@ -31,6 +32,8 @@
             if (title.textContent.trim() === "Kampfberichte") {
                 _UI.useJQueryUI(); // wird fürs Archiv genutzt
                 await MainPage.start();
+                const zip = await _File.getJSZip();
+                console.log("ZIPPER: ", zip);
             } else {
                 await this.getReportSiteInformation();
             }
@@ -163,7 +166,8 @@
         }
 
         static async start() {
-            this.migrate(); return;
+            //this.migrate(); return;
+            // MyStorage.recreateSourcesMeta(); return;
             this.title = document.getElementsByTagName("h1")[0];
             const wodContent = document.getElementsByClassName("content_table")[0];
             this.anchor = document.createElement("div");
@@ -244,14 +248,17 @@
          * @param isArchiv ob dies ein Archiv-Aufruf ist oder nicht.
          */
         static async completeDungeonInformations(isArchiv) {
-            const reportDB = await MyStorage.getReportDBMeta();
+            const reportDBMeta = await MyStorage.getReportDBMeta();
             const tbody = document.getElementsByClassName("content_table")[0].children[0];
             const ueberschriftArchiv = document.createElement("th");
             ueberschriftArchiv.innerHTML = "Archiviert (fehlend)";
             ueberschriftArchiv.style.width = "40px";
-            const ueberschriftArchivSpace = document.createElement("th");
-            ueberschriftArchivSpace.innerHTML = "Speicher";
-            ueberschriftArchivSpace.style.width = "40px";
+            const ueberschriftSpeicher = document.createElement("th");
+            ueberschriftSpeicher.innerHTML = "Speicher";
+            ueberschriftSpeicher.style.width = "40px";
+            const ueberschriftAktionen = document.createElement("th");
+            ueberschriftAktionen.innerHTML = "Aktionen";
+            ueberschriftAktionen.style.width = "40px";
             const ueberschriftErfolg = document.createElement("th");
             ueberschriftErfolg.title = "Wie weit die Gruppe levelmäßig vorgedrungen ist";
             ueberschriftErfolg.innerHTML = "Level";
@@ -277,7 +284,7 @@
                     }
                 }
                 if (!reportId) continue;
-                let thisReport = await reportDB.getValue(reportId);
+                let thisReport = await reportDBMeta.getValue(reportId);
                 if (!thisReport) {
                     thisReport = {
                         reportId: reportId,
@@ -287,26 +294,48 @@
                         gruppe_id: _WoD.getMyGroupId(),
                         world: _WoD.getMyWorld(),
                     }
-                    await reportDB.setValue(thisReport);
+                    await MyStorage.setFullReport(thisReport);
                 }
 
                 const archiviertTD = document.createElement("td");
                 archiviertTD.style.textAlign = "center";
                 archiviertTD.style.width = "40px";
-                const archiviertSpaceTD = document.createElement("td");
-                archiviertSpaceTD.style.textAlign = "center";
-                archiviertSpaceTD.style.width = "40px";
+                const archiviertSpeicherTD = document.createElement("td");
+                archiviertSpeicherTD.style.textAlign = "center";
+                archiviertSpeicherTD.style.width = "40px";
+                const hatDatensaetze = thisReport.statistik || thisReport.gegenstaende || thisReport.levels;
+                const archiviertAktionenTD = document.createElement("td");
+                archiviertAktionenTD.style.textAlign = "center";
+                archiviertAktionenTD.style.width = "40px";
+                archiviertAktionenTD.style.padding = "0px";
+                archiviertAktionenTD.style.fontSize = "18px";
+                if(hatDatensaetze) {
+                    const favoritButton = _UI.createButton("⭐", function() {
+
+                    });
+                    favoritButton.style.position = "relative";
+                    favoritButton.style.top = "-2px";
+                    favoritButton.style.fontSize = null;
+                    favoritButton.title = "Datensatz favorisieren";
+                    archiviertAktionenTD.append(favoritButton);
+                    const deleteButton = _UI.createButton("🌋", function () { // ❌
+
+                    });
+                    deleteButton.style.position = "relative";
+                    deleteButton.style.top = "-2px";
+                    deleteButton.style.fontSize = null;
+                    deleteButton.title = "Löschen der Berichte. Die bereits geholten Meta-Daten bleiben erhalten."; // was für Daten? auch Meta-Daten? oder nur Sources?
+                    archiviertAktionenTD.append(deleteButton);
+                }
                 const colorGreen = "rgb(62, 156, 62)";
                 const colorRed = "rgb(203, 47, 47)";
                 const colorYellow = "rgb(194, 194, 41)";
-
-                if (!thisReport || !thisReport.statistik && !thisReport.gegenstaende && !thisReport.levels) {
+                if (!thisReport || !hatDatensaetze) {
                     archiviertTD.style.backgroundColor = colorRed;
                     archiviertTD.innerHTML += "<span style='white-space: nowrap'>Fehlt komplett</span>";
                 } else {
-                    if (thisReport.space) {
-                        console.log("Set space! " + thisReport.space);
-                        archiviertSpaceTD.innerHTML = Math.round(10 * thisReport.space / 1024 / 1024) / 10 + " MB";
+                    if (hatDatensaetze && thisReport.space) {
+                        archiviertSpeicherTD.innerHTML = Math.ceil(10 * thisReport.space / 1024 / 1024) / 10 + " MB";
                     }
                     var haben = 0;
                     var brauchen = 0;
@@ -330,7 +359,7 @@
                         let maxLevel = thisReport.success.levels[1];
                         let successLevels = thisReport.success.levels[0];
                         if (successLevels) maxLevel = successLevels;
-                        for (var li = 0, ll = maxLevel - 1; li < ll; li++) {
+                        for (var li = 0, ll = maxLevel; li < ll; li++) {
                             if (thisReport.levels && thisReport.levels[li]) {
                                 haben++;
                             } else {
@@ -377,13 +406,19 @@
                 curTR.append(zielTD);
                 curTR.append(fortschrittTD);
                 curTR.append(archiviertTD);
-                if (isArchiv) curTR.append(archiviertSpaceTD);
+                if (isArchiv) {
+                    curTR.append(archiviertAktionenTD);
+                    curTR.append(archiviertSpeicherTD);
+                }
             }
             tbody.children[0].append(ueberschriftErfolg);
             tbody.children[0].append(ueberschriftZiel);
             tbody.children[0].append(ueberschriftFortschritt);
             tbody.children[0].append(ueberschriftArchiv);
-            if (isArchiv) tbody.children[0].append(ueberschriftArchivSpace);
+            if (isArchiv) {
+                tbody.children[0].append(ueberschriftAktionen);
+                tbody.children[0].append(ueberschriftSpeicher);
+            }
         }
     }
 
@@ -421,7 +456,7 @@
             const groupsFoundPrimary = {};
             const dungeonsFoundPrimary = {};
             const primaryDate = new Date();
-            primaryDate.setMonth(primaryDate.getMonth() - 1);
+            primaryDate.setDate(primaryDate.getDate() - 14);
             const groupsFound = {};
             let count = 0;
             const maxResults = ArchivSearch.searchQuery.maxResults;
@@ -476,7 +511,7 @@
             this.dungeonSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(dungeonsFoundPrimary).length > 0) {
-                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 30 Tagen besucht ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 14 Tagen besucht ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const dungeonName of Object.keys(dungeonsFoundPrimary).sort()) {
                     const selected = this.searchQuery.dungeonSelection.includes(dungeonName) ? "selected" : "";
                     this.dungeonSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
@@ -498,7 +533,7 @@
             this.groupSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(groupsFoundPrimary).length > 0) {
-                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 30 Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 14 Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const dungeonName of Object.keys(groupsFoundPrimary).sort()) {
                     const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
                     this.groupSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
@@ -571,8 +606,22 @@
             if (this.searchQuery.dateMax) dateMaxInput.value = _util.formatDateAndTime(this.searchQuery.dateMax);
             const datumRow = document.createElement("div");
             datumRow.append(dateMinInput);
+            datumRow.append(_UI.createButton("❌", function() {
+                if(dateMinInput.value.trim() !== "") {
+                    dateMinInput.value = "";
+                    thisObject.searchQuery.dateMin = null;
+                    ArchivSearch.updateSearch();
+                }
+            }));
             datumRow.append(" - ");
             datumRow.append(dateMaxInput);
+            datumRow.append(_UI.createButton("❌", function() {
+                if(dateMaxInput.value.trim() !== "") {
+                    dateMaxInput.value = "";
+                    thisObject.searchQuery.dateMax = null;
+                    ArchivSearch.updateSearch();
+                }
+            }));
             dateMinInput.onchange = function () {
                 try {
                     thisObject.searchQuery.dateMin = new Date(_util.parseStandardDateString(dateMinInput.value));
@@ -796,6 +845,18 @@
 
         static getReportDBMeta() {
             return this.reportSourcesMeta;
+        }
+
+        static async recreateSourcesMeta() {
+            console.log("recreateSourcesMeta...");
+            for (const report of await this.reportSourcesMeta.getAll()) {
+                await this.reportSourcesMeta.deleteValue(report.reportId);
+            }
+
+            for (const report of await this.reportSources.getAll()) {
+                await this.reportSourcesMeta.setValue(this.getMetaFor(report));
+            }
+            console.log("recreateSourcesMeta finished!");
         }
 
     }

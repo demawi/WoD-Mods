@@ -3,7 +3,7 @@
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
 // @include        http*://*.world-of-dungeons.*/wod/spiel/*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
 // ==/UserScript==
 // *************************************************************
 // *** [WoD] Item-Datenbank                                  ***
@@ -20,6 +20,8 @@
     const _Storages = demawiRepository.import("Storages");
     const BBCodeExporter = demawiRepository.import("BBCodeExporter");
     const _File = demawiRepository.import("File");
+    const _WoD = demawiRepository.import("WoD");
+    const _util = demawiRepository.import("util");
 
     class Mod {
         static dbname = "wodDB";
@@ -27,17 +29,80 @@
         static currentItemDataVersion = 3; // durch eine Veränderung werden die Items neu aus den Sourcen beschrieben
 
         static async startMod() {
-            console.log("StartMod: ItemDB");
             const page = util.getWindowPage();
+            console.log("StartMod: ItemDB '" + page + "'");
+
             // Links zu Items finden und markieren. Nahezu überall.
-            if (page !== "item.php") await ItemTracking.start();
+            if (page !== "item.php") {
+                await ItemTracking.start();
 
-            // Gegenstandsseite
-            if (page === "item.php") await ItemReader.start();
+                // Sofern Gegenstandsseite des Kampfberichtes: Fund hinzufügen.
+                // combat_report: Schlacht
+                if (page === "report.php" || page === "combat_report.php") {
+                    await ItemReaderKampfberichtArchiv.start();
+                }
+            }
 
+            // Gegenstandsseite. Einlesen der Item-Werte.
+            if (page === "item.php") {
+                await ItemReader.start();
+                await ItemFunde.start();
+            }
+
+            // Einbinden der Such-UI.
             if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
         }
     }
+
+    class ItemFunde {
+
+        static async start() {
+            const hints = document.getElementsByClassName("hints")[0];
+            if (!hints) return;
+            const all = document.getElementsByTagName("h1")[0];
+            const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
+            if (!itemName) return;
+            const item = await MyStorage.getItemDB().getValue(itemName);
+            if (!item) return;
+            const loot = item.loot || [];
+
+            const header = ["Dungeon", "Welt", "Zeit", "Stufe"];
+            let content = [];
+            let stufeMin = Number.MAX_VALUE;
+            let stufeMax = Number.MIN_VALUE;
+            const dungeons = {};
+            const entries = Object.entries(loot);
+            for (const [key, value] of entries) {
+                let stufe = Number(value.stufe);
+                if (stufe < stufeMin) stufeMin = stufe;
+                if (stufe > stufeMax) stufeMax = stufe;
+                dungeons[value.dungeon] = true;
+                content.push([value.dungeon, value.world, _util.formatDateAndTime(new Date(Number(key))), value.stufe]);
+            }
+            content.sort((a, b) => {
+                console.log(a[0]);
+                return a[0].localeCompare(b[0]);
+            });
+            const table = _util.createContentTableFrom(content, header);
+            table.style.marginLeft = "15px";
+            table.classList.add("nowod");
+            const lootUeberschrift = document.createElement("h3");
+            lootUeberschrift.style.marginLeft = "15px";
+            lootUeberschrift.innerHTML = "Fundorte";
+            hints.parentElement.insertBefore(lootUeberschrift, hints);
+            hints.parentElement.insertBefore(table, hints);
+            if (entries.length > 0) {
+                const aggregateInfos = [];
+                aggregateInfos.push(["Stufe (min-max):", stufeMin + "-" + stufeMax]);
+                aggregateInfos.push(["Unterschiedliche Dungeons:", Object.entries(dungeons).length]);
+                const aggregateTable = _util.createContentTableFrom(aggregateInfos);
+                aggregateTable.classList.add("nowod");
+                aggregateTable.style.marginLeft = "15px";
+                hints.parentElement.insertBefore(aggregateTable, table);
+            }
+        }
+    }
+
 
     class ItemReader {
         static createItem(itemName) {
@@ -102,7 +167,7 @@
         }
     }
 
-    // Überprüft auf einer Webseite die Gegenstandslinks
+    // Überprüft auf einer Webseite die Gegenstandslinks und fügt den Namen bei Bedarf der ItemDB hinzu.
     class ItemTracking {
 
         static async start() {
@@ -117,30 +182,15 @@
                 console.log("checkSiteForItems");
                 const allHrefs = document.getElementsByTagName("a");
                 var missingItemsFound = 0;
-                var addedItems = 0;
                 for (var i = 0, l = allHrefs.length; i < l; i++) {
                     const itemLinkElement = allHrefs[i];
-                    const curHref = itemLinkElement.href;
-                    var itemName;
-                    var index = curHref.indexOf("item.php?");
-                    if (index > 0) {
-                        itemName = curHref.match(/name=(.*?)&/);
-                    } else {
-                        index = curHref.indexOf("/item/");
-                        if (index > 0) {
-                            itemName = curHref.match(/item\/(.*?)&/);
-                        } else continue;
-                    }
+                    const itemName = util.getItemNameFromElement(itemLinkElement);
                     if (!itemName) continue;
-                    itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
 
-                    if (index > 0) {
-                        const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
-                        if (sourceItem && sourceItem.invalid) continue;
-                        if (!sourceItem || !sourceItem.details) missingItemsFound++;
-                        if (!sourceItem) addedItems++;
-                        await MyStorage.indexItem(itemName, itemLinkElement, sourceItem);
-                    }
+                    const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
+                    if (sourceItem && sourceItem.invalid) continue;
+                    if (!sourceItem || !sourceItem.details) missingItemsFound++;
+                    await MyStorage.indexItem(itemName, itemLinkElement, sourceItem);
                 }
                 missingSpanOverall.innerHTML = missingItemsFound + "�";
                 if (missingItemsFound === 0) {
@@ -1228,11 +1278,14 @@
         }
 
         static async getItemDataFromSource(itemSource) {
-            const item = {
-                name: itemSource.name,
-                details: itemSource.details,
-                link: itemSource.link,
+            let item = await MyStorage.getItemDB().getValue(itemSource.name);
+            if (!item) {
+                item = {
+                    name: itemSource.name,
+                }
             }
+            item.details = itemSource.details; // nur temporär
+            item.link = itemSource.link; // nur temporär
             await this.#writeItemData(item);
             delete item.details;
             delete item.link;
@@ -1511,6 +1564,113 @@
 
     }
 
+    class ItemReaderKampfberichtArchiv {
+
+        static async start() {
+            await this.readDocument(document);
+            //await this.startMigration(true);
+        }
+
+        /**
+         * @param resetLoot 'true' reset all loot tables. 'false' only update tables.
+         */
+        static async startMigration(resetLoot) {
+            if (resetLoot) {
+                console.log("ItemReaderKampfberichtArchiv ResetLoot...");
+                for (const item of await MyStorage.getItemDB().getAll()) {
+                    delete item.loot;
+                    await MyStorage.getItemDB().setValue(item);
+                }
+            }
+
+            console.log("ItemReaderKampfberichtArchiv Migration...");
+            const allReportSources = await MyStorage.reportSources.getAll();
+            for (const report of allReportSources) {
+                const gegenstandsHTML = report.gegenstaende;
+                const doc = _util.getDocumentFor(gegenstandsHTML);
+                await this.readDocument(doc, report);
+            }
+            console.log("ItemReaderKampfberichtArchiv Migration finished!");
+        }
+
+        static getStufeFromReport(report) {
+            // console.log("getStufeFromReport for ", report);
+            if (!report.levels) return;
+            for (const level of report.levels) {
+                const temp = document.createElement("div");
+                temp.innerHTML = level;
+                let check = temp.getElementsByClassName("rep_myhero")[0];
+                if (check) { // auf die 2te Spalte springen und ausgeben
+                    const nextSibling = check.parentElement.nextElementSibling;
+                    if (nextSibling) return check.parentElement.nextElementSibling.textContent;
+                }
+                check = temp.getElementsByClassName("rep_myotherhero")[0];
+                if (check) { // auf die 2te Spalte springen und ausgeben
+                    const nextSibling = check.parentElement.nextElementSibling;
+                    if (nextSibling) return check.parentElement.nextElementSibling.textContent;
+                }
+                check = temp.getElementsByClassName("rep_hero")[0];
+                if (check) { // auf die 2te Spalte springen und ausgeben
+                    const nextSibling = check.parentElement.nextElementSibling;
+                    if (nextSibling) return check.parentElement.nextElementSibling.textContent;
+                }
+            }
+        }
+
+        static async readDocument(doc, report) {
+            // console.log("Document: ", doc);
+            if (!doc) return;
+            const ueberschrift = doc.getElementsByTagName("h2")[0];
+            if (!ueberschrift) return;
+            const titleSplit = ueberschrift.textContent.split(/-(.*)/); // only on first occurence
+            const dungeonName = titleSplit[1].trim();
+            const stufe = (report && this.getStufeFromReport(report)) || _WoD.getMyStufe(doc);
+            if (!stufe) console.log("Keine Stufe gefunden: ", report);
+            const timeString = (report && report.time) || titleSplit[0].trim();
+            const timestamp = _util.parseStandardTimeString(_WoD.getTimeString(timeString));
+            console.log("Timestamp: ", timestamp, _WoD.getTimeString(timeString));
+            const world = _WoD.getMyWorld();
+            // console.log("Found Items: " + doc.getElementsByTagName("h3"));
+            for (const elem of doc.getElementsByTagName("h3")) {
+                if (elem.textContent === "Gefundene Gegenstände") {
+                    await this.readGegenstaende(elem.parentElement.getElementsByTagName("table")[0], world, dungeonName, timestamp, stufe);
+                }
+            }
+        }
+
+        static async readGegenstaende(table, world, dungeonName, timestamp, stufe) {
+            if (!table) return;
+            for (const aHref of table.getElementsByClassName("report")) {
+                await this.addLoot(aHref, world, dungeonName, timestamp, stufe);
+            }
+        }
+
+        static async addLoot(itemLink, world, dungeonName, timestamp, stufe) {
+            const item = await MyStorage.getItemFromLink(itemLink);
+            if (item) {
+                let lootList = item.loot;
+                if (!lootList) {
+                    lootList = {};
+                    item.loot = lootList;
+                }
+                if (!lootList[timestamp]) {
+                    console.log("AddLoot: '" + item.name + "'", [item, world, dungeonName, timestamp, stufe]);
+                    lootList[timestamp] = {
+                        dungeon: dungeonName,
+                        world: world,
+                        stufe: stufe,
+                    };
+                    await MyStorage.getItemDB().setValue(item);
+                    return true;
+                }
+            } else {
+                console.log("Cant found itemname: ", itemLink, dungeonName, timestamp);
+            }
+            return false;
+        }
+
+    }
+
     class MyStorage {
         static adjust = function (objStore) {
             let resultGetValue = objStore.getValue;
@@ -1533,8 +1693,7 @@
         static indexedDb = new _Storages.IndexedDb("ItemDB", Mod.dbname);
         static itemSources = this.adjust(this.indexedDb.createObjectStore("itemSources", "id"));
         static items = this.adjust(this.indexedDb.createObjectStore("items", "id"));
-
-        // static test = this.indexedDb.createObjectStore("test", "id");
+        static reportSources = this.indexedDb.createObjectStore("reportSources", "reportId");
 
         static getItemSourceDB() {
             return this.itemSources;
@@ -1550,6 +1709,25 @@
             await this.getItemSourceDB().setValue(item);
         }
 
+        static async getItemFromLink(itemLink) {
+            const itemName = util.getItemNameFromElement(itemLink);
+            if (!itemName) return;
+            return await this.getItem(itemName);
+        }
+
+        static async getItem(itemName) {
+            if (!this.itemSources.getValue(itemName)) {
+                const newItem = {name: itemName};
+                await this.itemSources.setValue(newItem);
+            }
+            let result = this.items.getValue(itemName);
+            if (!result) {
+                const newItem = {name: itemName};
+                await this.items.setValue(newItem);
+                result = newItem;
+            }
+            return result;
+        }
 
         static async indexItem(itemName, element, sourceItem) {
             const missingElement = element.parentElement.className === "missingWrapper" && element.parentElement.children.length > 1 && element.parentElement.children[1];
@@ -1585,7 +1763,7 @@
                 const newItem = {
                     name: itemName,
                 }
-                this.itemSources.setValue(newItem);
+                await this.itemSources.setValue(newItem);
             }
         }
     }
@@ -1700,6 +1878,23 @@
             var pathname = window.location.pathname.split("/");
             var pageSection = pathname[pathname.length - 2];
             return pathname[pathname.length - 1];
+        }
+
+        static getItemNameFromElement(aElement) {
+            const curHref = aElement.href;
+            var itemName;
+            var index = curHref.indexOf("item.php?");
+            if (index > 0) {
+                itemName = curHref.match(/name=(.*?)&/);
+            } else {
+                index = curHref.indexOf("/item/");
+                if (index > 0) {
+                    itemName = curHref.match(/item\/(.*?)&/);
+                }
+            }
+            if (!itemName) return;
+            itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
+            return itemName;
         }
 
     }

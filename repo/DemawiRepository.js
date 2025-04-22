@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.0.2";
+    static version = "1.0.3";
 
     static import(type, version) {
         return this[type];
@@ -112,6 +112,30 @@ class demawiRepository {
      * Hilfemethoden für Down- und Uploads
      */
     static File = class {
+        static jszip_loaded = false;
+
+        static async getJSZip() {
+            const thisObject = this;
+            return new Promise((result, reject) => {
+                if (thisObject.jszip_loaded) {
+                    result(new JSZip());
+                } else {
+                    thisObject.jszip_loaded = true;
+                    const script = document.createElement("script");
+                    script.id = "jszip";
+                    script.src = "https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js";
+                    const head = document.getElementsByTagName("head")[0];
+                    script.addEventListener('load', function () {
+                        result(new JSZip());
+                    });
+                    script.addEventListener('error', function() {
+                       console.log("JSZIP-error");
+                    });
+                    head.append(script);
+                }
+            });
+        }
+
         static forDownload(filename, data) {
             const blob = new Blob([data], {type: 'text/plain'});
             const fileURL = URL.createObjectURL(blob);
@@ -155,7 +179,7 @@ class demawiRepository {
      * WoD-DBs:
      * Inhaber:
      * ItemDatenbank (wodDB.items[w], wodDB.itemSources[w])
-     * KampfberichtArchiv (wodDB.reports[w])
+     * KampfberichtArchiv (wodDB.reportSources[w], wodDB.reportSourcesMeta[w])
      * ErweiterteKampfstatistik (wodDB.reportStats[w])
      *
      * Lesend:
@@ -512,6 +536,9 @@ class demawiRepository {
                 });
             }
 
+            /**
+             * Liefert ein Array über alle vorhandenen Objekte.
+             */
             async getAll() {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
@@ -532,59 +559,78 @@ class demawiRepository {
                 return await this.indexedDb.doesObjectStoreExist(this);
             }
         }
+
+        /**
+         * Kopiert die Objekte von einem Object-Storage zu einem anderen.
+         * Der Ziel-Storage muss dabei leer sein.
+         */
+        static async migrate(from, to) {
+            if ((await this.to.getAll()).length > 0) return; // nur migrieren wenn die Zieldatenbank leer ist
+            const db = await this.from.getAll();
+            for (const report of db) {
+                this.to.setValue(report);
+            }
+            console.log("Migration finished! " + db.length);
+        }
     }
 
     /**
      * Hilfemethoden um allgemeine Informationen von WoD zu erhalten (Name, Gruppe etc.)
      */
     static WoD = class {
-        static getMainForm() {
-            return document.getElementsByName("the_form")[0];
+        static getMainForm(doc) {
+            return (doc || document).getElementsByName("the_form")[0];
         }
 
-        static getValueFromMainForm(valueType) {
-            const form = _.WoD.getMainForm();
+        static getValueFromMainForm(valueType, doc) {
+            const form = _.WoD.getMainForm(doc);
             if (!form) return;
             return form[valueType].value;
         }
 
-        static getMyWorld() {
-            return _.WoD.getValueFromMainForm("wod_post_world");
+        static getMyWorld(doc) {
+            return _.WoD.getValueFromMainForm("wod_post_world", doc);
         }
 
-        static getMyGroup() {
-            return _.WoD.getValueFromMainForm("gruppe_name");
+        static getMyGroup(doc) {
+            return _.WoD.getValueFromMainForm("gruppe_name", doc);
         }
 
-        static getMyGroupId() {
-            return _.WoD.getValueFromMainForm("gruppe_id");
+        static getMyGroupId(doc) {
+            return _.WoD.getValueFromMainForm("gruppe_id", doc);
         }
 
-        static getMyHeroId() {
-            return _.WoD.getValueFromMainForm("session_hero_id");
+        static getMyHeroId(doc) {
+            return _.WoD.getValueFromMainForm("session_hero_id", doc);
         }
 
-        static getMyHeroName() {
-            return _.WoD.getValueFromMainForm("heldenname");
+        static getMyHeroName(doc) {
+            return _.WoD.getValueFromMainForm("heldenname", doc);
         }
 
-        static getMyUserName() {
-            return _.WoD.getValueFromMainForm("spielername");
+        static getMyUserName(doc) {
+            return _.WoD.getValueFromMainForm("spielername", doc);
+        }
+
+        static getMyStufe(doc) {
+            return _.WoD.getValueFromMainForm("stufe", doc);
         }
 
         /**
          * z.B. "Heute 12:13" => "12.12.2024 12:13"
          */
-        static getTimeString(timeString) {
+        static getTimeString(timeString, dateFormatter) {
+            if (!dateFormatter) dateFormatter = _.util.formatDate;
             if (timeString.includes("Heute")) {
-                timeString = timeString.replace("Heute", _.util.formatDate(new Date()));
+                timeString = timeString.replace("Heute", dateFormatter(new Date()));
             } else if (timeString.includes("Gestern")) {
                 const date = new Date();
                 date.setDate(date.getDate() - 1);
-                timeString = timeString.replace("Gestern", _.util.formatDate(date));
+                timeString = timeString.replace("Gestern", dateFormatter(date));
             }
             return timeString;
         }
+
     }
 
     /**
@@ -696,16 +742,146 @@ class demawiRepository {
         }
     }
 
+    static UI = class {
+        static createButton(htmlContent, callback) {
+            const button = document.createElement("span");
+            button.classList.add("nowod");
+            button.innerHTML = htmlContent;
+            button.style.fontSize = "12px";
+            button.style.cursor = "pointer";
+            button.onclick = callback;
+            return button;
+        }
+
+        static createTable(contentArray, headerArray) {
+            const table = document.createElement("table");
+            const tbody = document.createElement("tbody");
+            table.append(tbody);
+            if (headerArray) {
+                const tr = document.createElement("tr");
+                tr.classList.add("header");
+                tbody.append(tr);
+                for (const cur of headerArray) {
+                    const td = document.createElement("th");
+                    tr.append(td);
+                    td.style.textAlign = "center";
+                    if (typeof cur === "object") {
+                        td.append(cur);
+                    } else {
+                        td.innerHTML = cur;
+                    }
+                }
+            }
+            let row = true;
+            for (const curLine of contentArray) {
+                const tr = document.createElement("tr");
+                tr.classList.add("row" + (row ? 0 : 1));
+                row = !row;
+                tbody.append(tr);
+                for (const cur of curLine) {
+                    const td = document.createElement("td");
+                    tr.append(td);
+                    if (typeof cur === "object") {
+                        td.append(cur);
+                    } else {
+                        td.innerHTML = cur;
+                    }
+                }
+            }
+            return table;
+        }
+
+        static useJQueryUI() {
+            const jQueryUI = document.createElement("script");
+            jQueryUI.type = "text/javascript";
+            jQueryUI.src = "/wod/javascript/jquery/js/jquery-ui-1.8.21.custom.min.js";
+            document.getElementsByTagName("head")[0].append(jQueryUI);
+
+            const css = document.styleSheets[0];
+
+            function addRule(rule) {
+                css.insertRule(rule, css.cssRules.length);
+            }
+
+            addRule(".ui-datepicker {background-color:black;}");
+            addRule(".ui-datepicker .ui-datepicker-header {\n" +
+                "    background: #339999;\n" +
+                "    color: #ffffff;\n" +
+                "    font-family:'Times New Roman';\n" +
+                "    border-width: 1px 0 0 0;\n" +
+                "    border-style: solid;\n" +
+                "    border-color: #111;\n" +
+                "}");
+            addRule(".ui-datepicker .ui-datepicker-title {\n" +
+                "    text-align: center;\n" +
+                "    font-size: 15px;\n" +
+                "\n" +
+                "}");
+            addRule(".ui-datepicker .ui-datepicker-prev {\n" +
+                "    float: left;\n" +
+                "    cursor: pointer;\n" +
+                "    background-position: center -30px;\n" +
+                "}");
+            addRule(".ui-datepicker .ui-datepicker-next {\n" +
+                "    float: right;\n" +
+                "    cursor: pointer;\n" +
+                "    background-position: center 0px;\n" +
+                "}");
+        }
+    }
+
     /**
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
     static util = class {
+        static getSpace(object) {
+            return JSON.stringify(object).length;
+        }
+
         static arrayMap(list, fn) {
             var result = Array();
             for (var i = 0, l = list.length; i < l; i++) {
                 result.push(fn(list[i]));
             }
             return result;
+        }
+
+        static arrayRemove(list, value) {
+            var index = list.indexOf(value);
+            if (index > -1) {
+                list.splice(index, 1);
+            }
+        }
+
+        static createContentTableFrom(contentArray, headerArray) {
+            const table = document.createElement("table");
+            table.classList.add("content_table");
+            const tbody = document.createElement("tbody");
+            table.append(tbody);
+            if (headerArray) {
+                const tr = document.createElement("tr");
+                tr.classList.add("header");
+                tbody.append(tr);
+                for (const cur of headerArray) {
+                    const td = document.createElement("th");
+                    tr.append(td);
+                    td.style.textAlign = "center";
+                    td.innerHTML = cur;
+                }
+            }
+            let row = true;
+            for (const curLine of contentArray) {
+                const tr = document.createElement("tr");
+                tr.classList.add("row" + (row ? 0 : 1));
+                row = !row;
+                tbody.append(tr);
+                for (const cur of curLine) {
+                    const td = document.createElement("td");
+                    tr.append(td);
+                    td.innerHTML = cur;
+                }
+            }
+            return table;
         }
 
         static formatDate(date) {
@@ -718,6 +894,51 @@ class demawiRepository {
             result += a + ".";
             result += (date.getFullYear());
             return result;
+        }
+
+        static formatDateAndTime(date) {
+            var result = "";
+            var a = date.getDate();
+            if (a < 10) result += "0";
+            result += a + ".";
+            a = date.getMonth() + 1;
+            if (a < 10) result += "0";
+            result += a + ".";
+            result += (date.getFullYear());
+            result += " ";
+            a = date.getHours();
+            if (a < 10) result += "0";
+            result += a + ":";
+            a = date.getMinutes();
+            if (a < 10) result += "0";
+            result += a;
+            return result;
+        }
+
+        /**
+         * z.B. "22.01.2024 12:13" => 17234663464
+         */
+        static parseStandardTimeString(timeString) {
+            const matches = timeString.match(/(\d*)\.(\d*)\.(\d*) (.*)/);
+            return Date.parse(matches[3] + "-" + matches[2] + "-" + matches[1] + " " + matches[4]);
+        }
+
+        /**
+         * z.B. "22.01.2024 12:13" => 17234663464
+         */
+        static parseStandardDateString(timeString) {
+            const matches = timeString.match(/(\d*)\.(\d*)\.(\d*)/);
+            return Date.parse(matches[3] + "-" + matches[2] + "-" + matches[1]);
+        }
+
+        /**
+         * Erzeugt aus dem übergebenen HTMLString ein Document, welches dann auch
+         * .getElementsById und .getElementyByName enthält.
+         */
+        static getDocumentFor(fullHtmlString) {
+            const doc = document.implementation.createHTMLDocument();
+            doc.write(fullHtmlString);
+            return doc;
         }
 
         static JSONstringify(data) {

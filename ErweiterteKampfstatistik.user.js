@@ -12,7 +12,7 @@
 // @include        http*://*/wod/spiel/*dungeon/combat_report.php*
 // @include        http*://*/wod/spiel/event/play.php*
 // @include        http*://*/wod/spiel/event/eventlist.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -43,8 +43,10 @@
         // Einstiegspunkt der Anwendung, Parameter können von externen Anwendungen gesetzt werden
         static async startMod(kampfbericht, kampfstatistik) {
             let thisObject = this;
-            console.log("StartMod: KampfstatistikStatistik", kampfbericht, kampfstatistik);
-            unsafeWindow.statExecuter = this.startMod;
+            console.log("StartMod: KampfstatistikStatistik", kampfbericht, kampfstatistik, thisObject);
+            unsafeWindow.statExecuter = async function(...args) {
+                await Mod.startMod(...args);
+            }
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
                 let levelData = ReportParser.readKampfbericht(document);
                 if (levelData) {
@@ -2399,6 +2401,16 @@
                 if (!report.ts || report.ts < compareDate.getTime()) {
                     await reportDB.deleteValue(report.reportId);
                 }
+            }
+        }
+
+        static async recreateSourcesMeta() {
+            for (const report of await this.reportSourcesMeta.getAll()) {
+                await this.reportSourcesMeta.deleteValue(report.reportId);
+            }
+
+            for (const report of await this.reportSources.getAll()) {
+                await this.reportSourcesMeta.setValue(this.getMetaFor(report));
             }
         }
 

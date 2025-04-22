@@ -5,7 +5,7 @@
 // @version        1.0
 // @include        http*://*.world-of-dungeons.de/wod/spiel/hero/skillconf_nojs.php*
 // @include        http*://*.world-of-dungeons.de/wod/spiel/hero/skillconfig.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.2
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Kampfkonfig Plus                                  ***
@@ -21,6 +21,8 @@
     const _WoD = demawiRepository.import("WoD");
     const _File = demawiRepository.import("File");
     const _JSON2 = demawiRepository.import("JSON2");
+    const _util = demawiRepository.import("util");
+    const _UI = demawiRepository.import("UI");
 
     class Mod {
 
@@ -42,24 +44,13 @@
                 }
             }
             const profileName = ueberschrift.textContent.substring(8);
-            const button = document.createElement("span");
-            button.classList.add("nowod");
-            button.innerHTML = " 💾";
-            button.style.fontSize = "12px";
-            button.style.cursor = "pointer";
-            button.onclick = function () {
+
+            ueberschrift.append(_UI.createButton(" 💾", () => {
                 _this.exportKonfig(profileName);
-            }
-            const button2 = document.createElement("span");
-            button2.classList.add("nowod");
-            button2.innerHTML = " 📦";
-            button2.style.fontSize = "12px";
-            button2.style.cursor = "pointer";
-            button2.onclick = function () {
+            }));
+            ueberschrift.append(_UI.createButton(" 📂", () => {
                 _this.importKonfig(profileName);
-            }
-            ueberschrift.append(button);
-            ueberschrift.append(button2);
+            }));
         }
 
         static async importKonfig() {
