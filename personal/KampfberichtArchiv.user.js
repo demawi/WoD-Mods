@@ -3,9 +3,8 @@
 // @namespace      demawi
 // @description    Lässt einen die Seiten der Kampfberichte direkt downloaden
 // @version        0.1
-// @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -20,102 +19,383 @@
 
     const Storages = demawiRepository.import("Storages");
     const _WoD = demawiRepository.import("WoD");
+    const _util = demawiRepository.import("util");
+    const _UI = demawiRepository.import("UI");
 
     class Mod {
         static dbname = "wodDB";
 
         static async startMod() {
-            console.log("StartMod: KampfberichtArchiv");
+            console.log("StartMod: KampfberichtArchiv!");
             const title = document.getElementsByTagName("h1")[0];
             if (title.textContent.trim() === "Kampfberichte") {
-                MainPage.start();
+                _UI.useJQueryUI(); // wird fürs Archiv genutzt
+                await MainPage.start();
             } else {
-                const button = document.createElement("span");
-                button.classList.add("nowod");
-                button.innerHTML = " 💾";
-                button.style.fontSize = "12px";
-                button.style.cursor = "pointer";
-                button.onclick = function () {
-                    util.htmlExport();
-                }
-                title.appendChild(button);
+                await this.getReportSiteInformation();
+            }
+        }
 
-                const reportData = WoD.getFullReportData();
-                const reportDB = await MyStorage.getReportDB();
-                var thisReport = await reportDB.getValue(reportData.reportId);
-                console.log("Current Report ", reportData.reportId, thisReport);
-                if (!thisReport) thisReport = reportData;
-                if (title.textContent.trim().startsWith("Kampfstatistik")) {
-                    thisReport.statistik = util.getPlainMainContent().documentElement.outerHTML;
-                } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
-                    thisReport.gegenstaende = util.getPlainMainContent().documentElement.outerHTML;
-                } else if (title.textContent.trim().startsWith("Kampfbericht")) {
-                    const form = document.getElementsByName("the_form")[0];
-                    const levelNr = form.current_level.value;
+        /**
+         * Einzelseite eines Reports wurde aufgerufen. Bestimmen und speichern der Informationen.
+         */
+        static async getReportSiteInformation() {
+            const title = document.getElementsByTagName("h1")[0];
+            title.appendChild(_UI.createButton(" 💾", () => {
+                util.htmlExport();
+            }));
 
-                    let navigationLevels = document.getElementsByClassName("navigation levels")[0];
-                    if (navigationLevels) {
-                        thisReport.levelCount = (navigationLevels.children.length - 1);
+            const reportData = WoD.getFullReportBaseData();
+            var thisReport = await MyStorage.getFullReport(reportData.reportId);
+            console.log("Current Report ", reportData.reportId, thisReport);
+            if (!thisReport) thisReport = reportData;
+            if (title.textContent.trim().startsWith("Kampfstatistik")) {
+                thisReport.statistik = util.getPlainMainContent().documentElement.outerHTML;
+                thisReport.success = this.retrieveSuccessInformation(document);
+            } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
+                thisReport.gegenstaende = util.getPlainMainContent().documentElement.outerHTML;
+            } else if (title.textContent.trim().startsWith("Kampfbericht")) {
+                const form = document.getElementsByName("the_form")[0];
+                const levelNr = form.current_level.value;
+
+                let navigationLevels = document.getElementsByClassName("navigation levels")[0];
+                if (navigationLevels) {
+                    let successReport = thisReport.success;
+                    if (!successReport) {
+                        successReport = {};
+                        thisReport.success = successReport;
                     }
-                    if (!thisReport.levels) thisReport.levels = [];
-                    thisReport.levels[levelNr - 1] = util.getPlainMainContent().documentElement.outerHTML;
+                    successReport[1] = (navigationLevels.children.length - 1);
                 }
-                reportDB.setValue(thisReport);
+                if (!thisReport.levels) thisReport.levels = [];
+                thisReport.levels[levelNr - 1] = util.getPlainMainContent().documentElement.outerHTML;
+            }
+            await MyStorage.setFullReport(thisReport);
+        }
 
-                if (false) { // data dump
-                    const allData = await reportDB.getAllData();
-                    console.log("allData", allData);
-                    for (const [id, metaInfo] of Object.entries(allData)) {
-                        const bigData = await reportDB.getValue(id);
-                        console.log("ReportData", id, metaInfo, bigData);
+        static retrieveSuccessInformation(doc) {
+            const title = doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/)[1].trim();
+            const tables = doc.querySelectorAll(".content_table");
+            const table = tables[tables.length - 1];
+            let expElements = table.querySelector("tr:nth-child(2)").querySelectorAll("td");
+            let levelElements = table.querySelector("tr:nth-child(5)").querySelectorAll("td");
+            let roomElements = table.querySelector("tr:nth-child(6)").querySelectorAll("td");
+            const groupSize = levelElements.length - 2;
+            let finishedRooms = 0;
+            let fullRooms = 0;
+            let fullSuccessMembers = 0;
+            let maxSuccessLevel = 0;
+            let maxLevel;
+
+            const getNumbers = function (maxSuccessLevel, finishedRooms) {
+                if (title === "Offene Rechnung") {
+                    if (maxSuccessLevel > 0) {
+                        maxSuccessLevel++;
+                        finishedRooms++;
                     }
                 }
+                return [maxSuccessLevel, finishedRooms];
+            }
+
+            for (let i = 1, l = levelElements.length - 1; i < l; i++) {
+                const roomsElement = roomElements[i];
+                const roomSplit = roomsElement.textContent.split("/");
+                fullRooms += Number(roomSplit[1]);
+                const levelElement = levelElements[i];
+                const levelSplit = levelElement.textContent.split("/");
+
+                let curFinishedRoom = Number(roomSplit[0]);
+                let curSuccessLevel = Number(levelSplit[0]);
+                [curFinishedRoom, curSuccessLevel] = getNumbers(curFinishedRoom, curSuccessLevel);
+                if (curSuccessLevel > maxSuccessLevel) maxSuccessLevel = curSuccessLevel;
+                if (!maxLevel) maxLevel = Number(levelSplit[1]);
+                if (curSuccessLevel >= maxLevel) fullSuccessMembers++;
+
+                finishedRooms += curFinishedRoom;
+            }
+
+            return {
+                levels: [maxSuccessLevel, maxLevel],
+                rooms: [finishedRooms, fullRooms],
+                members: [fullSuccessMembers, groupSize],
             }
         }
     }
 
+    class SearchQuery {
+        dateMin;
+        dateMax;
+        groupSelection;
+        dungeonSelection;
+        maxResults = 100;
+
+        constructor() {
+            this.dateMax;
+            this.dateMin;
+            this.groupSelection = [_WoD.getMyGroup()];
+            this.dungeonSelection = [];
+        }
+    }
+
     class MainPage {
-        static anchor;
-        static wodContent;
+        static wodContent; // Kampfbericht-Inhalt
+        static anchor; // hier wird der SeitenInhalt eingebettet
         static title;
-        static statExecuter
+
+        static async migrate() {
+            console.log("Start success migration");
+            for (const report of await MyStorage.reportSources.getAll()) {
+                if (report.statistik) {
+                    const doc = _util.getDocumentFor(report.statistik);
+                    report.success = Mod.retrieveSuccessInformation(doc);
+                } else if (report.levelCount) {
+                    report.success = {
+                        levels: [null, report.levelCount],
+                    };
+                }
+                if (report.statistik) {
+                    report.title = WoD.getDungeonTitle(_util.getDocumentFor(report.statistik));
+                }
+                delete report.levelCount;
+                await MyStorage.reportSources.setValue(report);
+            }
+            console.log("Start success migration finished!");
+        }
 
         static async start() {
-            const title = document.getElementsByTagName("h1")[0];
+            this.migrate(); return;
+            this.title = document.getElementsByTagName("h1")[0];
             const wodContent = document.getElementsByClassName("content_table")[0];
-            const anchor = document.createElement("div");
-            this.anchor = anchor;
+            this.anchor = document.createElement("div");
             wodContent.parentElement.insertBefore(this.anchor, wodContent);
             wodContent.parentElement.removeChild(wodContent);
             this.anchor.append(wodContent);
             this.wodContent = wodContent;
 
             const thisObject = this;
-            const button = document.createElement("span");
-            button.classList.add("nowod");
-            button.innerHTML = " (Archiv)";
-            button.style.fontSize = "12px";
-            button.style.cursor = "pointer";
-            button.onclick = async function () {
-                console.log("contains: " + anchor.contains(wodContent))
-                if (anchor.contains(wodContent)) {
-                    if(!thisObject.statExecuter) {
-                        thisObject.statExecuter = unsafeWindow.statExecuter || function () {}
-                    }
-                    await MainPage.showOverview();
-                    //title.innerText = "Kampfberichte-Archiv";
-                } else {
-                    MainPage.showWodOverview();
-                    //title.innerText = "Kampfberichte";
-                }
-            }
-            title.appendChild(button);
-            this.title = title;
 
-            await this.fillOutCompletion();
+            this.archivButton = _UI.createButton(" 📦", async function () {
+                thisObject.title.removeChild(thisObject.archivButton);
+                thisObject.title.innerHTML = "Kampfberichte - Archiv";
+                await ArchivSearch.showArchiv(thisObject.anchor);
+                thisObject.title.appendChild(thisObject.wodContentButton);
+            });
+            this.statisticsButton = _UI.createButton(" 📊", async function () {
+                thisObject.title.innerHTML = "Kampfberichte - Statistik";
+                await MainPage.showStatistics();
+                thisObject.title.appendChild(thisObject.wodContentButton);
+            });
+            this.wodContentButton = _UI.createButton(" ↩", async function () {
+                thisObject.title.innerHTML = "Kampfberichte";
+                await MainPage.showWodOverview();
+                thisObject.title.appendChild(thisObject.archivButton);
+                thisObject.title.appendChild(thisObject.statisticsButton);
+            });
+            delete this.wodContentButton.style.fontSize;
+
+            thisObject.title.appendChild(thisObject.archivButton);
+            thisObject.title.appendChild(thisObject.statisticsButton);
+
+            await this.completeDungeonInformations(false);
         }
 
-        static async createTable() {
+        static async showWodOverview() {
+            this.anchor.removeChild(this.anchor.children[0]);
+            this.anchor.append(this.wodContent);
+        }
+
+        static async showStatistics() {
+            this.anchor.removeChild(this.anchor.children[0]);
+            const statTable = document.createElement("div");
+            const dungeonStats = {};
+            for (const report of await MyStorage.getReportDBMeta().getAll()) {
+                let dungeonStat = dungeonStats[report.title];
+                if (!dungeonStat) {
+                    dungeonStat = {};
+                    dungeonStats[report.title] = dungeonStat;
+                }
+                const success = report.success;
+                if (!success) continue;
+                const members = success.members;
+                if (!members) continue;
+                if (members[0] === members[1]) {
+                    let full = dungeonStat.full || 0;
+                    full++;
+                    dungeonStat.full = full;
+                } else if (Number(members[0]) === 0) {
+                    let wipe = dungeonStat.wipe || 0;
+                    wipe++;
+                    dungeonStat.wipe = wipe;
+                } else {
+                    let part = dungeonStat.part || 0;
+                    part++;
+                    dungeonStat.part = part;
+                }
+            }
+            for (const dungeonName of Object.keys(dungeonStats).sort()) {
+                const dungeonStat = dungeonStats[dungeonName];
+
+            }
+            this.anchor.append(statTable);
+        }
+
+        /**
+         * Erweitert den Dungeon-Table um eine weitere Spalte und liefert die Informationen welcher Content bereits aufgerufen wurde.
+         * @param isArchiv ob dies ein Archiv-Aufruf ist oder nicht.
+         */
+        static async completeDungeonInformations(isArchiv) {
+            const reportDB = await MyStorage.getReportDBMeta();
+            const tbody = document.getElementsByClassName("content_table")[0].children[0];
+            const ueberschriftArchiv = document.createElement("th");
+            ueberschriftArchiv.innerHTML = "Archiviert (fehlend)";
+            ueberschriftArchiv.style.width = "40px";
+            const ueberschriftArchivSpace = document.createElement("th");
+            ueberschriftArchivSpace.innerHTML = "Speicher";
+            ueberschriftArchivSpace.style.width = "40px";
+            const ueberschriftErfolg = document.createElement("th");
+            ueberschriftErfolg.title = "Wie weit die Gruppe levelmäßig vorgedrungen ist";
+            ueberschriftErfolg.innerHTML = "Level";
+            ueberschriftErfolg.style.width = "40px";
+            const ueberschriftZiel = document.createElement("th");
+            ueberschriftZiel.title = "Anteil der Charaktere die es erfolgreich bis ans Ende geschafft haben";
+            ueberschriftZiel.innerHTML = "Ziel";
+            ueberschriftZiel.style.width = "40px";
+            const ueberschriftFortschritt = document.createElement("th");
+            ueberschriftFortschritt.title = "Anteil aller erfolgreich besuchten Räume";
+            ueberschriftFortschritt.innerHTML = "%";
+            ueberschriftFortschritt.style.width = "10px";
+            let curTR;
+            for (var i = 1, l = tbody.children.length; i < l; i++) {
+                curTR = tbody.children[i];
+                const inputs = curTR.getElementsByTagName("input");
+                var reportId;
+                for (var k = 0, kl = inputs.length; k < kl; k++) {
+                    const curInput = inputs[k];
+                    if (curInput.name.startsWith("report_id")) {
+                        reportId = curInput.value;
+                        break;
+                    }
+                }
+                if (!reportId) continue;
+                let thisReport = await reportDB.getValue(reportId);
+                if (!thisReport) {
+                    thisReport = {
+                        reportId: reportId,
+                        title: curTR.children[1].textContent.trim(),
+                        time: _WoD.getTimeString(curTR.children[0].textContent.trim()),
+                        gruppe: _WoD.getMyGroup(),
+                        gruppe_id: _WoD.getMyGroupId(),
+                        world: _WoD.getMyWorld(),
+                    }
+                    await reportDB.setValue(thisReport);
+                }
+
+                const archiviertTD = document.createElement("td");
+                archiviertTD.style.textAlign = "center";
+                archiviertTD.style.width = "40px";
+                const archiviertSpaceTD = document.createElement("td");
+                archiviertSpaceTD.style.textAlign = "center";
+                archiviertSpaceTD.style.width = "40px";
+                const colorGreen = "rgb(62, 156, 62)";
+                const colorRed = "rgb(203, 47, 47)";
+                const colorYellow = "rgb(194, 194, 41)";
+
+                if (!thisReport || !thisReport.statistik && !thisReport.gegenstaende && !thisReport.levels) {
+                    archiviertTD.style.backgroundColor = colorRed;
+                    archiviertTD.innerHTML += "<span style='white-space: nowrap'>Fehlt komplett</span>";
+                } else {
+                    if (thisReport.space) {
+                        console.log("Set space! " + thisReport.space);
+                        archiviertSpaceTD.innerHTML = Math.round(10 * thisReport.space / 1024 / 1024) / 10 + " MB";
+                    }
+                    var haben = 0;
+                    var brauchen = 0;
+                    const fehlend = [];
+                    if (thisReport && thisReport.statistik) {
+                        haben++;
+                    } else {
+                        brauchen++;
+                        fehlend.push("S");
+                    }
+                    if (thisReport && thisReport.gegenstaende) {
+                        haben++;
+                    } else {
+                        brauchen++;
+                        fehlend.push("G");
+                    }
+                    if (!thisReport || !thisReport.success) {
+                        brauchen++;
+                        fehlend.push("Lx");
+                    } else {
+                        let maxLevel = thisReport.success.levels[1];
+                        let successLevels = thisReport.success.levels[0];
+                        if (successLevels) maxLevel = successLevels;
+                        for (var li = 0, ll = maxLevel - 1; li < ll; li++) {
+                            if (thisReport.levels && thisReport.levels[li]) {
+                                haben++;
+                            } else {
+                                brauchen++;
+                                fehlend.push("L" + (li + 1))
+                            }
+                        }
+                    }
+                    if (brauchen === 0) {
+                        archiviertTD.style.backgroundColor = colorGreen;
+                        archiviertTD.innerHTML += "Komplett";
+                    } else {
+                        archiviertTD.style.backgroundColor = colorYellow;
+                        archiviertTD.innerHTML += "<span style='white-space: nowrap'>" + fehlend.join(" ") + "</span>";
+                    }
+                }
+
+                const erfolgTD = document.createElement("td");
+                erfolgTD.style.textAlign = "center";
+                erfolgTD.style.width = "40px";
+                const zielTD = document.createElement("td");
+                zielTD.style.textAlign = "center";
+                zielTD.style.width = "40px";
+                const fortschrittTD = document.createElement("td");
+                fortschrittTD.style.textAlign = "center";
+                fortschrittTD.style.width = "40px";
+                if (thisReport && thisReport.success && thisReport.success.rooms) {
+                    const members = thisReport.success.members;
+                    if (members[0] === members[1]) {
+                        curTR.style.backgroundColor = colorGreen;
+                    } else if (members[0] > 0) {
+                        curTR.style.backgroundColor = colorYellow;
+                    } else {
+                        curTR.style.backgroundColor = colorRed;
+                    }
+                    const rooms = thisReport.success.rooms;
+                    const levels = thisReport.success.levels;
+                    const successRate = Math.round(100 * rooms[0] / rooms[1]);
+                    zielTD.innerHTML = members[0] + "/" + members[1];
+                    fortschrittTD.innerHTML = successRate + "%";
+                    erfolgTD.innerHTML = levels[0] + "/" + levels[1];
+                }
+                curTR.append(erfolgTD);
+                curTR.append(zielTD);
+                curTR.append(fortschrittTD);
+                curTR.append(archiviertTD);
+                if (isArchiv) curTR.append(archiviertSpaceTD);
+            }
+            tbody.children[0].append(ueberschriftErfolg);
+            tbody.children[0].append(ueberschriftZiel);
+            tbody.children[0].append(ueberschriftFortschritt);
+            tbody.children[0].append(ueberschriftArchiv);
+            if (isArchiv) tbody.children[0].append(ueberschriftArchivSpace);
+        }
+    }
+
+    class ArchivSearch {
+        static archivView;
+        static searchResultAnchor;
+
+        static searchQuery;
+        static dungeonSelect;
+        static groupSelect;
+
+        static async query() {
             const table = document.createElement("table");
             table.style.width = "100%";
             table.classList.add("content_table");
@@ -127,53 +407,261 @@
             let th = document.createElement("th");
             trHead.append(th);
             th.innerText = "Datum";
+            const dungeonTH = document.createElement("th");
+            trHead.append(dungeonTH);
+            dungeonTH.innerText = "Dungeon";
             th = document.createElement("th");
             trHead.append(th);
-            th.innerText = "Dungeon";
-            const allReports = await MyStorage.getReportDB().getAll();
+            th.innerText = "";
+            const allReports = await MyStorage.getReportDBMeta().getAll();
             allReports.reverse();
             let switcher = false;
-            allReports.forEach(a => {
-                //if(a.gruppe !== "Freizeit-Helden") return;
+            const thisObject = this;
+            const dungeonsFound = {};
+            const groupsFoundPrimary = {};
+            const dungeonsFoundPrimary = {};
+            const primaryDate = new Date();
+            primaryDate.setMonth(primaryDate.getMonth() - 1);
+            const groupsFound = {};
+            let count = 0;
+            const maxResults = ArchivSearch.searchQuery.maxResults;
+            for (const reportMeta of allReports) {
+                if (!thisObject.isValidDate(reportMeta)) continue;
+                groupsFound[reportMeta.gruppe] = true;
+                if (thisObject.isValidDate(reportMeta, primaryDate)) {
+                    groupsFoundPrimary[reportMeta.gruppe] = true;
+                }
+                if (!thisObject.isValidGroup(reportMeta)) continue;
+                dungeonsFound[reportMeta.title] = true;
+                if (thisObject.isValidDate(reportMeta, primaryDate)) {
+                    dungeonsFoundPrimary[reportMeta.title] = true;
+                }
+                if (!thisObject.isValidDungeon(reportMeta)) continue;
+                if (maxResults && count >= maxResults) continue;
+                count++;
+                const report = await MyStorage.getFullReport(reportMeta.reportId);
+                if(!report) {
+                    console.error("ReportSources not found: "+reportMeta.reportId);
+                }
                 switcher = !switcher;
                 const tr = document.createElement("tr");
                 tr.className = switcher ? "row0" : "row1";
                 tbody.append(tr);
                 const dateTD = document.createElement("td");
                 tr.append(dateTD);
-                dateTD.innerText = a.time;
+                dateTD.innerText = report.time;
                 const nameTD = document.createElement("td");
                 tr.append(nameTD);
-                nameTD.innerText = a.title;
+                nameTD.innerText = report.title;
                 const actionsTD = document.createElement("td");
                 tr.append(actionsTD);
-                MainPage.createReportActions(a, actionsTD);
-            });
+                ArchivSearch.createReportActions(report, actionsTD);
+            }
+            dungeonTH.innerText = "Dungeon (" + count + ")";
+            this.updateDungeonSelector(dungeonsFound, dungeonsFoundPrimary);
+            this.updateGroupSelector(groupsFound, groupsFoundPrimary);
             return table;
         }
 
-        static async showOverview() {
-            this.anchor.removeChild(this.anchor.children[0]);
-            this.anchor.append(await MainPage.createTable());
-            await this.fillOutCompletion();
+        static getErweiterteKampfstatistikExecuter() {
+            return unsafeWindow.statExecuter || function () {
+            }
         }
 
-        static async showWodOverview() {
-            this.anchor.removeChild(this.anchor.children[0]);
-            this.anchor.append(this.wodContent);
+        static updateDungeonSelector(dungeonsFound, dungeonsFoundPrimary) {
+            this.searchQuery.dungeonSelection.slice(0).forEach(name => {
+                if (!dungeonsFound[name]) _util.arrayRemove(this.searchQuery.dungeonSelection, name);
+            });
+            let selected = this.searchQuery.dungeonSelection.length === 0 ? "selected" : "";
+            this.dungeonSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
+
+            if (Object.keys(dungeonsFoundPrimary).length > 0) {
+                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 30 Tagen besucht ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                for (const dungeonName of Object.keys(dungeonsFoundPrimary).sort()) {
+                    const selected = this.searchQuery.dungeonSelection.includes(dungeonName) ? "selected" : "";
+                    this.dungeonSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
+                }
+                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+            }
+            for (const dungeonName of Object.keys(dungeonsFound).sort()) {
+                if (dungeonsFoundPrimary[dungeonName]) continue;
+                const selected = this.searchQuery.dungeonSelection.includes(dungeonName) ? "selected" : "";
+                this.dungeonSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
+            }
+        }
+
+        static updateGroupSelector(groupsFound, groupsFoundPrimary) {
+            this.searchQuery.groupSelection.slice(0).forEach(name => {
+                if (!groupsFound[name]) _util.arrayRemove(this.searchQuery.groupSelection, name);
+            });
+            let selected = this.searchQuery.groupSelection.length === 0 ? "selected" : "";
+            this.groupSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
+
+            if (Object.keys(groupsFoundPrimary).length > 0) {
+                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 30 Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                for (const dungeonName of Object.keys(groupsFoundPrimary).sort()) {
+                    const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
+                    this.groupSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
+                }
+                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+            }
+            for (const dungeonName of Object.keys(groupsFound).sort()) {
+                if (groupsFoundPrimary[dungeonName]) continue;
+                const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
+                this.groupSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
+            }
+        }
+
+        static isValidDate(report, dateMin) {
+            dateMin = dateMin || this.searchQuery.dateMin;
+            const dateMax = this.searchQuery.dateMax;
+
+            const reportTime = _util.parseStandardTimeString(report.time);
+            if (dateMax) {
+                if (dateMax <= reportTime) return false;
+            }
+            if (dateMin >= reportTime) return false;
+            return true;
+        }
+
+        static isValidGroup(report) {
+            const groupSelector = this.searchQuery.groupSelection;
+            if (groupSelector.length > 0) {
+                if (!groupSelector.includes(report.gruppe)) return false;
+            }
+            return true;
+        }
+
+        static isValidDungeon(report) {
+            const dungeonSelector = this.searchQuery.dungeonSelection;
+            if (dungeonSelector.length > 0) {
+                if (!dungeonSelector.includes(report.title)) return false;
+            }
+            return true;
+        }
+
+        static async showArchiv() {
+            MainPage.anchor.removeChild(MainPage.anchor.children[0]);
+            let created = false;
+            if (!this.archivView) {
+                created = true;
+                this.archivView = document.createElement("div");
+                this.searchQuery = new SearchQuery();
+                const letzteDungeonZeile = MainPage.wodContent.querySelector("table tr:last-child td");
+                //this.searchQuery.dateMax = new Date(_util.parseStandardTimeString(letzteDungeonZeile.textContent));
+                this.searchResultAnchor = document.createElement("div");
+                const searchTable = this.createSearchTable();
+                this.archivView.append(searchTable);
+                this.archivView.append(this.searchResultAnchor);
+                // TODO: Aktionen für Kampfberichte (Favorit, Löschen, Speichern-Alles)
+                // TODO: Erreichte Vollständigkeit des Dungeons anzeigen 12/12 geschafft zu 2/12 geschafft etc.
+                // TODO: Statistik-Anzeige aller Dungeons der Gruppe: Erstbesuch-Datum. Anzahl erfolgreicher Durchläufe. Anzahl semi-erfolgreicher Durchläufe. Anzahl nicht erfolgreicher Durchläufe.
+            }
+            MainPage.anchor.append(this.archivView);
+            this.updateSearch();
+        }
+
+        static createSearchTable() {
+            const searchTable = document.createElement("div");
+            searchTable.id = "orders";
+            const content = [];
+            const dateMinInput = this.createDatePicker();
+            if (this.searchQuery.dateMin) dateMinInput.value = _util.formatDateAndTime(this.searchQuery.dateMin);
+            const dateMaxInput = this.createDatePicker();
+            if (this.searchQuery.dateMax) dateMaxInput.value = _util.formatDateAndTime(this.searchQuery.dateMax);
+            const datumRow = document.createElement("div");
+            datumRow.append(dateMinInput);
+            datumRow.append(" - ");
+            datumRow.append(dateMaxInput);
+            dateMinInput.onchange = function () {
+                try {
+                    thisObject.searchQuery.dateMin = new Date(_util.parseStandardDateString(dateMinInput.value));
+                } catch (e) {
+                    thisObject.searchQuery.dateMin = null;
+                }
+                ArchivSearch.updateSearch();
+            }
+            dateMaxInput.onchange = function () {
+                try {
+                    thisObject.searchQuery.dateMax = new Date(_util.parseStandardDateString(dateMaxInput.value));
+                    thisObject.searchQuery.dateMax.setDate(thisObject.searchQuery.dateMax.getDate() + 1);
+                } catch (e) {
+                    thisObject.searchQuery.dateMax = null;
+                }
+                ArchivSearch.updateSearch();
+            }
+            content.push(["Zeitraum", datumRow]);
+            const thisObject = this;
+            this.groupSelect = document.createElement("select");
+            this.groupSelect.onchange = async function () {
+                thisObject.searchQuery.groupSelection = [];
+                var options = thisObject.groupSelect.selectedOptions;
+                for (var i = 0, l = options.length; i < l; i++) {
+                    const opt = options[i];
+                    const value = opt.value || opt.text;
+                    if (value === "") continue;
+                    thisObject.searchQuery.groupSelection.push(value);
+                }
+                ArchivSearch.updateSearch();
+            }
+            content.push(["Gruppe", this.groupSelect]);
+            this.dungeonSelect = document.createElement("select");
+            this.dungeonSelect.onchange = async function () {
+                thisObject.searchQuery.dungeonSelection = [];
+                var options = thisObject.dungeonSelect.selectedOptions;
+                for (var i = 0, l = options.length; i < l; i++) {
+                    const opt = options[i];
+                    const value = opt.value || opt.text;
+                    if (value === "") continue;
+                    thisObject.searchQuery.dungeonSelection.push(value);
+                }
+                console.log("Updated dungeon selection ", thisObject.searchQuery.dungeonSelection)
+                ArchivSearch.updateSearch();
+            }
+            content.push(["Dungeon", this.dungeonSelect]);
+            content.push(["Max. Ergebnisse", ArchivSearch.searchQuery.maxResults]);
+
+            searchTable.append(_UI.createTable(content));
+
+            if (false) {
+                const button = document.createElement("input");
+                button.type = "button";
+                button.value = "Aktualisieren";
+                button.onclick = async function () {
+                    await ArchivSearch.updateSearch();
+                };
+                searchTable.append(button);
+            }
+            return searchTable;
+        }
+
+        static async updateSearch() {
+            const resultTable = await ArchivSearch.query();
+            this.searchResultAnchor.innerHTML = "";
+            this.searchResultAnchor.append(resultTable);
+            await MainPage.completeDungeonInformations(true);
+        }
+
+        static createDatePicker() {
+            const input = document.createElement("input");
+            input.type = "text";
+            $(input).datepicker({
+                dateFormat: "dd.mm.yy",
+            });
+            input.size = 8;
+            return input;
         }
 
         static async showSite(report, reportSiteHTML, kampfbericht, kampfstatistik) {
-            this.anchor.removeChild(this.anchor.children[0]);
-            console.log("AnchorLength" + this.anchor.children.length);
+            MainPage.anchor.removeChild(MainPage.anchor.children[0]);
+            const doc = _util.getDocumentFor(reportSiteHTML);
+            const mainContent = doc.getElementById("main_content");
             const temp = document.createElement("div");
-            temp.innerHTML = reportSiteHTML;
-            this.anchor.append(temp);
-            this.title.scrollIntoView();
-            console.log("statE", this.statExecuter);
-            if (this.statExecuter) {
-                await this.statExecuter(kampfbericht, kampfstatistik);
-            }
+            temp.innerHTML = mainContent.outerHTML;
+            MainPage.anchor.append(temp);
+            MainPage.title.scrollIntoView();
+            const statExecuter = this.getErweiterteKampfstatistikExecuter();
+            if (statExecuter) await statExecuter(kampfbericht, kampfstatistik);
             const inputs = temp.getElementsByTagName("input");
             for (var i = 0, l = inputs.length; i < l; i++) {
                 const input = inputs[i];
@@ -183,21 +671,21 @@
                         e.preventDefault();
                         switch (input.value) {
                             case "Übersicht":
-                                MainPage.showOverview();
+                                ArchivSearch.showArchiv();
                                 break;
                             case "Statistik":
-                                MainPage.showSite(report, report.statistik, false, true);
+                                ArchivSearch.showSite(report, report.statistik, false, true);
                                 break;
                             case "Gegenstände":
-                                MainPage.showSite(report, report.gegenstaende);
+                                ArchivSearch.showSite(report, report.gegenstaende);
                                 break;
                             case "Bericht":
-                                MainPage.showSite(report, report.levels[0], true, false);
+                                ArchivSearch.showSite(report, report.levels[0], true, false);
                                 break;
                             default:
-                                const matches = input.value.match(/Level.*(\d+)/)
+                                const matches = input.value.match(/Level.*(\d+)/);
                                 if (matches) {
-                                    MainPage.showSite(report, report.levels[matches[1] - 1], true, false);
+                                    ArchivSearch.showSite(report, report.levels[matches[1] - 1], true, false);
                                 }
                                 break;
                         }
@@ -215,7 +703,7 @@
             reportId.name = "report_id[0]";
             reportId.onclick = function (e) {
                 e.preventDefault();
-                MainPage.showSite(report, report.statistik, false, true);
+                ArchivSearch.showSite(report, report.statistik, false, true);
             }
 
             const statistik = document.createElement("input");
@@ -225,7 +713,7 @@
             statistik.className = "button clickable";
             statistik.onclick = function (e) {
                 e.preventDefault();
-                MainPage.showSite(report, report.statistik, false, true);
+                ArchivSearch.showSite(report, report.statistik, false, true);
             }
 
             const gegenstaende = document.createElement("input");
@@ -235,7 +723,7 @@
             gegenstaende.className = "button clickable";
             gegenstaende.onclick = function (e) {
                 e.preventDefault();
-                MainPage.showSite(report, report.gegenstaende);
+                ArchivSearch.showSite(report, report.gegenstaende);
             }
 
             const bericht = document.createElement("input");
@@ -245,80 +733,69 @@
             bericht.className = "button clickable";
             bericht.onclick = function (e) {
                 e.preventDefault();
-                MainPage.showSite(report, report.levels[0], true, false);
+                ArchivSearch.showSite(report, report.levels[0], true, false);
             }
 
             return result;
         }
 
-        static async fillOutCompletion() {
-            console.log("fillOutCompletion", document.getElementsByClassName("content_table")[0]);
-            const reportDB = await MyStorage.getReportDB();
-            const tbody = document.getElementsByClassName("content_table")[0].children[0];
-            let curTR;
-            for (var i = 1, l = tbody.children.length; i < l; i++) {
-                curTR = tbody.children[i];
-                const inputs = curTR.getElementsByTagName("input");
-                var reportId;
-                for (var k = 0, kl = inputs.length; k < kl; k++) {
-                    const curInput = inputs[k];
-                    if (curInput.name.startsWith("report_id")) {
-                        reportId = curInput.value;
-                        break;
-                    }
-                }
-                console.log("reportId", reportId);
-                if(!reportId) continue;
-                const thisReport = await reportDB.getValue(reportId);
-
-                const reportStatus = document.createElement("td");
-                curTR.append(reportStatus);
-                //console.log("fillout: ", reportId, thisReport, curTR);
-
-                if (!thisReport) {
-                    reportStatus.innerHTML += "Fehlt komplett";
-                } else {
-                    var haben = 0;
-                    var brauchen = 0;
-                    if (thisReport && thisReport.statistik) {
-                        haben++;
-                    } else {
-                        brauchen++;
-                        reportStatus.innerHTML += " S";
-                    }
-                    if (thisReport && thisReport.gegenstaende) {
-                        haben++;
-                    } else {
-                        brauchen++;
-                        reportStatus.innerHTML += " G";
-                    }
-                    if (!thisReport || !thisReport.levels) {
-                        brauchen++;
-                        reportStatus.innerHTML += " Lx";
-                    } else {
-                        for (var li = 0, ll = thisReport.levelCount; li < ll; li++) {
-                            if (thisReport.levels[li]) {
-                                haben++;
-                            } else {
-                                brauchen++;
-                                reportStatus.innerHTML += " L" + (li + 1);
-                            }
-                        }
-                    }
-                    if (brauchen === 0) {
-                        reportStatus.innerHTML += "Komplett";
-                    }
-                }
-            }
-        }
     }
 
     class MyStorage {
-        static indexedDb = new Storages.IndexedDb("WoDReportArchiv", Mod.dbname);
-        static reports = this.indexedDb.createObjectStore("reports", "reportId");
+        static adjustMeta = function (objStore) {
+            const thisObject = this;
 
-        static getReportDB() {
-            return this.reports;
+            const resultSetValue = objStore.setValue;
+            objStore.setValue = async function (report) {
+                report.space = _util.getSpace(report);
+                await resultSetValue.call(objStore, report);
+                await thisObject.reportSourcesMeta.setValue(thisObject.getMetaFor(report));
+            }
+
+            const resultDeleteValue = objStore.deleteValue;
+            objStore.deleteValue = async function (dbObjectId) {
+                await resultDeleteValue.call(objStore, dbObjectId);
+                await thisObject.reportSourcesMeta.deleteValue(dbObjectId);
+            }
+            return objStore;
+        }
+        static getMetaFor = function (report) {
+            const meta = {
+                reportId: report.reportId,
+                time: report.time,
+                title: report.title,
+                gruppe: report.gruppe,
+                gruppe_id: report.gruppe_id,
+                world: report.world,
+                gegenstaende: !!report.gegenstaende,
+                statistik: !!report.statistik,
+                success: report.success,
+                space: report.space,
+            };
+            if (report.levels) {
+                const metaLevels = [];
+                for (const levelNr in report.levels) {
+                    metaLevels.push(!!report.levels[levelNr]);
+                }
+                meta.levels = metaLevels;
+            }
+            return meta;
+        }
+
+        static indexedDb = new Storages.IndexedDb("WoDReportArchiv", Mod.dbname);
+        static reportSources = this.adjustMeta(this.indexedDb.createObjectStore("reportSources", "reportId"));
+        static reportSourcesMeta = this.indexedDb.createObjectStore("reportSourcesMeta", "reportId");
+
+        static async getFullReport(reportId) {
+            return await this.reportSources.getValue(reportId);
+        }
+
+        static async setFullReport(report) {
+            return await this.reportSources.setValue(report);
+        }
+
+        static getReportDBMeta() {
+            return this.reportSourcesMeta;
         }
 
     }
@@ -327,20 +804,25 @@
         // Types: Dungeon/Quest, Schlacht-Report, Duell (Solo, Gruppe, Duell)
         // wod/spiel/clanquest/combat_report.php?battle=8414&report=59125 (battle scheint nicht relevant zu sein!? Seite kann auch so aufgerufen werden)
         // wod/spiel/tournament/duell.php
-        static getFullReportData() {
-            const form = document.getElementsByName("the_form")[0];
-            const titleSplit = document.getElementsByTagName("h2")[0].textContent.split("-");
+        static getFullReportBaseData(doc) {
+            doc = doc || document;
+            const form = doc.getElementsByName("the_form")[0];
+            const titleSplit = doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/);
+            const title = titleSplit[1].trim();
             const timeString = _WoD.getTimeString(titleSplit[0].trim());
             return {
                 reportId: form["report_id[0]"].value,
                 world: _WoD.getMyWorld(),
                 time: timeString,
-                title: titleSplit[1].trim(), // Bei einem Dungeon z.B. der Dungeonname
+                title: title, // Bei einem Dungeon z.B. der Dungeonname
                 gruppe: _WoD.getMyGroup(),
                 gruppe_id: _WoD.getMyGroupId(),
             };
         }
 
+        static getDungeonTitle(doc) {
+            return doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/)[1].trim();
+        }
 
         static getInformation(name) {
             return document.getElementsByName(name)[0];
