@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18.6
+// @version        0.18.7
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -12,7 +12,7 @@
 // @include        http*://*/wod/spiel/*dungeon/combat_report.php*
 // @include        http*://*/wod/spiel/event/play.php*
 // @include        http*://*/wod/spiel/event/eventlist.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -44,7 +44,7 @@
         static async startMod(kampfbericht, kampfstatistik) {
             let thisObject = this;
             console.log("StartMod: KampfstatistikStatistik", kampfbericht, kampfstatistik, thisObject);
-            unsafeWindow.statExecuter = async function(...args) {
+            unsafeWindow.statExecuter = async function (...args) {
                 await Mod.startMod(...args);
             }
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
@@ -242,8 +242,8 @@
         }
 
         static findFirstHeldenLevel(levelDataArray) {
-            for(const level of levelDataArray) {
-                if(level) return level;
+            for (const level of levelDataArray) {
+                if (level) return level;
             }
         }
 
@@ -988,6 +988,7 @@
         }
 
         static unitSearch(unitId, unitArray) {
+            if (!unitArray) return;
             for (var i = 0, l = unitArray.length; i < l; i++) {
                 const curUnit = unitArray[i];
                 if (curUnit.id.name === unitId.name && curUnit.id.index === unitId.index) {
@@ -1202,116 +1203,152 @@
 
                             const textArray = text.trim().split("/");
                             textArray.forEach(curText => {
-                                curText = curText.trim();
-                                let wurfMatcher = curText.match(/^(\D*)?(\d+)[\.\)]?$/);
-                                if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
-                                    fertigkeit.type = "Fernkampf";
-                                } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
-                                    fertigkeit.type = "Fernkampf";
-                                } else if (curText.startsWith("Eine Flasche mit billigem Fusel nähert sich euch auf einer wirklich beeindruckenden Bahn. Kopf runter!")) { // "Offene Rechnung"
-                                    fertigkeit.type = "Fernkampf";
-                                    wuerfe.push({
-                                        value: 100, // ??
-                                    })
-                                } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen") || curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) { // z.B. "Dunkles Erwachen"
-                                    fertigkeit.type = "Nahkampf";
-                                } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
-                                    || curText.startsWith("aus, sie dörrt Körper und Geist aus und lässt euch geschwächt zurück.") // Goldene Dracheneier
-                                ) {
-                                    fertigkeit.type = "Naturgewalt";
-                                } else if (curText.startsWith("auf sein Ziel und brüllt mit harter Stimme: DU gehörst mir!") || curText.startsWith("deutet mit seiner Waffe auf einen Gegner und brüllt mit harter Stimme: DU gehörst mir!") // "Sagenumwobener Zwergenstieg"
-                                    || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
-                                ) {
-                                    fertigkeit.type = "Sozial";
-                                    if (curText.startsWith("sind einfach überall!")) {
+                                    curText = curText.trim();
+                                    let wurfMatcher = curText.match(/^(\D*)?(\d+)[\.\)]?$/);
+                                    if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
+                                        fertigkeit.type = "Fernkampf";
+                                    } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
+                                        fertigkeit.type = "Fernkampf";
+                                    } else if (curText.startsWith("Eine Flasche mit billigem Fusel nähert sich euch auf einer wirklich beeindruckenden Bahn. Kopf runter!")) { // "Offene Rechnung"
+                                        fertigkeit.type = "Fernkampf";
                                         wuerfe.push({
-                                            value: 40,
+                                            value: 100, // ??
                                         })
+                                    } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen") || curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) { // z.B. "Dunkles Erwachen"
+                                        fertigkeit.type = "Nahkampf";
+                                    } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
+                                        || curText.startsWith("aus, sie dörrt Körper und Geist aus und lässt euch geschwächt zurück.") // Goldene Dracheneier
+                                    ) {
+                                        fertigkeit.type = "Naturgewalt";
+                                    } else if (curText.startsWith("Die Lemmingflut hat diesen massiven Felsblock")) { // Reise nach Keras
+                                        fertigkeit.type = "Naturgewalt";
+                                        wuerfe.push({
+                                            value: 100, // >53
+                                        })
+                                    } else if (curText.startsWith("auf sein Ziel und brüllt mit harter Stimme: DU gehörst mir!") || curText.startsWith("deutet mit seiner Waffe auf einen Gegner und brüllt mit harter Stimme: DU gehörst mir!") // "Sagenumwobener Zwergenstieg"
+                                        || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
+                                    ) {
+                                        fertigkeit.type = "Sozial";
+                                        if (curText.startsWith("sind einfach überall!")) {
+                                            wuerfe.push({
+                                                value: 40,
+                                            })
+                                        }
+                                    } else if (curText.startsWith("Ups - da ist wohl jemand untergetaucht und hat")) { // Offene Rechnung
+                                        fertigkeit.type = "Krankheit";
+                                    } else if (curText.startsWith("Oh je, was sind das nun wieder für")) {
+                                        fertigkeit.type = "Sozial";
+                                    } else if (curText.includes("Lass mich ziehen") // Eine Reise nach Keras
+                                        || curText.includes("Was willst du überhaupt von mir?") // Eine Reise nach Keras
+                                    ) {
+                                        fertigkeit.type = "Zauber";
+                                        wuerfe.push({
+                                            value: 0, // ??
+                                        })
+                                    } else if (curText.includes("Der beschwerliche Aufstieg hat eure Stärksten")) { // Eine Reise nach Keras
+                                        fertigkeit.type = "Zauber";
+                                        wuerfe.push({
+                                            value: 1000, // ??
+                                        })
+                                    } else if (curText.startsWith("verhilft dem Rentier zu besondern Fähigkeiten.")) {// Eine Reise nach Keras)
+                                        fertigkeit.type = "Naturgewalt";
+                                        wuerfe.push({
+                                            value: 100, // >17
+                                        })
+                                    } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe")
+                                        || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")
+                                        || curText.includes("Eine Flasche mit warmem Glühwein. Dieses Getränk belebt und hält wohlig warm.") // Reise nach Keras
+                                    ) {
+                                        fertigkeit.type = "Ereignis";
+                                    } else if (curText.startsWith("Mit ungeahnter Wucht lösen sich Teile der schwarzen Substanz von Dnobs Körper und fliegen in alle Richtungen")) { // Herz der Schatten
+                                        fertigkeit.type = "Fernkampf";
+                                    } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")
+                                        || curText.startsWith("Das Rentier geht eine innige Beziehung zu einem Helden ein") // Eine Reise nach Keras
+                                        || curText.startsWith("Das Rentier erhält die innige Beziehung zu einem") // Eine Reise nach Keras
+                                        || curText.includes("Räumt den Stein weg, ihr Narren") // Eine Reise nach Keras
+                                        || curText.startsWith("Hargow braucht offenbar Platz um sich ausreichend um Xeron zu kümmern") // Eine Reise nach Keras
+                                    ) {
+                                        fertigkeit.type = "Wirkung";
+                                    } else if (curText.startsWith("Weitere Menschen schließen sich der Gruppe an")) { // offene Rechnung, Herbeirufung
+                                        fertigkeit.type = "Ereignis";
                                     }
-                                } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe") || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")) {
-                                    fertigkeit.type = "Ereignis";
-                                } else if (curText.startsWith("Mit ungeahnter Wucht lösen sich Teile der schwarzen Substanz von Dnobs Körper und fliegen in alle Richtungen")) { // Herz der Schatten
-                                    fertigkeit.type = "Fernkampf";
-                                } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")) {
-                                    fertigkeit.type = "Wirkung";
-                                } else if (curText.startsWith("Weitere Menschen schließen sich der Gruppe an")) { // offene Rechnung, Herbeirufung
-                                    fertigkeit.type = "Ereignis";
+                                    if (wurfMatcher) { // wurf
+                                        let wo = wurfMatcher[1];
+                                        if (wo && wo.endsWith(":")) {
+                                            wo = wo.replace(":", "").trim();
+                                        }
+                                        wuerfe.push({
+                                            value: wurfMatcher[2],
+                                            dest: wo,
+                                        })
+                                    } else if (!fertigkeit.type) {
+                                        curText = curText.replace("(", "").replace(")", "").trim();
+                                        switch (curText) {
+                                            case "auf":
+                                            case "":
+                                            case "Das": // z.B. "Urlaub in den Bergen"
+                                            case "Der": // "Sagenumwobener Zwergenstieg"
+                                            case "mit seiner Waffe deutet": // "Sagenumwobener Zwergenstieg"
+                                            case "geht von": // Goldene Dracheneier
+                                            case "Mit seinem": // Goldene Dracheneier
+                                            case "entreißt": // Goldene Dracheneier
+                                                break;
+                                            case "ruft voller Schmerzen um Hilfe...": // z.B. Dungeon "Urlaub in den Bergen"
+                                            case "hält sein Opfer fest gefangen und verursacht tiefe Wunden...": // z.B. Dungeon "Urlaub in den Bergen" (verursacht wohl Schaden)
+                                            case "befindet sich in eurer Gefangenschaft - er wird kontrolliert von:": // z.B. Dungeon "Katz und Maus"
+                                            case "wird getragen von": // z.B. Weißzahnturm Lvl4 wirkt auf 2 Charaktere
+                                            // Debuff: "Den Alchemisten tragen"
+                                            case "wirkt":
+                                                fertigkeit.type = "Wirkung";
+                                                break;
+                                            case "heilt mittels":
+                                                fertigkeit.type = "Heilung";
+                                                break;
+                                            case "greift per Fernkampf an":
+                                                fertigkeit.type = "Fernkampf";
+                                                break;
+                                            case "greift im Nahkampf an":
+                                                fertigkeit.type = "Nahkampf";
+                                                break;
+                                            case "greift magisch an":
+                                                fertigkeit.type = "Zauber";
+                                                break;
+                                            case "greift sozial an":
+                                                fertigkeit.type = "Sozial";
+                                                break;
+                                            case "greift hinterhältig an":
+                                                fertigkeit.type = "Hinterhalt";
+                                                break;
+                                            case "verseucht":
+                                                fertigkeit.type = "Krankheit";
+                                                break;
+                                            case "entschärft":
+                                                fertigkeit.type = "Falle entschärfen";
+                                                break;
+                                            case "wirkt als Naturgewalt auf":
+                                                fertigkeit.type = "Naturgewalt";
+                                                break;
+                                            case "wird ausgelöst auf":
+                                                fertigkeit.type = "Falle";
+                                                break;
+                                            case "erwirkt eine Explosion gegen":
+                                                fertigkeit.type = "Explosion";
+                                                break;
+                                            case "ruft herbei mittels":
+                                                fertigkeit.type = "Herbeirufung";
+                                                break;
+                                            case "verschreckt":
+                                                fertigkeit.type = "Verschrecken";
+                                                break;
+                                            default:
+                                                console.error("Unbekannter Fertigkeits-Typ(1) ", "'" + curText + "'", actionElement);
+                                                throw Error("Unbekannter Fertigkeits-Typ!(1)");
+                                                break;
+                                        }
+                                    }
                                 }
-                                if (wurfMatcher) { // wurf
-                                    let wo = wurfMatcher[1];
-                                    if (wo && wo.endsWith(":")) {
-                                        wo = wo.replace(":", "").trim();
-                                    }
-                                    wuerfe.push({
-                                        value: wurfMatcher[2],
-                                        dest: wo,
-                                    })
-                                } else if (!fertigkeit.type) {
-                                    curText = curText.replace("(", "").replace(")", "").trim();
-                                    switch (curText) {
-                                        case "auf":
-                                        case "":
-                                        case "Das": // z.B. "Urlaub in den Bergen"
-                                        case "Der": // "Sagenumwobener Zwergenstieg"
-                                        case "mit seiner Waffe deutet": // "Sagenumwobener Zwergenstieg"
-                                        case "geht von": // Goldene Dracheneier
-                                        case "Mit seinem": // Goldene Dracheneier
-                                        case "entreißt": // Goldene Dracheneier
-                                            break;
-                                        case "ruft voller Schmerzen um Hilfe...": // z.B. Dungeon "Urlaub in den Bergen"
-                                        case "hält sein Opfer fest gefangen und verursacht tiefe Wunden...": // z.B. Dungeon "Urlaub in den Bergen" (verursacht wohl Schaden)
-                                        case "befindet sich in eurer Gefangenschaft - er wird kontrolliert von:": // z.B. Dungeon "Katz und Maus"
-                                        case "wird getragen von": // z.B. Weißzahnturm Lvl4 wirkt auf 2 Charaktere
-                                        // Debuff: "Den Alchemisten tragen"
-                                        case "wirkt":
-                                            fertigkeit.type = "Wirkung";
-                                            break;
-                                        case "heilt mittels":
-                                            fertigkeit.type = "Heilung";
-                                            break;
-                                        case "greift per Fernkampf an":
-                                            fertigkeit.type = "Fernkampf";
-                                            break;
-                                        case "greift im Nahkampf an":
-                                            fertigkeit.type = "Nahkampf";
-                                            break;
-                                        case "greift magisch an":
-                                            fertigkeit.type = "Zauber";
-                                            break;
-                                        case "greift sozial an":
-                                            fertigkeit.type = "Sozial";
-                                            break;
-                                        case "greift hinterhältig an":
-                                            fertigkeit.type = "Hinterhalt";
-                                            break;
-                                        case "verseucht":
-                                            fertigkeit.type = "Krankheit";
-                                            break;
-                                        case "entschärft":
-                                            fertigkeit.type = "Falle entschärfen";
-                                            break;
-                                        case "wirkt als Naturgewalt auf":
-                                            fertigkeit.type = "Naturgewalt";
-                                            break;
-                                        case "wird ausgelöst auf":
-                                            fertigkeit.type = "Falle";
-                                            break;
-                                        case "erwirkt eine Explosion gegen":
-                                            fertigkeit.type = "Explosion";
-                                            break;
-                                        case "ruft herbei mittels":
-                                            fertigkeit.type = "Herbeirufung";
-                                            break;
-                                        case "verschreckt":
-                                            fertigkeit.type = "Verschrecken";
-                                            break;
-                                        default:
-                                            console.error("Unbekannter Fertigkeits-Typ(1) ", "'" + curText + "'", actionElement);
-                                            throw Error("Unbekannter Fertigkeits-Typ!(1)");
-                                            break;
-                                    }
-                                }
-                            });
+                            )
+                            ;
 
                             break;
                         }
@@ -1322,16 +1359,44 @@
                     }
                 }
             )
-            fertigkeit.items = items;
-            if (!fertigkeit.type) {
-                switch (fertigkeit.name) {
-                    case "Stinkt gewaltig": // z.B. Manufaktur im verlassenden Tal
+            fertigkeit
+                .items = items;
+
+            if (
+
+                !
+                    fertigkeit
+                        .type
+            ) {
+                switch (fertigkeit
+
+                    .name
+                    ) {
+                    case
+                    "Stinkt gewaltig": // z.B. Manufaktur im verlassenden Tal
                         fertigkeit.type = "Krankheit";
                         break;
                     default:
-                        console.error("Unbekannter Fertigkeits-Typ(2)", fertigkeit, actionElement);
-                        fertigkeit.type = "Unbekannt: " + fertigkeit.name;
-                        error("Unbekannter Fertigkeits-Typ", fertigkeit, actionElement);
+                        console.error
+                        (
+                            "Unbekannter Fertigkeits-Typ(2)"
+                            ,
+                            fertigkeit
+                            ,
+                            actionElement
+                        )
+                        ;
+                        fertigkeit
+                            .type = "Unbekannt: " + fertigkeit.name;
+
+                        error(
+                            "Unbekannter Fertigkeits-Typ"
+                            ,
+                            fertigkeit
+                            ,
+                            actionElement
+                        )
+                        ;
                         break;
                 }
             }

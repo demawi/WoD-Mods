@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.0.3";
+    static version = "1.0.4";
 
     static import(type, version) {
         return this[type];
@@ -121,17 +121,13 @@ class demawiRepository {
                     result(new JSZip());
                 } else {
                     thisObject.jszip_loaded = true;
-                    const script = document.createElement("script");
-                    script.id = "jszip";
-                    script.src = "https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js";
-                    const head = document.getElementsByTagName("head")[0];
-                    script.addEventListener('load', function () {
-                        result(new JSZip());
-                    });
-                    script.addEventListener('error', function() {
-                       console.log("JSZIP-error");
-                    });
-                    head.append(script);
+                    //xmlHttp.open("GET", "https://raw.githubusercontent.com/Stuk/jszip/refs/heads/main/dist/jszip.min.js", false); // false for synchronous request
+                    var xmlHttp = new XMLHttpRequest();
+                    xmlHttp.open("GET", "https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js", false); // false for synchronous request
+                    xmlHttp.send(null);
+                    unsafeWindow.eval(xmlHttp.responseText);
+                    console.log("JSZip loaded: " + JSZip.version);
+                    result(new JSZip());
                 }
             });
         }
@@ -191,6 +187,7 @@ class demawiRepository {
             modname;
             dbname;
             objectStores = [];
+            objectStoresToDelete = [];
             dbConnection;
             static requestIdx = 0; // only for debugging
 
@@ -205,6 +202,7 @@ class demawiRepository {
              * @returns {Promise<void>}
              */
             async cloneTo(dbNameTo) {
+                console.log("Clone " + this.dbname + " to " + dbNameTo + "...");
                 const dbTo = new demawiRepository.Storages.IndexedDb(this.modname, dbNameTo);
                 const dbConnectionFrom = await this.getConnection();
                 const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
@@ -228,6 +226,7 @@ class demawiRepository {
                         await writeTo.setValue(cur);
                     }
                 }
+                console.log("Clone " + this.dbname + " to " + dbNameTo + "... finished!");
             }
 
             /**
@@ -349,6 +348,9 @@ class demawiRepository {
                 })
             }
 
+            /**
+             * Sofern nicht vorhanden wird der Object-Store erstellt.
+             */
             createObjectStore(storageId, key, indizes) {
                 let readonly = false;
                 if (indizes === true) {
@@ -359,6 +361,10 @@ class demawiRepository {
                 objectStore.indexedDb = this;
                 this.objectStores.push(objectStore);
                 return objectStore;
+            }
+
+            deleteObjectStore(storageId) {
+                this.objectStoresToDelete.push(storageId);
             }
 
             async getConnection() {
@@ -427,6 +433,13 @@ class demawiRepository {
             // synchronisiert die Datenbank mit den gewünschten ObjectStore-Definitionen
             async syncObjectStores(dbConnection) {
                 try {
+                    this.objectStoresToDelete.slice().forEach((storageId, idx) => {
+                        if (dbConnection.objectStoreNames.contains(storageId)) {
+                            console.log("Lösche Objectstore " + this.dbname + "." + storageId);
+                            dbConnection.deleteObjectStore(storageId);
+                        }
+                        this.objectStoresToDelete.splice(idx, 1);
+                    });
                     this.objectStores.forEach(objectstore => {
                         if (objectstore.readonly) return;
                         const storageId = objectstore.storageId;
@@ -448,8 +461,11 @@ class demawiRepository {
                 return true;
             }
 
-            // boolean: ob die Object-Stores entsprechend ihrer Definition installiert sind.
+            /**
+             * @return boolean: ob die Object-Stores entsprechend ihrer Definition installiert/deinstalliert sind.
+             */
             areAllObjectStoresSynced(dbConnection) {
+                if (this.objectStoresToDelete.length > 0) return false;
                 const installedNames = dbConnection.objectStoreNames; // Array
                 for (const objectStore of this.objectStores) {
                     if (objectStore.readonly) continue;
@@ -554,9 +570,62 @@ class demawiRepository {
                 });
             }
 
+            /**
+             * Liefert ein Array über alle vorhandenen Objekte.
+             */
+            async getAllKeys() {
+                const thisObject = this;
+                return new Promise(async (resolve, reject) => {
+                    let connection = await thisObject.indexedDb.getConnection();
+                    let transaction = connection.transaction(this.storageId, "readwrite");
+                    let objectStore = transaction.objectStore(this.storageId);
+                    const request = objectStore.getAllKeys();
+
+                    request.onsuccess = function (event) {
+                        const result = event.target.result;
+                        resolve(result);
+                    };
+                });
+            }
+
+            /**
+             * Liefert ein Array über alle vorhandenen Objekte.
+             */
+            async count() {
+                const thisObject = this;
+                return new Promise(async (resolve, reject) => {
+                    let connection = await thisObject.indexedDb.getConnection();
+                    let transaction = connection.transaction(this.storageId, "readwrite");
+                    let objectStore = transaction.objectStore(this.storageId);
+                    const request = objectStore.count();
+
+                    request.onsuccess = function (event) {
+                        const result = event.target.result;
+                        resolve(result);
+                    };
+                });
+            }
+
             // für readonly objectstores, kann man hierüber abfragen, ob der ObjectStore auch existiert
             async exists() {
                 return await this.indexedDb.doesObjectStoreExist(this);
+            }
+
+            async copyTo(toObjectStore) {
+                for (const curKey of await this.getAllKeys()) {
+                    const object = await this.getValue(curKey);
+                    await toObjectStore.setValue(object);
+                }
+            }
+
+            async cloneTo(toObjectStore) {
+                console.log("Clone objectstore " + this.storageId + " to " + toObjectStore.storageId + "...");
+                if (await toObjectStore.getAllKeys().length !== 0) {
+                    console.error("Zielobjectstore " + toObjectStore.storageId + " ist nicht leer!");
+                }
+                console.log("Clone objectstore " + this.storageId + " to " + toObjectStore.storageId + "... starte...");
+                await this.copyTo(toObjectStore);
+                console.log("Clone objectstore " + this.storageId + " to " + toObjectStore.storageId + "... finished!");
             }
         }
 
@@ -619,16 +688,20 @@ class demawiRepository {
         /**
          * z.B. "Heute 12:13" => "12.12.2024 12:13"
          */
-        static getTimeString(timeString, dateFormatter) {
+        static getTimeString(wodTimeString, dateFormatter) {
             if (!dateFormatter) dateFormatter = _.util.formatDate;
-            if (timeString.includes("Heute")) {
-                timeString = timeString.replace("Heute", dateFormatter(new Date()));
-            } else if (timeString.includes("Gestern")) {
+            if (wodTimeString.includes("Heute")) {
+                wodTimeString = wodTimeString.replace("Heute", dateFormatter(new Date()));
+            } else if (wodTimeString.includes("Gestern")) {
                 const date = new Date();
                 date.setDate(date.getDate() - 1);
-                timeString = timeString.replace("Gestern", dateFormatter(date));
+                wodTimeString = wodTimeString.replace("Gestern", dateFormatter(date));
             }
-            return timeString;
+            return wodTimeString;
+        }
+
+        static getTimestampFromString(wodTimeString) {
+            return _.util.parseStandardTimeString(this.getTimeString(wodTimeString));
         }
 
     }
@@ -753,6 +826,37 @@ class demawiRepository {
             return button;
         }
 
+        static createContentTable(contentArray, headerArray) {
+            const table = document.createElement("table");
+            table.classList.add("content_table");
+            const tbody = document.createElement("tbody");
+            table.append(tbody);
+            if (headerArray) {
+                const tr = document.createElement("tr");
+                tr.classList.add("header");
+                tbody.append(tr);
+                for (const cur of headerArray) {
+                    const td = document.createElement("th");
+                    tr.append(td);
+                    td.style.textAlign = "center";
+                    td.innerHTML = cur;
+                }
+            }
+            let row = true;
+            for (const curLine of contentArray) {
+                const tr = document.createElement("tr");
+                tr.classList.add("row" + (row ? 0 : 1));
+                row = !row;
+                tbody.append(tr);
+                for (const cur of curLine) {
+                    const td = document.createElement("td");
+                    tr.append(td);
+                    td.innerHTML = cur;
+                }
+            }
+            return table;
+        }
+
         static createTable(contentArray, headerArray) {
             const table = document.createElement("table");
             const tbody = document.createElement("tbody");
@@ -791,42 +895,46 @@ class demawiRepository {
             return table;
         }
 
-        static useJQueryUI() {
-            const jQueryUI = document.createElement("script");
-            jQueryUI.type = "text/javascript";
-            jQueryUI.src = "/wod/javascript/jquery/js/jquery-ui-1.8.21.custom.min.js";
-            document.getElementsByTagName("head")[0].append(jQueryUI);
+        static async useJQueryUI() {
+            return new Promise((result, reject) => {
+                const jQueryUI = document.createElement("script");
+                jQueryUI.type = "text/javascript";
+                jQueryUI.src = "/wod/javascript/jquery/js/jquery-ui-1.8.21.custom.min.js";
+                jQueryUI.onload = r => result();
+                jQueryUI.onerror = e => reject(e);
+                document.head.append(jQueryUI);
 
-            const css = document.styleSheets[0];
+                const css = document.styleSheets[0];
 
-            function addRule(rule) {
-                css.insertRule(rule, css.cssRules.length);
-            }
+                function addRule(rule) {
+                    css.insertRule(rule, css.cssRules.length);
+                }
 
-            addRule(".ui-datepicker {background-color:black;}");
-            addRule(".ui-datepicker .ui-datepicker-header {\n" +
-                "    background: #339999;\n" +
-                "    color: #ffffff;\n" +
-                "    font-family:'Times New Roman';\n" +
-                "    border-width: 1px 0 0 0;\n" +
-                "    border-style: solid;\n" +
-                "    border-color: #111;\n" +
-                "}");
-            addRule(".ui-datepicker .ui-datepicker-title {\n" +
-                "    text-align: center;\n" +
-                "    font-size: 15px;\n" +
-                "\n" +
-                "}");
-            addRule(".ui-datepicker .ui-datepicker-prev {\n" +
-                "    float: left;\n" +
-                "    cursor: pointer;\n" +
-                "    background-position: center -30px;\n" +
-                "}");
-            addRule(".ui-datepicker .ui-datepicker-next {\n" +
-                "    float: right;\n" +
-                "    cursor: pointer;\n" +
-                "    background-position: center 0px;\n" +
-                "}");
+                addRule(".ui-datepicker {background-color:black;}");
+                addRule(".ui-datepicker .ui-datepicker-header {\n" +
+                    "    background: #339999;\n" +
+                    "    color: #ffffff;\n" +
+                    "    font-family:'Times New Roman';\n" +
+                    "    border-width: 1px 0 0 0;\n" +
+                    "    border-style: solid;\n" +
+                    "    border-color: #111;\n" +
+                    "}");
+                addRule(".ui-datepicker .ui-datepicker-title {\n" +
+                    "    text-align: center;\n" +
+                    "    font-size: 15px;\n" +
+                    "\n" +
+                    "}");
+                addRule(".ui-datepicker .ui-datepicker-prev {\n" +
+                    "    float: left;\n" +
+                    "    cursor: pointer;\n" +
+                    "    background-position: center -30px;\n" +
+                    "}");
+                addRule(".ui-datepicker .ui-datepicker-next {\n" +
+                    "    float: right;\n" +
+                    "    cursor: pointer;\n" +
+                    "    background-position: center 0px;\n" +
+                    "}");
+            });
         }
     }
 
@@ -834,8 +942,23 @@ class demawiRepository {
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
     static util = class {
+        static getWindowPage() {
+            var pathname = window.location.pathname.split("/");
+            return pathname[pathname.length - 1];
+        }
+
         static getSpace(object) {
             return JSON.stringify(object).length;
+        }
+
+        static fromBytesToMB(count) {
+            return Math.ceil(10 * count / 1024 / 1024) / 10 + " MB";
+        }
+
+        static fromBytesToDynamic(count) {
+            count = count / 1024;
+            if (count < 1024) Math.ceil(10 * count) / 10 + " KB";
+            return Math.ceil(10 * count / 1024) / 10 + " MB";
         }
 
         static arrayMap(list, fn) {
@@ -853,38 +976,8 @@ class demawiRepository {
             }
         }
 
-        static createContentTableFrom(contentArray, headerArray) {
-            const table = document.createElement("table");
-            table.classList.add("content_table");
-            const tbody = document.createElement("tbody");
-            table.append(tbody);
-            if (headerArray) {
-                const tr = document.createElement("tr");
-                tr.classList.add("header");
-                tbody.append(tr);
-                for (const cur of headerArray) {
-                    const td = document.createElement("th");
-                    tr.append(td);
-                    td.style.textAlign = "center";
-                    td.innerHTML = cur;
-                }
-            }
-            let row = true;
-            for (const curLine of contentArray) {
-                const tr = document.createElement("tr");
-                tr.classList.add("row" + (row ? 0 : 1));
-                row = !row;
-                tbody.append(tr);
-                for (const cur of curLine) {
-                    const td = document.createElement("td");
-                    tr.append(td);
-                    td.innerHTML = cur;
-                }
-            }
-            return table;
-        }
-
         static formatDate(date) {
+            if (typeof date === "number") date = new Date(date);
             var result = "";
             var a = date.getDate();
             if (a < 10) result += "0";
@@ -897,6 +990,7 @@ class demawiRepository {
         }
 
         static formatDateAndTime(date) {
+            if (typeof date === "number") date = new Date(date);
             var result = "";
             var a = date.getDate();
             if (a < 10) result += "0";
@@ -924,7 +1018,7 @@ class demawiRepository {
         }
 
         /**
-         * z.B. "22.01.2024 12:13" => 17234663464
+         * z.B. "22.01.2024" => 17234663464
          */
         static parseStandardDateString(timeString) {
             const matches = timeString.match(/(\d*)\.(\d*)\.(\d*)/);
@@ -937,7 +1031,7 @@ class demawiRepository {
          */
         static getDocumentFor(fullHtmlString) {
             const doc = document.implementation.createHTMLDocument();
-            doc.write(fullHtmlString);
+            doc.documentElement.innerHTML = fullHtmlString;
             return doc;
         }
 

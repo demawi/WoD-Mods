@@ -2,7 +2,7 @@
 // @name           [WoD] Item-Datenbank
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
-// @include        http*://*.world-of-dungeons.*/wod/spiel/*
+// @include        https://*.world-of-dungeons.*/wod/spiel/*
 // @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
 // ==/UserScript==
 // *************************************************************
@@ -22,6 +22,7 @@
     const _File = demawiRepository.import("File");
     const _WoD = demawiRepository.import("WoD");
     const _util = demawiRepository.import("util");
+    const _UI = demawiRepository.import("UI");
 
     class Mod {
         static dbname = "wodDB";
@@ -29,7 +30,7 @@
         static currentItemDataVersion = 3; // durch eine Veränderung werden die Items neu aus den Sourcen beschrieben
 
         static async startMod() {
-            const page = util.getWindowPage();
+            const page = _util.getWindowPage();
             console.log("StartMod: ItemDB '" + page + "'");
 
             // Links zu Items finden und markieren. Nahezu überall.
@@ -83,7 +84,7 @@
                 console.log(a[0]);
                 return a[0].localeCompare(b[0]);
             });
-            const table = _util.createContentTableFrom(content, header);
+            const table = _UI.createContentTable(content, header);
             table.style.marginLeft = "15px";
             table.classList.add("nowod");
             const lootUeberschrift = document.createElement("h3");
@@ -95,7 +96,7 @@
                 const aggregateInfos = [];
                 aggregateInfos.push(["Stufe (min-max):", stufeMin + "-" + stufeMax]);
                 aggregateInfos.push(["Unterschiedliche Dungeons:", Object.entries(dungeons).length]);
-                const aggregateTable = _util.createContentTableFrom(aggregateInfos);
+                const aggregateTable = _UI.createContentTable(aggregateInfos);
                 aggregateTable.classList.add("nowod");
                 aggregateTable.style.marginLeft = "15px";
                 hints.parentElement.insertBefore(aggregateTable, table);
@@ -1872,12 +1873,6 @@
             result.type = "text";
             if (width) result.style.width = width;
             return result;
-        }
-
-        static getWindowPage() {
-            var pathname = window.location.pathname.split("/");
-            var pageSection = pathname[pathname.length - 2];
-            return pathname[pathname.length - 1];
         }
 
         static getItemNameFromElement(aElement) {
