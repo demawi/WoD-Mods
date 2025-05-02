@@ -18,6 +18,7 @@
     let debug = false;
 
     const _Storages = demawiRepository.import("Storages");
+    const _WoDStorages = demawiRepository.import("WoDStorages");
     const BBCodeExporter = demawiRepository.import("BBCodeExporter");
     const _File = demawiRepository.import("File");
     const _WoD = demawiRepository.import("WoD");
@@ -63,9 +64,8 @@
             const all = document.getElementsByTagName("h1")[0];
             const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
             if (!itemName) return;
-            const item = await MyStorage.getItemDB().getValue(itemName);
-            if (!item) return;
-            const loot = item.loot || [];
+            const item = await MyStorage.getItemLootDB().getValue(itemName);
+            const loot = item && (item.loot || []);
 
             const header = ["Dungeon", "Welt", "Zeit", "Stufe"];
             let content = [];
@@ -74,11 +74,11 @@
             const dungeons = {};
             const entries = Object.entries(loot);
             for (const [key, value] of entries) {
-                let stufe = Number(value.stufe);
+                const stufe = Number(value.stufe) || Number(value.stufe_);
                 if (stufe < stufeMin) stufeMin = stufe;
                 if (stufe > stufeMax) stufeMax = stufe;
-                dungeons[value.dungeon] = true;
-                content.push([value.dungeon, value.world, _util.formatDateAndTime(new Date(Number(key))), value.stufe]);
+                dungeons[value.loc] = true;
+                content.push([value.loc, value.world, _util.formatDateAndTime(new Date(Number(key))), value.stufe || "(" + value.stufe_ + ")"]);
             }
             content.sort((a, b) => {
                 console.log(a[0]);
@@ -104,14 +104,12 @@
         }
     }
 
-
     class ItemReader {
         static createItem(itemName) {
-            let worldName = window.location.href.match(/\/\/(.*?)\./)[1];
             return {
                 name: itemName,
                 time: new Date().getTime(),
-                world: worldName[0].toUpperCase(),
+                world: _WoD.getMyWorld(),
             }
         }
 
@@ -141,9 +139,7 @@
             await MyStorage.getItemSourceDB().setValue(sourceItem);
             const item = await ItemParser.getItemDataFromSource(sourceItem);
             await MyStorage.getItemDB().setValue(item);
-            console.log("Gegenstandsseite", sourceItem, item);
-
-            //ItemParser.rewriteAllItemsFromSource();
+            console.log("Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
         }
     }
 
@@ -151,7 +147,7 @@
         static async start() {
             const item = await this.findNext();
             if (item) {
-                console.log("Auto-Load Item: " + item.name);
+                // console.log("Auto-Load Item: " + item.name);
                 const iframe = document.createElement("iframe");
                 iframe.src = WoD.getItemUrl(item.name);
                 iframe.style.display = "none";
@@ -180,7 +176,7 @@
             missingSpanOverall.style.right = "0px";
 
             async function checkSiteForItems() {
-                console.log("checkSiteForItems");
+                console.log("ItemDB.checkSiteForItems...");
                 const allHrefs = document.getElementsByTagName("a");
                 var missingItemsFound = 0;
                 for (var i = 0, l = allHrefs.length; i < l; i++) {
@@ -234,7 +230,7 @@
                 searchContainerTitle.append(toBBCodeButton);
 
                 async function updateMissingButton() {
-                    const allItems = await MyStorage.getItemSourceDB().getAll();
+                    const allItems = await MyStorage.getItemSourceDB().parse();
                     var itemsToLoad = 0;
                     var allItemCount = 0;
                     for (const item of allItems) {
@@ -328,9 +324,9 @@
                 async function getItemResult() {
                     var items;
                     if (itemDBSearch.checked) {
-                        items = await MyStorage.getItemDB().getAll();
+                        items = await MyStorage.getItemDB().parse();
                     } else {
-                        items = await MyStorage.getItemSourceDB().getAll();
+                        items = await MyStorage.getItemSourceDB().parse();
                     }
                     const itemResult = Array();
                     for (const item of items) {
@@ -1267,7 +1263,7 @@
 
         static async rewriteAllItemsFromSource() {
             console.log("rewriteAllItemsFromSource");
-            let itemSources = await MyStorage.getItemSourceDB().getAll();
+            let itemSources = await MyStorage.getItemSourceDB().parse();
             for (const itemSource of itemSources) {
                 if (itemSource.invalid) {
                     await MyStorage.getItemDB().deleteValue(itemSource.name);
@@ -1572,28 +1568,6 @@
             //await this.startMigration(true);
         }
 
-        /**
-         * @param resetLoot 'true' reset all loot tables. 'false' only update tables.
-         */
-        static async startMigration(resetLoot) {
-            if (resetLoot) {
-                console.log("ItemReaderKampfberichtArchiv ResetLoot...");
-                for (const item of await MyStorage.getItemDB().getAll()) {
-                    delete item.loot;
-                    await MyStorage.getItemDB().setValue(item);
-                }
-            }
-
-            console.log("ItemReaderKampfberichtArchiv Migration...");
-            const allReportSources = await MyStorage.reportSources.getAll();
-            for (const report of allReportSources) {
-                const gegenstandsHTML = report.gegenstaende;
-                const doc = _util.getDocumentFor(gegenstandsHTML);
-                await this.readDocument(doc, report);
-            }
-            console.log("ItemReaderKampfberichtArchiv Migration finished!");
-        }
-
         static getStufeFromReport(report) {
             // console.log("getStufeFromReport for ", report);
             if (!report.levels) return;
@@ -1642,32 +1616,9 @@
         static async readGegenstaende(table, world, dungeonName, timestamp, stufe) {
             if (!table) return;
             for (const aHref of table.getElementsByClassName("report")) {
-                await this.addLoot(aHref, world, dungeonName, timestamp, stufe);
+                const itemName = util.getItemNameFromElement(aHref);
+                await _WoDStorages.addLootUnsafe(itemName, dungeonName, timestamp, world, stufe);
             }
-        }
-
-        static async addLoot(itemLink, world, dungeonName, timestamp, stufe) {
-            const item = await MyStorage.getItemFromLink(itemLink);
-            if (item) {
-                let lootList = item.loot;
-                if (!lootList) {
-                    lootList = {};
-                    item.loot = lootList;
-                }
-                if (!lootList[timestamp]) {
-                    console.log("AddLoot: '" + item.name + "'", [item, world, dungeonName, timestamp, stufe]);
-                    lootList[timestamp] = {
-                        dungeon: dungeonName,
-                        world: world,
-                        stufe: stufe,
-                    };
-                    await MyStorage.getItemDB().setValue(item);
-                    return true;
-                }
-            } else {
-                console.log("Cant found itemname: ", itemLink, dungeonName, timestamp);
-            }
-            return false;
         }
 
     }
@@ -1693,15 +1644,19 @@
         }
         static indexedDb = new _Storages.IndexedDb("ItemDB", Mod.dbname);
         static itemSources = this.adjust(this.indexedDb.createObjectStore("itemSources", "id"));
-        static items = this.adjust(this.indexedDb.createObjectStore("items", "id"));
-        static reportSources = this.indexedDb.createObjectStore("reportSources", "reportId");
+        static item = this.adjust(this.indexedDb.createObjectStore("item", "id"));
+        static itemLoot = this.adjust(this.indexedDb.createObjectStore("itemLoot", "id"));
 
         static getItemSourceDB() {
             return this.itemSources;
         }
 
         static getItemDB() {
-            return this.items;
+            return this.item;
+        }
+
+        static getItemLootDB() {
+            return this.itemLoot;
         }
 
         static async notExistingItem(itemName) {
@@ -1721,10 +1676,10 @@
                 const newItem = {name: itemName};
                 await this.itemSources.setValue(newItem);
             }
-            let result = this.items.getValue(itemName);
+            let result = this.item.getValue(itemName);
             if (!result) {
                 const newItem = {name: itemName};
-                await this.items.setValue(newItem);
+                await this.item.setValue(newItem);
                 result = newItem;
             }
             return result;

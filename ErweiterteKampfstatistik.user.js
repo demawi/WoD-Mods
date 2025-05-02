@@ -27,6 +27,10 @@
 
     const Storages = demawiRepository.import("Storages");
     const BBCodeExporter = demawiRepository.import("BBCodeExporter");
+    const _WoD = demawiRepository.import("WoD");
+    const _WoDParser = demawiRepository.import("WoDParser");
+    const _ReportParser = demawiRepository.import("ReportParser");
+    const _util = demawiRepository.import("util");
 
     class Mod {
         static dbname = "wodDB";
@@ -38,40 +42,51 @@
         static thisReport;
         static thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
         static outputAnchor;
-        static runSave;
+        static runSafe;
 
-        // Einstiegspunkt der Anwendung, Parameter können von externen Anwendungen gesetzt werden
-        static async startMod(kampfbericht, kampfstatistik) {
+        /**
+         * Einstiegspunkt der Anwendung. Falls von externer Mod aufgerufen wird, sollten die Parameter entsprechend gesetzt werden.
+         * @param kampfbericht   ob es ich um eine Kampfberichtseite handelt
+         * @param kampfstatistik ob es sich um die Kampfstatistik-Seite handelt
+         * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
+         */
+        static async startMod(kampfbericht, kampfstatistik, dbReportSource) {
             let thisObject = this;
-            console.log("StartMod: KampfstatistikStatistik", kampfbericht, kampfstatistik, thisObject);
+            console.log("StartMod: KampfstatistikStatistik", kampfbericht, kampfstatistik);
             unsafeWindow.statExecuter = async function (...args) {
                 await Mod.startMod(...args);
             }
+            if (dbReportSource && dbReportSource.levels) {
+                await this.syncWithReportSources(dbReportSource);
+                await Mod.startMod(kampfbericht, kampfstatistik); // ohne Report nochmal aufrufen
+                return;
+            }
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
-                let levelData = ReportParser.readKampfbericht(document);
+                let levelData = _ReportParser.readKampfbericht(document);
                 if (levelData) {
                     Mod.outputAnchor = Mod.createOutputAnchor();
                     Mod.thisLevelDatas = [levelData];
-                    var roundCount = levelData.roundCount;
-                    var hinweisText = ": " + roundCount + " Runden";
+                    let roundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
+                    let hinweisText = ": " + roundCount + " Runden";
                     Mod.outputAnchor.setTitle(hinweisText);
                 }
             }
             if (kampfbericht || WoD.istSeite_Kampfbericht()) { // Einzelseite
                 Mod.outputAnchor = Mod.createOutputAnchor();
-                Mod.runSave(async function () {
+                Mod.runSafe(async function () {
                     // cur_rep_id für Dungeons, report bei Schlachten
-                    const reportId = WoD.getReportId();
+                    const reportData = _WoD.getFullReportBaseData();
+                    const reportId = reportData.reportId;
                     thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
                     console.log("ReportId: ", reportId, thisObject.thisReport);
 
-                    var [levelData, levelNr] = ReportParser.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
+                    var [levelData, levelNr] = thisObject.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
                     if (levelData) {
-                        var roundCount = levelData.roundCount;
+                        let roundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
 
                         var hinweisText = ": " + roundCount + " Runden";
                         if (levelData.areas.length > 0) {
-                            hinweisText += " [" + util.arrayMap(levelData.areas, area => area.rounds.length).join(", ") + "]";
+                            hinweisText += " [" + _util.arrayMap(levelData.areas, area => area.rounds.length).join(", ") + "]";
                         }
                         const reportProgress = Mod.getReportProgress();
                         if (reportProgress.missingReports.length > 0) {
@@ -80,15 +95,22 @@
                         Mod.outputAnchor.setTitle(hinweisText);
                         Mod.thisLevelDatas = [];
                         Mod.thisLevelDatas[levelNr - 1] = levelData;
+                        thisObject.thisReport.ts = new Date().getTime(); // reportData.ts;
                         await MyStorage.getReportStatsDB().setValue(thisObject.thisReport);
                     }
                 });
             }
-            if (kampfstatistik || WoD.istSeite_Kampfstatistik()) { // Übersichtsseite
+            if (kampfstatistik || WoD.istSeite_Kampfstatistik()) { // Statistikseite (keine Zwischenspeicherung nur Anzeige)
                 Mod.outputAnchor = Mod.createOutputAnchor();
-                Mod.runSave(async function () {
-                    const reportId = WoD.getReportId();
+                Mod.runSafe(async function () {
+                    const reportData = _WoD.getFullReportBaseData();
+                    const reportId = reportData.reportId;
                     thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
+
+                    // Holen und Speichern der erreichten Level
+                    const successStats = _WoDParser.retrieveSuccessInformationOnStatisticPage(document, thisObject.thisReport.success);
+                    thisObject.thisReport.maxLevels = Math.min(successStats.levels[0] + 1, successStats.levels[1]);
+                    await MyStorage.getReportStatsDB().setValue(thisObject.thisReport);
 
                     console.log("ReportId: ", reportId, thisObject.thisReport);
 
@@ -109,6 +131,46 @@
             }
         }
 
+        /**
+         * Lädt aus den Report-Quellen fehlende Level-Statistiken in die ReportStat-Datenbank.
+         */
+        static async syncWithReportSources(dbReportSource) {
+            const reportId = dbReportSource.reportId;
+            const statReport = await MyStorage.getReportStatsDB().getValue(reportId);
+            let changed = false;
+            for (let i = 0, l = dbReportSource.levels.length; i < l; i++) {
+                if (!statReport.levelData || !statReport.levelData[i]) {
+                    const doc = _util.getDocumentFor(dbReportSource.levels[i]);
+                    this.readKampfberichtAndStoreIntoReport(doc, statReport, reportId);
+                    changed = true;
+                }
+            }
+            if (changed) await MyStorage.getReportStatsDB().setValue(statReport);
+        }
+
+        static readKampfberichtAndStoreIntoReport(container, report, reportId) {
+            var levelNr;
+            var levelCount;
+            console.log("Reporting", reportId, report);
+            if (reportId.startsWith("schlacht_")) {
+                levelNr = 1;
+                report.levelCount = 1;
+            } else { // Dungeon
+                levelNr = container.getElementsByName("current_level")[0].value;
+                let navigationBar = container.getElementsByClassName("navigation levels")[0];
+                if (navigationBar) {
+                    report.levelCount = navigationBar.children.length - 1;
+                }
+            }
+            const levelData = _ReportParser.readKampfbericht(container);
+            report.id = reportId;
+            if (!report.levelDatas) {
+                report.levelDatas = [];
+            }
+            report.levelDatas[levelNr - 1] = levelData;
+            return [levelData, levelNr];
+        }
+
         static getReportProgress() {
             var foundReportCount = 0;
             var missingReports = Array();
@@ -119,18 +181,19 @@
             var levelDatas;
 
             if (Mod.thisReport) {
-                levelCount = Mod.thisReport.levelCount;
+                levelCount = Mod.thisReport.maxLevels || Mod.thisReport.levelCount;
                 levelDatas = Mod.thisReport.levelDatas;
 
                 for (var i = 0, l = levelCount; i < l; i++) {
                     if (levelDatas.length > i) {
                         const levelData = levelDatas[i];
+                        const thisLevelRoundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
                         if (levelData) {
                             const curAreaCount = Object.keys(levelData.areas).length;
                             const areaRoundCounts = Array();
                             levelData.areas.forEach(area => areaRoundCounts.push(area.rounds.length));
-                            allRoundNumbers[i] = (curAreaCount > 1 ? "[" + areaRoundCounts.join(", ") + "]" : "" + levelData.roundCount);
-                            roundCount += levelData.roundCount;
+                            allRoundNumbers[i] = (curAreaCount > 1 ? "[" + areaRoundCounts.join(", ") + "]" : "" + thisLevelRoundCount);
+                            roundCount += thisLevelRoundCount;
                             areaCount += curAreaCount;
                             foundReportCount++;
                             continue;
@@ -203,7 +266,7 @@
 
             // führt die Funktion in einem gesicherten Kontext aus, um aufkommende Fehler abzufangen und konform anzuzeigen
             // jeglicher Code sollte in diesem Kontext laufen
-            Mod.runSave = function (asyncFunction) {
+            Mod.runSafe = function (asyncFunction) {
                 try {
                     const functionResult = asyncFunction()
                     if (functionResult && functionResult.catch) {
@@ -351,8 +414,8 @@
                     subStats.actionClassification = function (curAction) {
                         let curSettings = curStats.actionClassification(curAction);
                         return {
-                            fromMe: curSettings.fromMe && ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
-                            atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => ReportParser.isUnitEqual(target.unit, statTarget.unit)),
+                            fromMe: curSettings.fromMe && _ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
+                            atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => _ReportParser.isUnitEqual(target.unit, statTarget.unit)),
                         }
                     }
                     break;
@@ -391,7 +454,7 @@
                         }
                         unitCount[unit.id.id] = true;
                     }
-                    if (ReportParser.isUnitEqual(unit, action.unit)) {
+                    if (_ReportParser.isUnitEqual(unit, action.unit)) {
                         subStats.actionUnit = unit;
                     }
                     return subStats;
@@ -414,7 +477,7 @@
                         }
                         unitCount[unit.id.id] = true;
                     }
-                    if (ReportParser.isUnitEqual(unit, action.unit)) {
+                    if (_ReportParser.isUnitEqual(unit, action.unit)) {
                         subStats.actionUnit = unit;
                     }
                     return subStats;
@@ -471,9 +534,9 @@
             "items": {
                 name: "Gegenstände",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, util.arrayMap(statTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, _util.arrayMap(statTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
                     if (!subStats) return false;
-                    subStats.title = util.arrayMap(statTarget.fertigkeit.items, a => a.srcRef).join(", ");
+                    subStats.title = _util.arrayMap(statTarget.fertigkeit.items, a => a.srcRef).join(", ");
                     return subStats;
                 }
             },
@@ -654,7 +717,7 @@
                                             fromMe: wantHeroes === curAction.unit.id.isHero,
                                             atMe: wantHeroes === !!util.arraySearch(curAction.targets, target => target.unit.id.isHero === wantHeroes),
                                             fromGroup: wantHeroes === curAction.unit.id.isHero,
-                                            atGroup: wantHeroes === !!util.arraySearch(action.targets, target => ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            atGroup: wantHeroes === !!util.arraySearch(action.targets, target => _ReportParser.isUnitEqual(curAction.unit, target.unit)),
                                         }
                                     }
 
@@ -728,844 +791,6 @@
             }
         }
 
-    }
-
-    // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
-    // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    class ReportParser {
-        static currentRound;
-
-        static isUnitEqual(unit1, unit2) {
-            return unit1.id.name === unit2.id.name;
-        }
-
-        static readKampfberichtAndStoreIntoReport(container, report, reportId) {
-            var levelNr;
-            var levelCount;
-            console.log("Reporting", reportId, report);
-            if (reportId.startsWith("schlacht_")) {
-                levelNr = 1;
-                report.levelCount = 1;
-            } else { // Dungeon
-                levelNr = container.getElementsByName("current_level")[0].value;
-                let navigationBar = container.getElementsByClassName("navigation levels")[0];
-                if (navigationBar) {
-                    report.levelCount = navigationBar.children.length - 1;
-                }
-            }
-            const levelData = this.readKampfbericht(container);
-            report.id = reportId;
-            if (!report.levelDatas) {
-                report.levelDatas = [];
-            }
-            report.levelDatas[levelNr - 1] = levelData;
-            return [levelData, levelNr];
-        }
-
-        static readKampfbericht(container) {
-            var contentTables = container.getElementsByClassName("content_table");
-
-            var roundContentTable; // Suche nach dem Table der die eigentliche Runden enthält
-            {
-                for (var i = 0, l = contentTables.length; i < l; i++) {
-                    var curContentTable = contentTables[i];
-                    if (curContentTable.getElementsByClassName("rep_status_table").length > 0) {
-                        roundContentTable = curContentTable;
-                    }
-                }
-            }
-
-            const areas = Array();
-            var curAreaNr = 0;
-            var curArea = Array();
-            var roundCount = 0;
-            if (roundContentTable) {
-                var roundTRs = roundContentTable.children[0].children;
-                roundCount = roundTRs.length;
-                for (var i = 0, l = roundTRs.length; i < l; i++) {
-                    const neueRunde = new this.Round(i + 1, roundTRs[i]);
-                    if (neueRunde.area !== curAreaNr) {
-                        curArea = {
-                            rounds: Array(),
-                        };
-                        curAreaNr = neueRunde.area;
-                        areas.push(curArea);
-                    }
-                    curArea.rounds.push(neueRunde);
-                }
-            }
-            return {
-                roundCount: roundCount,
-                areas: areas,
-            };
-        }
-
-        static Round = class Round {
-            nr;
-            area;
-            helden;
-
-            actions; // aufgeteilt in vorrunde, regen, initiative, runde
-            monster;
-
-            constructor(nr, roundTD) {
-                if (!ReportParser.currentRound) {
-                    this.area = 1;
-                } else {
-                    if (roundTD.getElementsByClassName("rep_round_headline")[0].innerText === "Runde 1") {
-                        this.area = ReportParser.currentRound.area + 1;
-                    } else {
-                        this.area = ReportParser.currentRound.area;
-                    }
-                }
-                ReportParser.currentRound = this;
-                this.nr = nr;
-
-                var statusTables = roundTD.getElementsByClassName("rep_status_table"); // üblicherweise sollten es immer 2 sein, nur am Ende des Kampfes dann 4
-                if (statusTables.length !== 2 && statusTables.length !== 4) {
-                    console.error("Es wurden keine zwei StatusTable in einer Runde gefunden: " + statusTables.length);
-                }
-                this.helden = ReportParser.GruppenStatus(statusTables[0], true);
-                if (!this.helden) this.emptyRound(); // keine kampfbereiten Helden, keine Aktionen
-                this.monster = ReportParser.GruppenStatus(statusTables[1], false);
-                if (!this.monster) this.emptyRound(); // keine kampfbereiten Gegner, keine Aktionen
-                var initiative = Array();
-                var vorrunde = Array();
-                var regen = Array();
-                var runde = Array();
-                let actionsElement = roundTD.getElementsByTagName("table")[2].querySelectorAll("tr");
-                for (var k = 0, kl = actionsElement.length; k < kl; k++) {
-                    var currentAction = actionsElement[k]; // Round-Action-TR
-                    if (currentAction.children.length === 1) { // <hr>
-                        // nothing to do
-                    } else if (currentAction.children.length === 2) { // Flucht z.B. "ist ein Feigling und flieht wegen Hitpointverlusts." oder "kann nichts tun", oder Regen/Initiative
-                        // currently nothing to do
-                        let td = currentAction.children[1];
-                        if (td.childNodes.length === 1) {
-                            // einfache Beschreibung ohne Einheit-Verlinkung: Der Düsterwolf scheint noch etwas träge, offenbar muss er sich erst noch sammeln.
-                        } else {
-                            if (td.textContent.startsWith("Das Yeti-Kind")) continue; // z.B. Urlaub in den Bergen
-                            let unit = td.childNodes[0];
-                            if (unit.tagName === "SPAN") {
-                                unit = unit.children[0];
-                            }
-                            if (unit.tagName === "A") { // regen oder initiative
-                                let text = td.childNodes[1].textContent;
-                                if (text.includes("wirkt")) { // Initiative
-
-                                } else { // Regen
-
-                                }
-                            } else {
-                                console.error("Aktion nicht zuweisbar ", td);
-                                // if (typeof testEnvironment !== "undefined") window.alert("Aktion nicht zuweisbar! " + td.textContent);
-                            }
-                        }
-                    } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
-                        if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
-                            ReportParser.Action(currentAction, null, currentAction.children[1], currentAction.children[2]).forEach(a => vorrunde.push(a));
-                        } else { // Runden-Aktion
-                            ReportParser.Action(currentAction, currentAction.children[0], currentAction.children[1], currentAction.children[2]).forEach(a => {
-                                runde.push(a)
-                            });
-                        }
-                    }
-                }
-                this.actions = {
-                    initiative: initiative,
-                    vorrunde: vorrunde,
-                    regen: regen,
-                    runde: runde,
-                };
-            }
-
-            emptyRound() {
-                return {
-                    initiative: Array(),
-                    vorrunde: Array(),
-                    regen: Array(),
-                    runde: Array(),
-                };
-            }
-        }
-
-        static GruppenStatus(statusTable, heldenJaNein) {
-            var statusTRs = statusTable.children[0].children
-            if (statusTRs[1].innerText.includes("keine kampfbereiten Gegner")) {
-                return;
-            }
-            var result = Array();
-            //console.log("Status Table", statusTRs);
-            for (var i = 1, l = statusTRs.length; i < l; i++) { // ohne Header
-                var tds = statusTRs[i].children;
-                var srcRef = tds[1].innerHTML; // Mit aktuellen Wirkungen und Index. Helden wenn sie bewusstlos sind haben keinen Link mehr
-                var typeRef; // unabhängig von Wirkung und Index, sofern vorhanden einzig der Link
-                var unitLink = tds[1].getElementsByTagName("a");
-                if (unitLink) unitLink = unitLink[0];
-                if (unitLink) typeRef = unitLink.outerHTML;
-                const unit = {
-                    id: this.getUnitIdFromElement(tds[1].childNodes[0], null, heldenJaNein, true),
-                    stufe: tds[2].innerText.trim(),
-                    position: tds[3].innerText.trim(),
-                    hp: tds[4].innerText.trim(),
-                    mp: tds[5].innerText.trim(),
-                    zustand: tds[6].innerText.trim(),
-                    srcRef: srcRef,
-                    typeRef: typeRef,
-                }
-                if (unit.position !== "") {
-                    result.push(unit);
-                }
-            }
-            return result;
-        }
-
-        static Target(strLine) {
-            var type
-            var wirkung
-            var result
-
-            if (strLine.match(/: Fehlschlag/)) {
-                result = 0;
-            } else if (strLine.match(/: kritischer Erfolg/)) {
-                result = 3;
-            } else if (strLine.match(/: guter Erfolg/)) {
-                result = 2;
-            } else if (strLine.match(/: Erfolg/)) {
-                result = 1;
-            }
-            var pw;
-            if (result > -1) {
-                type = "Angriff";
-                const pwMatch = strLine.match(/(\(|\/)(\d+)(\)|\/)/);
-                if (pwMatch) {
-                    pw = pwMatch[2];
-                } else {
-                    console.log("Keine Parade", strLine);
-                }
-
-            } else {
-                var matching = strLine.match(/\+(\d*) HP/)
-                if (matching) { // Single Target Heal
-                    type = "Heilung";
-                    wirkung = {
-                        what: "HP",
-                        value: matching[1],
-                    }
-                } else {
-
-                }
-            }
-
-            return {
-                type: type,
-                fertigkeit: {
-                    wurf: pw,
-                },
-                wirkung: wirkung, // z.B. bei direkter Heilung
-                result: result, // 0:Fehlschlag, 1:Erfolg, 2: Guter Erfolg, 3: Kritischer Erfolg
-                damage: Array() // Achtung: hier wird auch der Overkill nicht abgezogen. Ist also evtl. mehr Schaden angezeigt als überhaupt HP beim Gegner noch vorhanden wären. Gilt das aber auch beim Heilen!?
-            };
-        }
-
-        static isUnitClass(className) {
-            return className && (className === "rep_hero" || className === "rep_monster" || className === "rep_myhero" || className === "rep_myotherheros");
-        }
-
-        //Einen Lookup ausführen, damit die Unit auch immer alle möglichen Information (z.B. Position) trägt.
-        static unitLookup(unitId) {
-            var lookupUnit = this.unitSearch(unitId, this.currentRound.helden);
-            if (!lookupUnit) {
-                lookupUnit = this.unitSearch(unitId, this.currentRound.monster);
-            }
-            if (!lookupUnit) {
-                console.error("Unit konnte nicht in der aktuellen Runde gefunden werden!", unitId);
-                return {
-                    id: unitId,
-                };
-            }
-            return lookupUnit;
-        }
-
-        static unitSearch(unitId, unitArray) {
-            if (!unitArray) return;
-            for (var i = 0, l = unitArray.length; i < l; i++) {
-                const curUnit = unitArray[i];
-                if (curUnit.id.name === unitId.name && curUnit.id.index === unitId.index) {
-                    return curUnit;
-                } else if (this.unitNameOhneGestalt(curUnit.id.name) === this.unitNameOhneGestalt(unitId.name) && curUnit.id.index === unitId.index) { // evtl. Gestaltwechsel!? z.B. "Dunkles Erwachen"
-                    return curUnit;
-                }
-            }
-        }
-
-        static unitNameOhneGestalt(unitName) {
-            let matches = unitName.match(/\((.*gestalt)\)/);
-            if (matches) {
-                return unitName.replace(" (" + matches[1] + ")", "");
-            }
-            return unitName;
-        }
-
-        //im Target kann auch "sich" stehen, das wird dann entsprechend durch die zusätzliche Angabe "unitId" ersetzt.
-        static getUnitIdFromElement(element, unitId) {
-            if (!element) { // Ereignis
-                return {
-                    name: "? Ereignis",
-                    isHero: false,
-                    isEreignis: true,
-                }
-            }
-            if (!element.tagName) {
-                if (element.innerText === "sich" || element.textContent === "sich") {
-                    return unitId;
-                }
-                return;
-            }
-            if (element.tagName !== "A") {
-                const findElements = element.getElementsByTagName("A");
-                if (findElements.length > 0) {
-                    element = findElements[0];
-                } else {
-                    return;
-                }
-            }
-            var className = element.className;
-            if (!this.isUnitClass(className)) return;
-
-            var unitIndex;
-            var sibling = element.nextSibling;
-            var isHero = element.className !== "rep_monster";
-            if (sibling && sibling.tagName === "SPAN") {
-                unitIndex = sibling.innerText;
-            }
-            return {
-                name: element.innerText,
-                index: unitIndex,
-                isHero: isHero,
-            };
-        }
-
-        static getDamageType(stringLine) {
-            if (stringLine.includes("Hiebschaden"))
-                return "Hieb";
-            else if (stringLine.includes("Schneidschaden"))
-                return "Schneid";
-            else if (stringLine.includes("Stichschaden"))
-                return "Stich";
-            else if (stringLine.includes("Feuer"))
-                return "Feuer";
-            else if (stringLine.includes("Eisschaden"))
-                return "Eis";
-            else if (stringLine.includes("Blitzschaden"))
-                return "Blitz";
-            else if (stringLine.includes("psychologisch"))
-                return "Psychologisch";
-            else if (stringLine.includes("Heiliger Schaden"))
-                return "Heilig";
-            else if (stringLine.includes("Säureschaden"))
-                return "Säure";
-            else if (stringLine.includes("Falle entschärfen"))
-                return "FalleEntschärfen";
-            else if (stringLine.includes("Giftschaden"))
-                return "Gift";
-            else if (stringLine.includes("Manaschaden"))
-                return "Mana";
-            else if (stringLine.includes("Arkaner Schaden"))
-                return "Arkan";
-            console.error("DamageType kann nicht bestimmt werden: " + stringLine);
-            return "???";
-        }
-
-        static Damage(damageLineElement) {
-            var resistenz = 0;
-            let damage;
-            const stringLine = damageLineElement.textContent;
-            var matching = stringLine.match(/^(\d*) \[\+(\d*)\]/);
-            if (matching) {
-                damage = {
-                    value: Number(matching[1]),
-                    ruestung: Number(matching[2]),
-                    resistenz: resistenz,
-                    type: this.getDamageType(stringLine),
-                }
-            } else {
-                matching = stringLine.match(/^(\d*)/);
-                if (matching) {
-                    damage = {
-                        value: Number(matching[1]),
-                        ruestung: 0,
-                        resistenz: resistenz,
-                        type: this.getDamageType(stringLine),
-                    }
-                }
-            }
-            if (!damage) {
-                console.error("Es kann kein Schaden ermittelt werden: " + stringLine);
-                return;
-            }
-            if (damageLineElement.tagName === "SPAN") { // hat Anfälligkeit
-                console.log("Anfälligkeit gefunden " + damageLineElement.onmouseover);
-                const dmgVorher = damageLineElement.onmouseover.toString().match(/verursacht: <b>(\d*)<\/b>/)[1];
-                let dmgNachher = damageLineElement.onmouseover.toString().match(/Anfälligkeit.* <b>(\d*)<\/b>/);
-                if (dmgNachher) {
-                    dmgNachher = dmgNachher[1];
-                } else {
-                    dmgNachher = damageLineElement.onmouseover.toString().match(/Unempfindlichkeit.* <b>(\d*)<\/b>/)[1];
-                    dmgNachher = -Number(dmgNachher);
-                }
-                damage.resistenz = Number(dmgVorher) - Number(dmgNachher) - damage.ruestung;
-            }
-            return damage;
-        }
-
-        static actionParse(actionElement) {
-            const fertigkeit = {};
-            const childNodes = actionElement.childNodes;
-            const items = Array();
-            var unit;
-            const wuerfe = Array();
-            util.forEach(actionElement.childNodes, curNode => {
-                    switch (curNode.tagName) {
-                        case "IMG":
-                            // z.B. Veredelungen => ignore
-                            break;
-                        case "A":
-                            if (curNode.href.includes("/hero/") || curNode.href.includes("/npc/")) {
-                                unit = this.unitLookup(this.getUnitIdFromElement(curNode));
-                            } else if (curNode.href.includes("/skill/")) {
-                                fertigkeit.name = curNode.textContent.trim();
-                                fertigkeit.typeRef = curNode.outerHTML;
-                                fertigkeit.wirkungen = this.getWirkungenFromElement(curNode);
-                            } else if (curNode.href.includes("/item/")) {
-                                items.push({
-                                    name: curNode.textContent.trim(),
-                                    srcRef: curNode.outerHTML,
-                                    wirkungen: this.getWirkungenFromElement(curNode),
-                                });
-                            } else {
-                                console.error("Unbekanntes A-Element in Action!", curNode.textContent, curNode);
-                                throw Error("Unbekanntes A-Element in Action!");
-                            }
-                            break;
-                        case "SPAN":
-                            if (curNode.style.fontSize === "0.65em") {
-                                //unitIdx = curNode.textContent;
-                            } else if (curNode.className === "rep_mana_cost") {
-                                fertigkeit.mp = curNode.textContent.match(/(\d*) MP/)[1];
-                            } else if (curNode.className === "rep_gain") { // z.B. "Dunkles Erwachen"
-                                let mpGain = curNode.textContent.match(/\.(\d*) MP/);
-                                if (mpGain) {
-                                    fertigkeit.mpGain = mpGain[1];
-                                } else {
-                                    let hpGain = curNode.textContent.match(/\.(\d*) HP/);
-                                    if (hpGain) {
-                                        fertigkeit.hpGain = hpGain[1];
-                                    } else {
-                                        error("Rep_Gain kann nicht aufgelöst werden", curNode.textContent);
-                                    }
-                                }
-                            } else if (curNode.className === "rep_loss") { // z.B. "Dunkles Erwachen"
-                                let mpGain = curNode.textContent.match(/\.(\d*) MP/);
-                                if (mpGain) {
-                                    fertigkeit.mpGain = -mpGain[1];
-                                } else {
-                                    let hpGain = curNode.textContent.match(/\.(\d*) HP/);
-                                    if (hpGain) {
-                                        fertigkeit.hpGain = -hpGain[1];
-                                    } else {
-                                        error("Rep_Loss kann nicht aufgelöst werden", curNode.textContent);
-                                    }
-                                }
-                            } else if (curNode.onmouseover && curNode.children[0].tagName === "A") { // Unit-Wrap z.B. für Helfer
-                                unit = this.unitLookup(this.getUnitIdFromElement(curNode.children[0]));
-                            } else {
-                                console.error("Unbekanntes SPAN-Element in Action!", curNode);
-                                throw Error("Unbekanntes SPAN-Element in Action!");
-                            }
-                            break;
-                        case "":
-                        case undefined: {
-                            let text = curNode.textContent.trim();
-                            if (!unit) {
-                                // only flavour text without unit reference
-                                unit = {
-                                    name: "? Ereignis",
-                                    id: {
-                                        name: "? Ereignis",
-                                    },
-                                    isHero: false,
-                                    isEreignis: true,
-                                }
-                                fertigkeit.unit = unit;
-                            }
-                            if (text.length < 2) break; // skip
-
-                            const textArray = text.trim().split("/");
-                            textArray.forEach(curText => {
-                                    curText = curText.trim();
-                                    let wurfMatcher = curText.match(/^(\D*)?(\d+)[\.\)]?$/);
-                                    if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
-                                        fertigkeit.type = "Fernkampf";
-                                    } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
-                                        fertigkeit.type = "Fernkampf";
-                                    } else if (curText.startsWith("Eine Flasche mit billigem Fusel nähert sich euch auf einer wirklich beeindruckenden Bahn. Kopf runter!")) { // "Offene Rechnung"
-                                        fertigkeit.type = "Fernkampf";
-                                        wuerfe.push({
-                                            value: 100, // ??
-                                        })
-                                    } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen") || curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) { // z.B. "Dunkles Erwachen"
-                                        fertigkeit.type = "Nahkampf";
-                                    } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
-                                        || curText.startsWith("aus, sie dörrt Körper und Geist aus und lässt euch geschwächt zurück.") // Goldene Dracheneier
-                                    ) {
-                                        fertigkeit.type = "Naturgewalt";
-                                    } else if (curText.startsWith("Die Lemmingflut hat diesen massiven Felsblock")) { // Reise nach Keras
-                                        fertigkeit.type = "Naturgewalt";
-                                        wuerfe.push({
-                                            value: 100, // >53
-                                        })
-                                    } else if (curText.startsWith("auf sein Ziel und brüllt mit harter Stimme: DU gehörst mir!") || curText.startsWith("deutet mit seiner Waffe auf einen Gegner und brüllt mit harter Stimme: DU gehörst mir!") // "Sagenumwobener Zwergenstieg"
-                                        || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
-                                    ) {
-                                        fertigkeit.type = "Sozial";
-                                        if (curText.startsWith("sind einfach überall!")) {
-                                            wuerfe.push({
-                                                value: 40,
-                                            })
-                                        }
-                                    } else if (curText.startsWith("Ups - da ist wohl jemand untergetaucht und hat")) { // Offene Rechnung
-                                        fertigkeit.type = "Krankheit";
-                                    } else if (curText.startsWith("Oh je, was sind das nun wieder für")) {
-                                        fertigkeit.type = "Sozial";
-                                    } else if (curText.includes("Lass mich ziehen") // Eine Reise nach Keras
-                                        || curText.includes("Was willst du überhaupt von mir?") // Eine Reise nach Keras
-                                    ) {
-                                        fertigkeit.type = "Zauber";
-                                        wuerfe.push({
-                                            value: 0, // ??
-                                        })
-                                    } else if (curText.includes("Der beschwerliche Aufstieg hat eure Stärksten")) { // Eine Reise nach Keras
-                                        fertigkeit.type = "Zauber";
-                                        wuerfe.push({
-                                            value: 1000, // ??
-                                        })
-                                    } else if (curText.startsWith("verhilft dem Rentier zu besondern Fähigkeiten.")) {// Eine Reise nach Keras)
-                                        fertigkeit.type = "Naturgewalt";
-                                        wuerfe.push({
-                                            value: 100, // >17
-                                        })
-                                    } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe")
-                                        || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")
-                                        || curText.includes("Eine Flasche mit warmem Glühwein. Dieses Getränk belebt und hält wohlig warm.") // Reise nach Keras
-                                    ) {
-                                        fertigkeit.type = "Ereignis";
-                                    } else if (curText.startsWith("Mit ungeahnter Wucht lösen sich Teile der schwarzen Substanz von Dnobs Körper und fliegen in alle Richtungen")) { // Herz der Schatten
-                                        fertigkeit.type = "Fernkampf";
-                                    } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")
-                                        || curText.startsWith("Das Rentier geht eine innige Beziehung zu einem Helden ein") // Eine Reise nach Keras
-                                        || curText.startsWith("Das Rentier erhält die innige Beziehung zu einem") // Eine Reise nach Keras
-                                        || curText.includes("Räumt den Stein weg, ihr Narren") // Eine Reise nach Keras
-                                        || curText.startsWith("Hargow braucht offenbar Platz um sich ausreichend um Xeron zu kümmern") // Eine Reise nach Keras
-                                    ) {
-                                        fertigkeit.type = "Wirkung";
-                                    } else if (curText.startsWith("Weitere Menschen schließen sich der Gruppe an")) { // offene Rechnung, Herbeirufung
-                                        fertigkeit.type = "Ereignis";
-                                    }
-                                    if (wurfMatcher) { // wurf
-                                        let wo = wurfMatcher[1];
-                                        if (wo && wo.endsWith(":")) {
-                                            wo = wo.replace(":", "").trim();
-                                        }
-                                        wuerfe.push({
-                                            value: wurfMatcher[2],
-                                            dest: wo,
-                                        })
-                                    } else if (!fertigkeit.type) {
-                                        curText = curText.replace("(", "").replace(")", "").trim();
-                                        switch (curText) {
-                                            case "auf":
-                                            case "":
-                                            case "Das": // z.B. "Urlaub in den Bergen"
-                                            case "Der": // "Sagenumwobener Zwergenstieg"
-                                            case "mit seiner Waffe deutet": // "Sagenumwobener Zwergenstieg"
-                                            case "geht von": // Goldene Dracheneier
-                                            case "Mit seinem": // Goldene Dracheneier
-                                            case "entreißt": // Goldene Dracheneier
-                                                break;
-                                            case "ruft voller Schmerzen um Hilfe...": // z.B. Dungeon "Urlaub in den Bergen"
-                                            case "hält sein Opfer fest gefangen und verursacht tiefe Wunden...": // z.B. Dungeon "Urlaub in den Bergen" (verursacht wohl Schaden)
-                                            case "befindet sich in eurer Gefangenschaft - er wird kontrolliert von:": // z.B. Dungeon "Katz und Maus"
-                                            case "wird getragen von": // z.B. Weißzahnturm Lvl4 wirkt auf 2 Charaktere
-                                            // Debuff: "Den Alchemisten tragen"
-                                            case "wirkt":
-                                                fertigkeit.type = "Wirkung";
-                                                break;
-                                            case "heilt mittels":
-                                                fertigkeit.type = "Heilung";
-                                                break;
-                                            case "greift per Fernkampf an":
-                                                fertigkeit.type = "Fernkampf";
-                                                break;
-                                            case "greift im Nahkampf an":
-                                                fertigkeit.type = "Nahkampf";
-                                                break;
-                                            case "greift magisch an":
-                                                fertigkeit.type = "Zauber";
-                                                break;
-                                            case "greift sozial an":
-                                                fertigkeit.type = "Sozial";
-                                                break;
-                                            case "greift hinterhältig an":
-                                                fertigkeit.type = "Hinterhalt";
-                                                break;
-                                            case "verseucht":
-                                                fertigkeit.type = "Krankheit";
-                                                break;
-                                            case "entschärft":
-                                                fertigkeit.type = "Falle entschärfen";
-                                                break;
-                                            case "wirkt als Naturgewalt auf":
-                                                fertigkeit.type = "Naturgewalt";
-                                                break;
-                                            case "wird ausgelöst auf":
-                                                fertigkeit.type = "Falle";
-                                                break;
-                                            case "erwirkt eine Explosion gegen":
-                                                fertigkeit.type = "Explosion";
-                                                break;
-                                            case "ruft herbei mittels":
-                                                fertigkeit.type = "Herbeirufung";
-                                                break;
-                                            case "verschreckt":
-                                                fertigkeit.type = "Verschrecken";
-                                                break;
-                                            default:
-                                                console.error("Unbekannter Fertigkeits-Typ(1) ", "'" + curText + "'", actionElement);
-                                                throw Error("Unbekannter Fertigkeits-Typ!(1)");
-                                                break;
-                                        }
-                                    }
-                                }
-                            )
-                            ;
-
-                            break;
-                        }
-                        default:
-                            console.error("Unbekannter Tag '" + curNode.tagName + "' Element in Action!", curNode);
-                            throw Error("Unbekannter Tag '" + curNode.tagName + "' Element in Action!");
-                            break;
-                    }
-                }
-            )
-            fertigkeit
-                .items = items;
-
-            if (
-
-                !
-                    fertigkeit
-                        .type
-            ) {
-                switch (fertigkeit
-
-                    .name
-                    ) {
-                    case
-                    "Stinkt gewaltig": // z.B. Manufaktur im verlassenden Tal
-                        fertigkeit.type = "Krankheit";
-                        break;
-                    default:
-                        console.error
-                        (
-                            "Unbekannter Fertigkeits-Typ(2)"
-                            ,
-                            fertigkeit
-                            ,
-                            actionElement
-                        )
-                        ;
-                        fertigkeit
-                            .type = "Unbekannt: " + fertigkeit.name;
-
-                        error(
-                            "Unbekannter Fertigkeits-Typ"
-                            ,
-                            fertigkeit
-                            ,
-                            actionElement
-                        )
-                        ;
-                        break;
-                }
-            }
-            const fertigkeiten = Array();
-            if (wuerfe.length <= 1) {
-                fertigkeit.wurf = wuerfe[0];
-                fertigkeiten.push(fertigkeit);
-            } else {
-                wuerfe.forEach(wurf => {
-                    const temp = util.cloneObject(fertigkeit);
-                    temp.wurf = wurf;
-                    fertigkeiten.push(temp);
-                })
-            }
-            return [fertigkeiten, unit];
-        }
-
-        static Action(actionTR, initiative, action, target) {
-            var actionText = action.innerText;
-            var who;
-            var wurf;
-            var mp;
-            const [fertigkeiten, unit] = this.actionParse(action);
-            // Parse Targets
-            var curTargetUnit
-            var currentTarget
-            var currentLine = Array();
-            var lineNr = 0;
-            var targets = Array();
-
-            function addTarget() {
-                var line = util.arrayMap(currentLine, a => a.textContent).join("");
-                currentTarget = ReportParser.Target(line);
-                currentTarget.unit = curTargetUnit;
-                targets.push(currentTarget);
-            }
-
-            for (var i = 0, l = target.childNodes.length; i < l; i++) {
-                const curElement = target.childNodes[i];
-
-                const unitIdCheck = this.getUnitIdFromElement(curElement, unit.id);
-
-                if (unitIdCheck) {
-                    lineNr = 1;
-                    curTargetUnit = this.unitLookup(unitIdCheck);
-                    currentLine.push(curElement);
-                    currentTarget = null;
-                } else if (lineNr === -1) {
-                    // ignorieren solange bis neue Entität kommt
-                } else if (curElement.tagName === "BR") {
-                    if (lineNr === 1) { // Erste-Zeile beendet wir setzen das Target
-                        addTarget();
-                    }
-                    currentLine = Array()
-                    lineNr++;
-                } else {
-                    if (lineNr > 1) { // Nachfolgende DamageLines direkt auswerten
-                        //console.log("here: "+currentTarget+" "+lineNr+" => "+curElement.textContent);
-                        if (curElement.tagName === "A") { // Schaden an einem Gegenstand
-                            lineNr = -1; // solange ignorieren bis eine neue Entität kommt
-                        } else {
-                            currentTarget.damage.push(ReportParser.Damage(curElement));
-                        }
-                    } else {
-                        currentLine.push(curElement);
-                    }
-                }
-            }
-            if (lineNr === 1) {
-                addTarget();
-            }
-
-            // Action
-            const actions = Array();
-            var myAction = {
-                name: unit.id.name, // nur fürs Testen
-                unit: unit,
-                targets: targets,
-                src: actionTR.outerHTML,
-            };
-            if (fertigkeiten.length === 1) {
-                myAction.fertigkeit = fertigkeiten[0];
-                actions.push(myAction);
-            } else {
-                fertigkeiten.forEach(fertigkeit => {
-                    const temp = util.cloneObject(myAction);
-                    temp.fertigkeit = fertigkeiten[0];
-                    actions.push(temp);
-                });
-            }
-            return actions;
-        }
-
-        static searchWirkungen(parentElement, name) {
-            var result;
-            const hrefs = parentElement.getElementsByTagName("a");
-            for (var i = 0, l = hrefs.length; i < l; i++) {
-                const href = hrefs[i];
-                if (href.innerText === name) {
-                    if (href.onmouseover) {
-                        result = this.getWirkungenFromElement(href);
-                    }
-                    break;
-                }
-            }
-            return result;
-        }
-
-        /**
-         * Die Dauer wird nicht angezeigt, diese müsste durch die Boni in Verbindung mit der/des angewandten Fertigkeit/Gegenstand aufgelöst werden
-         * @param href Fertigkeit oder Gegenstands-Element
-         * @returns {any[]}
-         */
-        static getWirkungenFromElement(href) {
-            let result;
-            if (href.onmouseover) {
-                result = href.onmouseover.toString();
-                result = result.substring(result.indexOf("'") + 1, result.lastIndexOf("'"));
-                result = this.getWirkungenFromMouseOverString(result);
-            }
-            return result;
-        }
-
-        static getWirkungenFromMouseOverString(htmlString) {
-            const elem = document.createElement("div");
-            elem.innerHTML = htmlString;
-            const wirkungen = Array();
-            var currentMode = 0;
-            var name;
-            var wirkung = Array();
-            var wann;
-
-            function addWirkung() {
-                if (!name.startsWith("Dies ist ein")) {
-                    wirkungen.push({
-                        name: name,
-                        wirkung: wirkung.join(""),
-                        wann: wann,
-                    });
-                }
-            }
-
-            for (var i = 0, l = elem.childNodes.length; i < l; i++) {
-                const curNode = elem.childNodes[i];
-                if (currentMode === 0) {
-                    name = curNode.textContent;
-                    currentMode = 1;
-                } else if (curNode.tagName === "BR") {
-                    addWirkung();
-                    currentMode = 0;
-                } else if (curNode.textContent === " ") {
-                    // ignorieren
-                } else {
-                    const curText = curNode.textContent;
-                    if (curText.includes("Runde")) {
-                        wann = curText;
-                    } else {
-                        wirkung.push(curText);
-                    }
-                    currentMode++;
-                }
-            }
-            if (currentMode > 1) {
-                addWirkung();
-            }
-            //console.log(htmlString, elem.childNodes.length, wirkungen);
-
-            return wirkungen;
-        }
     }
 
     class Viewer {
@@ -2420,16 +1645,17 @@
             return result;
         }
 
-        static getReportId() {
-            var reportId = document.getElementsByName("report_id[0]")[0];
-            if (reportId) {
-                return "dungeon_" + reportId.value;
-            }
-            reportId = document.getElementsByName("report")[0];
-            if (reportId) {
-                return "schlacht_" + reportId.value;
-            }
+    }
+
+    class StatReport {
+        static async load(reportId) {
+            return await MyStorage.getReportStatsDB().getValue(reportId);
         }
+
+        static async save(report) {
+            await MyStorage.getReportStatsDB().setValue(report);
+        }
+
     }
 
     class MyStorage {
@@ -2442,7 +1668,6 @@
             }
             let resultSetValue = objStore.setValue;
             objStore.setValue = async function (dbObject) {
-                dbObject.ts = new Date().getTime();
                 await resultSetValue.call(objStore, dbObject);
             }
             return objStore;
@@ -2458,37 +1683,26 @@
         }
 
         static async validateAllReports() {
-            //console.log("validateAllReports");
             const reportDB = this.getReportStatsDB()
             let compareDate = new Date();
             compareDate.setDate(compareDate.getDate() - 8); // x-Tage lang vorhalten
+            let spaceSum = 0;
             for (const report of await reportDB.getAll()) {
                 if (!report.ts || report.ts < compareDate.getTime()) {
                     await reportDB.deleteValue(report.reportId);
+                } else {
+                    const mySpace = JSON.stringify(report).length;
+                    if (mySpace > 20000000)
+                        console.log("ReportStats: ", report.reportId, (Math.round(10 * mySpace / 1024 / 1025) / 10 + " MB"), report);
+                    spaceSum += mySpace
                 }
             }
-        }
-
-        static async recreateSourcesMeta() {
-            for (const report of await this.reportSourcesMeta.getAll()) {
-                await this.reportSourcesMeta.deleteValue(report.reportId);
-            }
-
-            for (const report of await this.reportSources.getAll()) {
-                await this.reportSourcesMeta.setValue(this.getMetaFor(report));
-            }
+            console.log("ReportStats-Space: " + (Math.round(10 * spaceSum / 1024 / 1025) / 10 + " MB"));
         }
 
     }
 
     class util {
-        static arrayMap(list, fn) {
-            var result = Array();
-            for (var i = 0, l = list.length; i < l; i++) {
-                result.push(fn(list[i]));
-            }
-            return result;
-        }
 
         static addNode(parent, element, index) {
             if (!(index > -1) || index >= parent.children.length) parent.append(element);
@@ -2519,10 +1733,6 @@
             var div = document.createElement('div');
             div.innerHTML = htmlString.trim();
             return div.firstChild;
-        }
-
-        static cloneObject(obj) {
-            return JSON.parse(JSON.stringify(obj));
         }
 
         static cloneElement(elem) {
@@ -2638,7 +1848,7 @@
             collapsible.onclick = function () {
                 collapsed = !collapsed;
                 updateCollapserSrc();
-                Mod.runSave(function () {
+                Mod.runSafe(function () {
                     fnCallback(collapsed);
                 })
             }

@@ -19,14 +19,18 @@
 (function () {
     'use strict';
 
-    const Storages = demawiRepository.import("Storages");
+    const _Storages = demawiRepository.import("Storages");
     const _WoD = demawiRepository.import("WoD");
+    const _WoDStorages = demawiRepository.import("WoDStorages");
+    const _WoDParser = demawiRepository.import("WoDParser");
     const _util = demawiRepository.import("util");
     const _UI = demawiRepository.import("UI");
     const _File = demawiRepository.import("File");
+    const _Libs = demawiRepository.import("Libs");
 
     class Mod {
         static dbname = "wodDB";
+        static modname = "KampfberichtArchiv";
 
         static async startMod() {
             console.log("StartMod: KampfberichtArchiv!");
@@ -110,23 +114,26 @@
                 title.appendChild(warning);
             }
 
-            const reportData = WoD.getFullReportBaseData();
+            const reportData = _WoD.getFullReportBaseData();
             let reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
             if (!reportMeta.schlacht) reportMeta.schlacht = reportData.schlacht; // kommt evtl. nachträglich erst herein
+            if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe;
             let reportSource = await MyStorage.getSourceReport(reportData.reportId) || {reportId: reportData.reportId};
             console.log("Current Report ", reportData, reportMeta, reportSource);
 
             if (title.textContent.trim().startsWith("Kampfstatistik")) {
                 reportSource.statistik = util.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.statistik = true;
-                reportMeta.success = this.retrieveSuccessInformation(document, reportMeta.success);
+                reportMeta.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(document, reportMeta.success);
             } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
                 reportSource.gegenstaende = util.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.gegenstaende = true;
+                const memberList = _WoDParser.parseKampfberichtGegenstaende();
+                const reportExt = await MyStorage.putToExt(reportSource.reportId, memberList);
+                await MyStorage.submitLoot(reportMeta, reportExt);
             } else if (title.textContent.trim().startsWith("Kampfbericht")) {
-                const form = document.getElementsByName("the_form")[0];
-                const levelNr = WoD.isSchlacht() ? 1 : form.current_level.value;
-
+                const form = _WoD.getMainForm();
+                const levelNr = _WoD.isSchlacht() ? 1 : form.current_level.value;
                 let navigationLevels = document.getElementsByClassName("navigation levels")[0];
                 if (navigationLevels) {
                     let successReport = reportMeta.success;
@@ -134,29 +141,29 @@
                         successReport = {};
                         reportMeta.success = successReport;
                     }
-                    successReport[1] = (navigationLevels.children.length - 1);
+                    if (!reportMeta.success.levels) reportMeta.success.levels = {};
+                    reportMeta.success.levels[1] = navigationLevels.children.length - 1;
                 }
                 if (!reportSource.levels) reportSource.levels = [];
                 if (!reportMeta.levels) reportMeta.levels = [];
                 reportSource.levels[levelNr - 1] = util.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.levels[levelNr - 1] = true;
 
-                if (WoD.isSchlacht()) {
+                const heldenListe = _WoDParser.getHeldenstufenOnKampfbericht();
+                if (heldenListe) {
+                    const reportExt = await MyStorage.putToExt(reportMeta.reportId, heldenListe);
+                    await MyStorage.submitLoot(reportMeta, reportExt);
+                }
+
+                if (_WoD.isSchlacht()) {
                     const gewonnen = document.getElementsByClassName("rep_room_end")[0].textContent === "Die Angreifer haben gesiegt!";
                     let success = reportMeta.success || {};
                     success.rooms = [gewonnen ? 1 : 0, 1];
                     success.levels = [gewonnen ? 1 : 0, 1];
                     reportMeta.success = success;
 
-                    const allHeadlines = document.querySelectorAll(".rep_status_headline");
-                    let lastHeroHeadline;
-                    for (const curHeadline of allHeadlines) {
-                        if (curHeadline.textContent === "Angreifer:") {
-                            lastHeroHeadline = curHeadline;
-                        }
-                    }
-                    const lastHeroTable = lastHeroHeadline.nextElementSibling;
-                    const heroTags = lastHeroTable.querySelectorAll(".rep_hero, .rep_myhero, .rep_myotherheros");
+                    const lastActionHeroes = _WoDParser.getLastHeroTableOnKampfbericht();
+                    const heroTags = lastActionHeroes.querySelectorAll(".rep_hero, .rep_myhero, .rep_myotherheros");
                     let countHeroes = 0;
                     let countHeroesSuccess = 0;
                     for (const heroTag of heroTags) {
@@ -168,72 +175,23 @@
                     success.members = [countHeroesSuccess, countHeroes];
                 }
             }
-
-            const space = _util.getSpace(reportSource);
-            reportMeta.space = space;
+            reportMeta.space = _util.getSpace(reportSource);
             await MyStorage.reportArchive.setValue(reportMeta);
             await MyStorage.setSourceReport(reportSource);
+
+            if (Report.isVollstaendig(reportMeta)) await AutoFavorit.checkAutoFavoritenFor(reportMeta);
         }
 
-        static retrieveSuccessInformation(doc, success) {
-            const title = doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/)[1].trim();
-            const tables = doc.querySelectorAll(".content_table");
-            const table = tables[tables.length - 1];
-            let expElements = table.querySelector("tr:nth-child(2)").querySelectorAll("td");
-            const groupSize = expElements.length - 2;
-            if (WoD.isSchlacht()) {
-                success = success || {};
-                if (!success.levels) success.levels = [1, 1];
-                if (!success.members) success.members = ["?", groupSize];
-                return success;
-            }
-            let levelElements = table.querySelector("tr:nth-child(5)").querySelectorAll("td");
-            let roomElements = table.querySelector("tr:nth-child(6)").querySelectorAll("td");
-            let finishedRooms = 0;
-            let fullRooms = 0;
-            let fullSuccessMembers = 0;
-            let maxSuccessLevel = 0;
-            let maxLevel;
-
-            const getNumbers = function (maxSuccessLevel, finishedRooms) {
-                if (title === "Offene Rechnung") {
-                    if (maxSuccessLevel > 0) {
-                        maxSuccessLevel++;
-                        finishedRooms++;
-                    }
-                }
-                return [maxSuccessLevel, finishedRooms];
-            }
-
-            for (let i = 1, l = levelElements.length - 1; i < l; i++) {
-                const roomsElement = roomElements[i];
-                const roomSplit = roomsElement.textContent.split("/");
-                fullRooms += Number(roomSplit[1]);
-                const levelElement = levelElements[i];
-                const levelSplit = levelElement.textContent.split("/");
-
-                let curFinishedRoom = Number(roomSplit[0]);
-                let curSuccessLevel = Number(levelSplit[0]);
-                [curFinishedRoom, curSuccessLevel] = getNumbers(curFinishedRoom, curSuccessLevel);
-                if (curSuccessLevel > maxSuccessLevel) maxSuccessLevel = curSuccessLevel;
-                if (!maxLevel) maxLevel = Number(levelSplit[1]);
-                if (curSuccessLevel >= maxLevel) fullSuccessMembers++;
-
-                finishedRooms += curFinishedRoom;
-            }
-
-            return {
-                levels: [maxSuccessLevel, maxLevel],
-                rooms: [finishedRooms, fullRooms],
-                members: [fullSuccessMembers, groupSize],
-            }
-        }
     }
 
-    class SearchQuery {
+    class FilterQuery {
+        static FAVORIT_MANUELL = "Manuell";
+        static FAVORIT_AUTO_GROUP = "Auto (Gruppe)";
+        static FAVORIT_AUTO_ALL = "Auto (Alle)";
+
         dateMin;
         dateMax;
-        nurFavoriten = false;
+        nurFavoriten = [];
         typeSelection = [];
         worldSelection;
         groupSelection;
@@ -253,7 +211,9 @@
         static wodContent; // Kampfbericht-Inhalt
         static anchor; // hier wird der SeitenInhalt eingebettet
         static title;
-
+        static COLOR_GREEN = "rgb(62, 156, 62)";
+        static COLOR_RED = "rgb(203, 47, 47)";
+        static COLOR_YELLOW = "rgb(194, 194, 41)";
 
         static async recreateReporting() {
             console.log("recreateReporting...");
@@ -262,7 +222,7 @@
                 await MyStorage.reportArchive.deleteValue(report.reportId);
             }
 
-            for (const report of await MyStorage.reportSourcesMeta.getAll()) {
+            for (const report of await MyStorage.reportSourcesMeta.parse()) {
                 await MyStorage.reportArchive.setValue(report);
             }
             console.log("recreateReporting finished!");
@@ -271,7 +231,7 @@
         static async migrate() {
             console.log("Start migration");
 
-            await Maintenance.checkAllAutoFavoriten();
+            await AutoFavorit.checkAutoFavoriten();
 
             if (false) {
                 for (const oldReportId of await MyStorage.reportArchive.getAllKeys()) {
@@ -299,6 +259,7 @@
                 delete report.locVersion;
                 delete report.locVersionGuess;
                 await Report.getVersion(report);
+                await MyStorage.reportArchive.setValue(report);
             }
             for (const report of await MyStorage.reportArchive.getAll()) {
                 delete report.locVersionGuess;
@@ -307,18 +268,83 @@
             console.log("resyncVersions finished!");
         }
 
+        static async recallVersions() {
+            console.log("recallVersions...");
+            for (const report of await MyStorage.reportArchive.getAll()) {
+                const result = await Report.getVersion(report);
+            }
+            console.log("recallVersions finished!");
+        }
+
+        static async checkMaintenance() {
+            const settings = await Settings.get();
+
+            // Zuerst Auto-Favoriten erst dann Löschen
+            if (settings.updateAutoFavoritAll) {
+                await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL);
+                delete settings.updateAutoFavoritAll;
+                await Settings.save();
+            }
+            if (settings.updateAutoFavoritAllSeason) {
+                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL_SEASON);
+                delete settings.updateAutoFavoritAllSeason;
+                await Settings.save();
+            }
+            if (settings.updateAutoFavoritGroup) {
+                await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP);
+                delete settings.updateAutoFavoritGroup;
+                await Settings.save();
+            }
+            if (settings.updateAutoFavoritGroupSeason) {
+                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP_SEASON);
+                delete settings.updateAutoFavoritGroupSeason;
+                await Settings.save();
+            }
+            if (settings.autoLoeschen && !settings.autoLoeschenDate || new Date(settings.autoLoeschenDate) < new Date().setDate(new Date().getDate() - 1)) {
+                console.log("Auto Löschen wird ausgeführt!");
+                settings.autoLoeschenDate = new Date().getTime();
+                await Settings.save();
+            }
+        }
+
+        static async rewriteExt() {
+            for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
+                if (reportSource.gegenstaende) {
+                    const doc = _util.getDocumentFor(reportSource.gegenstaende);
+                    const memberList = _WoDParser.parseKampfberichtGegenstaende(doc);
+                    await MyStorage.putToExt(reportSource.reportId, memberList);
+                }
+                if (reportSource.levels && reportSource.levels[0]) {
+                    const doc = _util.getDocumentFor(reportSource.levels[0]);
+                    const helden = _WoDParser.getHeldenstufenOnKampfbericht(doc);
+                    if (helden) await MyStorage.putToExt(reportSource.reportId, helden);
+                }
+            }
+        }
+
+        static async syncReportExtToItemLoot() {
+            for (const reportExt of await MyStorage.reportArchiveExt.getAll()) {
+                const report = await MyStorage.reportArchive.getValue(reportExt.reportId);
+                await MyStorage.submitLoot(report, reportExt);
+            }
+        }
+
         static async onKampfberichteSeite() {
-            //await Maintenance.recalculateSpace();
+            //await MyStorage.indexedDb.cloneTo("wodDB_Backup3");
+            // await this.rewriteExt();
+            //await MyStorage.indexedDb.deleteObjectStore("items");
+            // await this.resyncVersions();
+            // await AutoFavorit.checkAutoFavoriten();
+            // await Maintenance.recalculateSpace();
             // await Maintenance.rewriteSourceFoundingsToMeta();
             // await Maintenance.syncCheck();
-            await this.resyncVersions();
-            await Maintenance.checkAllAutoFavoriten();
+            // await this.recallVersions();
             // await this.syncCheck();
             // this.migrate(); return;
             // this.recreateReporting(); return;
             // MyStorage.reportRealSources.cloneTo(MyStorage.reportArchiveSources); return;
-            //MyStorage.indexedDb.cloneTo("wodDB"); return;
 
+            await this.checkMaintenance();
             this.title = document.getElementsByTagName("h1")[0];
             const wodContent = document.getElementsByClassName("content_table")[0];
             this.anchor = document.createElement("div");
@@ -343,6 +369,7 @@
                 await MainPage.showStatistics();
                 thisObject.title.appendChild(thisObject.wodContentButton);
                 thisObject.title.appendChild(thisObject.archivButton);
+                thisObject.title.appendChild(thisObject.settingButton);
             });
             this.statisticsButton.title = "Statistik anzeigen";
             this.wodContentButton = _UI.createButton(" ↩", async function () {
@@ -350,6 +377,7 @@
                 await MainPage.showWodOverview();
                 thisObject.title.appendChild(thisObject.archivButton);
                 thisObject.title.appendChild(thisObject.statisticsButton);
+                //thisObject.title.appendChild(thisObject.settingButton);
             });
             this.wodContentButton.title = "Zurück zu den Kampfberichten";
             this.settingButton = _UI.createButton(" ⚙", async function () {
@@ -367,9 +395,11 @@
 
             thisObject.title.appendChild(thisObject.archivButton);
             thisObject.title.appendChild(thisObject.statisticsButton);
+            //thisObject.title.appendChild(thisObject.settingButton);
 
+            ArchivSearch.preInit();
             await this.completeDungeonInformations(false, this.wodContent);
-            _UI.useJQueryUI().then(a => ArchivSearch.loadArchivView()); // preload
+            _Libs.useJQueryUI().then(a => ArchivSearch.loadArchivView()); // preload
         }
 
         static async showWodOverview() {
@@ -414,9 +444,9 @@
                 }
             }
             statTable.append(_UI.createContentTable([
-                ["Anzahl Berichte", await MyStorage.reportArchive.count()],
-                ["Anzahl Datensätze", await MyStorage.reportArchiveSources.count()],
-                ["Belegter Speicher", _util.fromBytesToMB(memorySpace)],
+                ["Anzahl Meta-Daten", await MyStorage.reportArchive.count()],
+                ["Anzahl Quell-Berichte", await MyStorage.reportArchiveSources.count()],
+                ["Belegter Speicher durch Quell-Berichte", _util.fromBytesToMB(memorySpace)],
             ]));
 
             const dungeonTableModell = [];
@@ -430,9 +460,9 @@
 
         static async showSettings() {
             this.anchor.removeChild(this.anchor.children[0]);
-            const settingTable = document.createElement("div");
-            this.anchor.append(settingTable);
+            this.anchor.append(await SettingsPage.create()); // wird jedes Mal neu erstellt
         }
+
 
         /**
          * Erweitert den Dungeon-Table um eine weitere Spalte und liefert die Informationen welcher Content bereits aufgerufen wurde.
@@ -443,7 +473,7 @@
             const table = mainNode.classList.contains("content_table") ? mainNode : mainNode.getElementsByClassName("content_table")[0];
             const tbody = table.children[0];
             const ueberschriftArchiv = document.createElement("th");
-            ueberschriftArchiv.innerHTML = "Archiviert (fehlend)";
+            ueberschriftArchiv.innerHTML = "Archiv";
             ueberschriftArchiv.style.width = "40px";
             const ueberschriftSpeicher = document.createElement("th");
             ueberschriftSpeicher.innerHTML = "Speicher";
@@ -498,11 +528,23 @@
                     }
                     await MyStorage.reportArchive.setValue(reportMeta);
                 }
+                // console.log("Report: ", new Date(reportMeta.ts), reportMeta);
+
+                const getTitle = async function (report) {
+                    let result = report.title;
+                    if (await Report.hasMoreThanOneVersion(reportMeta)) {
+                        const versionNr = await Report.getVersion(reportMeta);
+                        if (versionNr) result += " (v" + versionNr + ")";
+                        else result += " (v?)";
+                    }
+                    return result;
+                }
                 if (await Report.hasMoreThanOneVersion(reportMeta)) {
                     const nameTD = curTR.children[1];
-                    const versionNr = await Report.getVersion(reportMeta);
-                    if (versionNr) nameTD.innerHTML += " (Version " + versionNr + ")";
-                    else nameTD.innerHTML += " (Version ?)";
+                    const title = await getTitle(reportMeta);
+                    if (nameTD.textContent !== title) {
+                        nameTD.innerHTML = title;
+                    }
                 }
 
                 const archiviertTD = document.createElement("td");
@@ -519,6 +561,7 @@
                 archiviertAktionenTD.style.fontSize = "18px";
                 archiviertAktionenTD.style.whiteSpace = "nowrap";
                 if (hatDatensaetze) {
+                    let updateLoeschenButton;
                     if (isArchiv) {
                         const updateFavorit = function (curReportMeta) {
                             const istFavorit = curReportMeta.fav;
@@ -535,6 +578,7 @@
                             curReportMeta.fav = !curReportMeta.fav;
                             updateFavorit(curReportMeta);
                             await MyStorage.reportArchive.setValue(curReportMeta);
+                            await updateLoeschenButton(curReportMeta);
                         });
                         updateFavorit(reportMeta);
                         favoritButton.style.position = "relative";
@@ -546,7 +590,6 @@
 
                     if (isArchiv) {
                         const saveButton = _UI.createButton("💾", async function () {
-                            console.log("saveButton clicked");
                             await util.htmlExportFullReportAsZip(reportId);
                         });
                         saveButton.style.position = "relative";
@@ -557,22 +600,39 @@
                     }
 
                     if (isArchiv) {
-                        const deleteButton = _UI.createButton("🌋", function () {
+                        const reportToString = async function (report) {
+                            return "- " + await getTitle(report) + "\n        [" + report.gruppe + "; " + _util.formatDateAndTime(new Date(report.ts)) + "]";
+                        }
+                        const deleteButton = _UI.createButton("🌋", async function () {
+                            const confirmation = confirm("Es wird folgender Datensatz gelöscht: \n" + await reportToString(reportMeta));
+                            if (confirmation) {
+                                await Report.deleteSources(reportMeta.reportId);
+                                await ArchivSearch.updateSearch();
+                            }
                         });
                         deleteButton.style.position = "relative";
                         deleteButton.style.top = "-2px";
                         deleteButton.style.fontSize = null;
-                        deleteButton.title = "Löschen der Berichte. Die Meta-Daten bleiben erhalten."; // was für Daten? auch Meta-Daten? oder nur Sources?
+                        deleteButton.title = "Löschen der Quell-Berichte. Die ermittelten Meta-Daten bleiben erhalten."; // was für Daten? auch Meta-Daten? oder nur Sources?
                         archiviertAktionenTD.append(deleteButton);
+                        updateLoeschenButton = async function (curReportMeta) {
+                            curReportMeta = curReportMeta || await MyStorage.reportArchive.getValue(reportId);
+                            const isBlocked = curReportMeta.fav || (curReportMeta.favAuto && curReportMeta.favAuto.length > 0);
+                            if (isBlocked) {
+                                deleteButton.style.visibility = "hidden";
+                            } else {
+                                deleteButton.style.visibility = "";
+                            }
+                            curReportMeta.fav = !curReportMeta.fav;
+                        }
+                        await updateLoeschenButton(reportMeta);
                     }
                 }
-                const colorGreen = "rgb(62, 156, 62)";
-                const colorRed = "rgb(203, 47, 47)";
-                const colorYellow = "rgb(194, 194, 41)";
+
                 if (!hatDatensaetze) {
-                    archiviertTD.style.backgroundColor = colorRed;
-                    archiviertAktionenTD.style.backgroundColor = colorRed;
-                    archiviertSpeicherTD.style.backgroundColor = colorRed;
+                    archiviertTD.style.backgroundColor = MainPage.COLOR_RED;
+                    archiviertAktionenTD.style.backgroundColor = MainPage.COLOR_RED;
+                    archiviertSpeicherTD.style.backgroundColor = MainPage.COLOR_RED;
                     archiviertTD.innerHTML += "<span style='white-space: nowrap'>Fehlt komplett</span>";
                 } else {
                     if (reportMeta.space) {
@@ -580,22 +640,26 @@
                     }
                     const fehlend = Report.getMissingReportSites(reportMeta);
                     if (fehlend.length === 0) {
-                        archiviertTD.style.backgroundColor = colorGreen;
-                        archiviertSpeicherTD.style.backgroundColor = colorGreen;
-                        archiviertAktionenTD.style.backgroundColor = colorGreen;
-                        archiviertTD.innerHTML += "Komplett";
+                        archiviertTD.style.backgroundColor = MainPage.COLOR_GREEN;
+                        archiviertSpeicherTD.style.backgroundColor = MainPage.COLOR_GREEN;
+                        archiviertAktionenTD.style.backgroundColor = MainPage.COLOR_GREEN;
+                        archiviertTD.innerHTML += "Komplett ";
                         archiviertTD.style.whiteSpace = "nowrap";
                         archiviertTD.style.position = "relative";
-                        if (reportMeta.favAuto) {
-                            const favoritAuto = document.createElement("span");
-                            favoritAuto.innerHTML = " ★";
-                            favoritAuto.style.color = "lightblue";
-                            archiviertTD.append(favoritAuto);
+                        for (const curTag of [AutoFavorit.TAG_ALL, AutoFavorit.TAG_GROUP, AutoFavorit.TAG_ALL_SEASON, AutoFavorit.TAG_GROUP_SEASON]) {
+                            if (reportMeta.favAuto && reportMeta.favAuto.includes(curTag)) {
+                                const favoritAuto = document.createElement("span");
+                                favoritAuto.innerHTML = "★";
+                                favoritAuto.title = AutoFavorit.TAG_DESC[curTag];
+                                favoritAuto.style.cursor = "default";
+                                favoritAuto.style.color = AutoFavorit.TAG_COLORS[curTag];
+                                archiviertTD.append(favoritAuto);
+                            }
                         }
                     } else {
-                        archiviertTD.style.backgroundColor = colorYellow;
-                        archiviertSpeicherTD.style.backgroundColor = colorYellow;
-                        archiviertAktionenTD.style.backgroundColor = colorYellow;
+                        archiviertTD.style.backgroundColor = MainPage.COLOR_YELLOW;
+                        archiviertSpeicherTD.style.backgroundColor = MainPage.COLOR_YELLOW;
+                        archiviertAktionenTD.style.backgroundColor = MainPage.COLOR_YELLOW;
                         archiviertTD.innerHTML += "<span style='white-space: nowrap'>" + fehlend.join(" ") + "</span>";
                     }
                 }
@@ -613,27 +677,29 @@
                 if (reportMeta && reportMeta.space) {
                     space += reportMeta.space;
                 }
-                if (reportMeta && reportMeta.success) {
+                if (reportMeta && reportMeta.success && reportMeta.success.levels) {
                     const members = reportMeta.success.members;
                     const rooms = reportMeta.success.rooms;
                     const levels = reportMeta.success.levels;
                     if (members) {
                         if (members[0] === members[1]) {
-                            curTR.style.backgroundColor = colorGreen;
+                            curTR.style.backgroundColor = MainPage.COLOR_GREEN;
                             successWin++;
                         } else if (members[0] > 0) {
-                            curTR.style.backgroundColor = colorYellow;
+                            curTR.style.backgroundColor = MainPage.COLOR_YELLOW;
                             successTie++;
                         } else {
-                            curTR.style.backgroundColor = colorRed;
+                            curTR.style.backgroundColor = MainPage.COLOR_RED;
                             successLose++;
                         }
                     } else if (reportMeta.success.levels) {
-                        if (levels[0] !== levels[1]) {
-                            curTR.style.backgroundColor = colorRed;
-                            successLose++;
-                        } else {
-                            curTR.style.backgroundColor = "lightgreen";
+                        if (levels[0] > -1) {
+                            if (levels[0] !== levels[1]) {
+                                curTR.style.backgroundColor = MainPage.COLOR_RED;
+                                successLose++;
+                            } else {
+                                curTR.style.backgroundColor = "lightgreen";
+                            }
                         }
                     }
                     if (rooms) {
@@ -649,7 +715,7 @@
                         zielTD.innerHTML = "?";
                         fortschrittTD.innerHTML = "?";
                     }
-                    erfolgTD.innerHTML = levels[0] + "/" + levels[1];
+                    erfolgTD.innerHTML = (levels[0] > -1 ? levels[0] : "?") + "/" + levels[1];
                 }
                 curTR.append(erfolgTD);
                 curTR.append(zielTD);
@@ -675,6 +741,163 @@
 
     }
 
+    class SettingsPage {
+
+        static async create() {
+            const settings = await Settings.get(true);
+            const settingTable = document.createElement("div");
+            await this.createAutoFavorit(settingTable, settings);
+            await this.createLoeschautomatik(settingTable, settings);
+            return settingTable;
+        }
+
+        static addHeader(settingTable, ueberschriftTxt, descTxt, infoTxt) {
+            const ueberschrift = document.createElement("h2");
+            ueberschrift.style.fontStyle = "italic";
+            ueberschrift.style.textDecoration = "underline";
+            ueberschrift.style.marginBottom = "2px";
+            ueberschrift.innerHTML = ueberschriftTxt;
+            if (infoTxt) {
+                ueberschrift.innerHTML += " 🛈";
+                ueberschrift.title = infoTxt;
+            }
+            settingTable.append(ueberschrift);
+            const description = document.createElement("div");
+            description.innerHTML = descTxt.replaceAll("\n", "<br>");
+            description.style.fontStyle = "italic";
+            description.style.fontSize = "12px";
+            description.style.marginBottom = "10px";
+            settingTable.append(description);
+        }
+
+        static async createLoeschautomatik(settingTable, settings) {
+            this.addHeader(settingTable, "Löschautomatik", "Es werden standardmäßig nur die Quell-Berichte und nicht die ermittelten Meta-Daten gelöscht. Die Löschung wird einmal täglich beim Aufrufen der 'Kampfberichte'-Seite durchgeführt.");
+
+            const tableContent = [];
+
+            const autoLoeschenTageLabel = document.createElement("span");
+            autoLoeschenTageLabel.innerHTML = "Anzahl Tage:";
+            const autoLoeschenTage = this.createTextBox(() => {
+                    return settings.autoLoeschenTage || 14;
+                },
+                async function (value) {
+                    try {
+                        value = Math.round(Number(value));
+                    } catch (e) {
+                    }
+                    settings.autoLoeschenTage = value;
+                    await Settings.save();
+                });
+            autoLoeschenTage.size = 4;
+
+            let updateVisibility;
+            const autoLoeschen = this.createCheckBox(() => settings.autoLoeschen,
+                async function (value) {
+                    settings.autoLoeschen = value;
+                    if (!value) {
+                        delete settings.autoLoeschenDate;
+                    }
+                    await Settings.save();
+                    updateVisibility();
+                });
+            updateVisibility = async function () {
+                if (autoLoeschen.checked) {
+                    autoLoeschenTageLabel.style.display = "";
+                    autoLoeschenTage.style.display = "";
+                } else {
+                    autoLoeschenTageLabel.style.display = "none";
+                    autoLoeschenTage.style.display = "none";
+                }
+            }
+            await updateVisibility();
+            tableContent.push(["Automatisches Löschen", autoLoeschen]);
+            tableContent.push([autoLoeschenTageLabel, autoLoeschenTage]);
+
+            const result = _UI.createTable(tableContent)
+            result.style.backgroundColor = MainPage.COLOR_GREEN;
+            settingTable.append(result);
+        }
+
+        static async createAutoFavorit(settingTable, settings) {
+            this.addHeader(settingTable, "Auto-Favorit", "Durch das Setzen eines Datensatzes als Favorit, wird dieser Datensatz vom Löschen ausgenommen. Die Änderung tritt beim nächsten Aufruf der 'Kampfberichte'-Seite in Kraft.", "Auswahlkriterien sind pro Dungeonversion: \n1. Größere Anzahl an Mitglieder die das Ziel erreicht haben\n2. Größere Anzahl erreichter Level\n3. Größere Anzahl an erfolgreichen Räumen\n4. Der Datensatz mit dem neueren Datum");
+
+            const tableContent = [];
+
+            const autoLoeschenFavoritLabelAll = document.createElement("span");
+            autoLoeschenFavoritLabelAll.innerHTML = "Auto-Favoriten <b>gruppenunabhängig</b> markieren:";
+            autoLoeschenFavoritLabelAll.title = "Unabhängig von einer Gruppe wird jeweils ein Dungeon markiert.";
+            console.log("settings.autoFavoritAll", settings.autoFavoritAll);
+            const autoLoeschenFavoritAll = this.createCheckBox(() => settings.autoFavoritAll,
+                async function (value) {
+                    settings.autoFavoritAll = value;
+                    settings.updateAutoFavoritAll = true;
+                    await Settings.save();
+                });
+            autoLoeschenFavoritAll.title = "Es wird generell nur je ein Dungeon markiert.";
+            const autoLoeschenFavoritAllSeason = this.createCheckBox(() => settings.autoFavoritAllSeason,
+                async function (value) {
+                    settings.autoFavoritAllSeason = value;
+                    settings.updateAutoFavoritAllSeason = true;
+                    await Settings.save();
+                });
+            autoLoeschenFavoritAllSeason.title = "Pro Saison wird genau je ein Dungeon markiert.";
+
+            const autoLoeschenFavoritLabelGroup = document.createElement("span");
+            autoLoeschenFavoritLabelGroup.innerHTML = "Auto-Favoriten <b>pro Gruppe</b> markieren:";
+            autoLoeschenFavoritLabelGroup.title = "Für jede Gruppe wird je ein Dungeon markiert.";
+            const autoLoeschenFavoritGroup = this.createCheckBox(() => settings.autoFavoritGroup,
+                async function (value) {
+                    settings.autoFavoritGroup = value;
+                    settings.updateAutoFavoritGroup = true;
+                    await Settings.save();
+                });
+            autoLoeschenFavoritGroup.title = "Für jede Gruppe wird generell nur je ein Dungeon markiert.";
+            const autoLoeschenFavoritGroupSeason = this.createCheckBox(() => settings.autoFavoritGroupSeason,
+                async function (value) {
+                    settings.autoFavoritGroupSeason = value;
+                    settings.updateAutoFavoritGroupSeason = true;
+                    await Settings.save();
+                });
+            autoLoeschenFavoritGroupSeason.title = "Für jede Gruppe in jeder Saison wird je ein Dungeon markiert.";
+            const getFavoritCheckBox = function (checkbox, tagName) {
+                const wrapper = document.createElement("span");
+                wrapper.append(checkbox);
+                wrapper.title = checkbox.title;
+                const descr = document.createElement("span");
+                descr.innerHTML = "★";
+                descr.style.color = AutoFavorit.TAG_COLORS[tagName];
+                wrapper.append(descr);
+                return wrapper;
+            }
+
+            tableContent.push([autoLoeschenFavoritLabelAll, getFavoritCheckBox(autoLoeschenFavoritAll, AutoFavorit.TAG_ALL), getFavoritCheckBox(autoLoeschenFavoritAllSeason, AutoFavorit.TAG_ALL_SEASON)]);
+            tableContent.push([autoLoeschenFavoritLabelGroup, getFavoritCheckBox(autoLoeschenFavoritGroup, AutoFavorit.TAG_GROUP), getFavoritCheckBox(autoLoeschenFavoritGroupSeason, AutoFavorit.TAG_GROUP_SEASON)]);
+            const autoFavoritTable = _UI.createTable(tableContent, ["", "Saisonübergreifend", "pro Saison"])
+            autoFavoritTable.style.backgroundColor = MainPage.COLOR_GREEN;
+            settingTable.append(autoFavoritTable);
+        }
+
+        static createTextBox(supplier, consumer) {
+            const result = document.createElement("input");
+            result.type = "text";
+            result.value = supplier();
+            result.onchange = async function () {
+                await consumer(result.value);
+            }
+            return result;
+        }
+
+        static createCheckBox(supplier, consumer) {
+            const result = document.createElement("input");
+            result.type = "checkbox";
+            result.checked = supplier();
+            result.onchange = async function () {
+                await consumer(result.checked);
+            }
+            return result;
+        }
+    }
+
     class ArchivSearch {
         static archivView; // Such-Tabelle und Result
         static searchResultAnchor;
@@ -685,6 +908,12 @@
         static worldSelect;
         static groupSelect;
         static dungeonSelect;
+
+        static preInit() {
+            this.archivView = document.createElement("div");
+        }
+
+        static AUSWAHL_BEVORZUGT = 8;
 
         static async query() {
             const table = document.createElement("table");
@@ -710,7 +939,7 @@
             let switcher = false;
             const thisObject = this;
             const primaryDate = new Date();
-            primaryDate.setDate(primaryDate.getDate() - 14);
+            primaryDate.setDate(primaryDate.getDate() - ArchivSearch.AUSWAHL_BEVORZUGT);
             const groupsFound = {};
             const groupsFoundPrimary = {};
             const worldsFound = {};
@@ -881,7 +1110,7 @@
             this.dungeonSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(dungeonsFoundPrimary).length > 0) {
-                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 14 Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const [dungeonName, title] of Object.entries(dungeonsFoundPrimary).sort((a, b) => a[1].localeCompare(b[1]))) {
                     const selected = this.searchQuery.dungeonSelection.includes(dungeonName) ? "selected" : "";
                     this.dungeonSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + title + "</option>";
@@ -903,7 +1132,7 @@
             this.groupSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(groupsFoundPrimary).length > 0) {
-                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 14 Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const dungeonName of Object.keys(groupsFoundPrimary).sort()) {
                     const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
                     this.groupSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
@@ -925,7 +1154,7 @@
             this.worldSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(worldsFoundPrimary).length > 0) {
-                this.worldSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten 14 Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.worldSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const worldId of Object.keys(worldsFoundPrimary).sort()) {
                     const selected = this.searchQuery.worldSelection.includes(worldId) ? "selected" : "";
                     this.worldSelect.innerHTML += "<option value='" + worldId + "' " + selected + ">" + (this.worldValues[worldId] || worldId) + "</option>";
@@ -949,8 +1178,12 @@
         }
 
         static isValidFavorit(report) {
-            if (!this.searchQuery.nurFavoriten) return true;
-            return !!this.searchQuery.nurFavoriten === !!report.fav;
+            const favoritSelector = this.searchQuery.nurFavoriten;
+            if (favoritSelector.length === 0) return true;
+            if (favoritSelector.includes(FilterQuery.FAVORIT_AUTO_GROUP) && !(report.favAuto && report.favAuto.includes(AutoFavorit.TAG_GROUP))) return false;
+            if (favoritSelector.includes(FilterQuery.FAVORIT_AUTO_ALL) && !(report.favAuto && report.favAuto.includes(AutoFavorit.TAG_ALL))) return false;
+            if (favoritSelector.includes(FilterQuery.FAVORIT_MANUELL) && !report.fav) return false;
+            return true;
         }
 
         static isValidDate(report, dateMin) {
@@ -1006,8 +1239,13 @@
         }
 
         static async loadArchivView() {
-            this.archivView = document.createElement("div");
-            this.searchQuery = new SearchQuery();
+            this.searchQuery = new FilterQuery();
+            const maxResults = (await Settings.get()).maxResults;
+            if (maxResults !== undefined) {
+                this.searchQuery.maxResults = maxResults;
+            } else {
+                this.searchQuery.maxResults = 100;
+            }
             this.searchResultAnchor = document.createElement("div");
             const searchTable = this.createSearchTable();
             this.archivView.append(searchTable);
@@ -1066,13 +1304,23 @@
             content.push(["Zeitraum", datumRow]);
             const thisObject = this;
 
-            this.nurFavoritenSelect = document.createElement("input");
+            this.nurFavoritenSelect = document.createElement("select");
             this.nurFavoritenSelect.onchange = async function () {
-                thisObject.searchQuery.nurFavoriten = thisObject.nurFavoritenSelect.checked;
+                thisObject.searchQuery.nurFavoriten = [];
+                var options = thisObject.nurFavoritenSelect.selectedOptions;
+                for (var i = 0, l = options.length; i < l; i++) {
+                    const opt = options[i];
+                    const value = opt.value || opt.text;
+                    if (value === "") continue;
+                    thisObject.searchQuery.nurFavoriten.push(value);
+                }
                 ArchivSearch.updateSearch();
             }
-            this.nurFavoritenSelect.type = "checkbox";
-            content.push(["Nur Favoriten?", this.nurFavoritenSelect]);
+            this.nurFavoritenSelect.innerHTML += "<option></option>";
+            this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_MANUELL + "</option>";
+            this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_AUTO_GROUP + "</option>";
+            this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_AUTO_ALL + "</option>";
+            content.push(["Favoriten", this.nurFavoritenSelect]);
 
             this.typeSelect = document.createElement("select");
             this.typeSelect.innerHTML += "<option></option>";
@@ -1136,8 +1384,28 @@
             content.push(["Dungeon", this.dungeonSelect]);
 
             const lastRow = document.createElement("span");
-            const maxResultsInput = document.createElement("span");
-            maxResultsInput.innerHTML = "" + ArchivSearch.searchQuery.maxResults;
+            const maxResultsInput = document.createElement("input");
+            maxResultsInput.type = "text";
+            maxResultsInput.size = 4;
+            maxResultsInput.value = ArchivSearch.searchQuery.maxResults;
+            maxResultsInput.onchange = async function (e) {
+                try {
+                    let newValue;
+                    if (maxResultsInput.value === "") {
+                        newValue = "";
+                    } else {
+                        newValue = Number(maxResultsInput.value);
+                        if (isNaN(newValue)) throw new Errror("Not a number");
+                    }
+                    ArchivSearch.searchQuery.maxResults = newValue;
+                    const settings = await Settings.get();
+                    settings.maxResults = newValue;
+                    await Settings.save();
+                    ArchivSearch.updateSearch();
+                } catch (e) { // reset
+                    maxResultsInput.value = ArchivSearch.searchQuery.maxResults;
+                }
+            }
             lastRow.append(maxResultsInput);
             const aktualisierenButton = document.createElement("input");
             aktualisierenButton.type = "button";
@@ -1181,7 +1449,13 @@
             MainPage.anchor.append(temp);
             MainPage.title.scrollIntoView();
             const statExecuter = this.getErweiterteKampfstatistikExecuter();
-            if (statExecuter) await statExecuter(kampfbericht, kampfstatistik);
+            if (statExecuter) {
+                const dbSourceReport = await MyStorage.reportArchiveSources.getValue(report.reportId);
+                try {
+                    await statExecuter(kampfbericht, kampfstatistik, dbSourceReport);
+                } catch (e) {
+                }
+            }
             let inputs = temp.getElementsByTagName("input");
             for (const elem of inputs) {
                 if (elem.value === "Statistik" && !elem.previousElementSibling) { // dies ist bei Popups der Fall
@@ -1380,89 +1654,6 @@
             console.log("Sync check beendet! Fehler gefunden: " + failures);
         }
 
-        /**
-         * Überprüft alle Dungeon Auto-Favoriten.
-         */
-        static async checkAllAutoFavoriten() {
-            await this.checkAutoFavoriten(await MyStorage.reportArchive.getAll());
-        }
-
-        /**
-         * Überprüft den Auto-Favoriten für den angegebenen Dungeon und Gruppe.
-         */
-        static async updateAutoFavoritenFor(report) {
-            const reports = (await MyStorage.reportArchive.getAll()).filter(current => current.title === report.title && current.gruppe_id === report.gruppe_id);
-            await this.checkAutoFavoriten(reports);
-        }
-
-        /**
-         * Auto-Favoriten pro Gruppe und Dungeon und Version.
-         */
-        static async checkAutoFavoriten(reports) {
-            const favorites = {};
-            const getIds = async function (report, debug) {
-                const myVersions = await Report.getVersions(report);
-                if (!myVersions || myVersions.length === 0) return [];
-                const result = [];
-                for (const version of myVersions) {
-                    result.push(report.gruppe_id + ";" + report.title + ";" + version);
-                }
-                return result;
-            }
-            for (const report of reports) {
-                if (!Report.isVollstaendig(report)) continue; // nur Reports, wo alle erreichten Level gespeichert wurden
-                const ids = await getIds(report, true);
-                if (!ids) continue;
-                for (const id of ids) {
-                    const lastFavorit = favorites[ids];
-                    if (lastFavorit) {
-                        favorites[ids] = this.checkPrefer(lastFavorit, report);
-                    } else {
-                        favorites[ids] = report;
-                    }
-                }
-            }
-            for (const report of reports) {
-                const ids = await getIds(report);
-                let isAutoFavorit = false;
-                if (ids) {
-                    for (const id of ids) {
-                        if (favorites[ids] ? (favorites[ids].reportId === report.reportId) : false) {
-                            isAutoFavorit = true;
-                            break;
-                        }
-                    }
-                }
-                if (report.favAuto !== isAutoFavorit) {
-                    if (isAutoFavorit) {
-                        report.favAuto = true;
-                    } else {
-                        delete report.favAuto;
-                    }
-                    await MyStorage.reportArchive.setValue(report);
-                }
-            }
-        }
-
-        /**
-         * Welcher der beiden Report überwiegt als Auto-Favorit?
-         */
-        static checkPrefer(report1, report2) {
-            // Größere Memberzahl gewinnt
-            const members1 = report1.success.members[1];
-            const members2 = report2.success.members[1];
-            if (members1 !== members2) return members1 > members2 ? report1 : report2;
-            // Größere Levelzahl gewinnt
-            const levels1 = report1.success.levels[1];
-            const levels2 = report2.success.levels[1];
-            if (levels1 !== levels2) return levels1 > levels2 ? report1 : report2;
-            // Größere Anzahl an geschafften Räumen gewinnt
-            const success1 = Report.getSuccessRoomRate(report1);
-            const success2 = Report.getSuccessRoomRate(report2);
-            if (success1 !== success2) return success1 > success2 ? report1 : report2;
-            // Der neuere Report gewinnt
-            return report1.ts > report2.ts ? report1 : report2;
-        }
 
     }
 
@@ -1487,12 +1678,29 @@
             const fehlend = [];
             if (!report.statistik) fehlend.push("S");
             if (!report.gegenstaende) fehlend.push("G");
-            if (!report || !report.success || !report.levels) {
+            for (const lv of this.getMissingReportSitesLevel(report, onlyFullSuccess)) {
+                fehlend.push(lv);
+            }
+            return fehlend;
+        }
+
+        static isVollstaendigLevel(report, onlyFullSuccess) {
+            if (!report.levels || !report.success) return false;
+            return this.getMissingReportSitesLevel(report, onlyFullSuccess).length === 0;
+        }
+
+        static getMissingReportSitesLevel(report, onlyFullSuccess) {
+            const fehlend = [];
+            if (report.success && report.success[1]) {
+                delete report.success[1];
+                MyStorage.reportArchive.setValue(report);
+            }
+            if (!report || !report.success || !report.levels || !report.success.levels) {
                 fehlend.push("Lx");
             } else {
                 let maxLevel = report.success.levels[1];
-                let successLevels = report.success.levels[0];
-                if (!onlyFullSuccess && successLevels) maxLevel = successLevels; // evtl. nicht erfolgreich, dann müssen auch nicht alle angefordert sein
+                const successLevels = report.success.levels[0];
+                if (!onlyFullSuccess && successLevels !== undefined) maxLevel = Math.min(successLevels + 1, maxLevel); // evtl. nicht erfolgreich, dann müssen auch nicht alle angefordert sein
                 for (var i = 0, l = maxLevel; i < l; i++) {
                     if (!report.levels[i]) fehlend.push("L" + (i + 1));
                 }
@@ -1500,48 +1708,48 @@
             return fehlend;
         }
 
-        static async getVersion(report) {
-            return (await this.getVersions(report)).join(" | ");
+        static async getVersion(report, reportSourceOpt) {
+            return (await this.getVersions(report, reportSourceOpt)).join(" | ");
         }
 
-        static async getVersions(report) {
+        static async getVersions(report, reportSourceOpt) {
             if (report.locVersion) return [report.locVersion];
             if (report.schlacht) return [1];
             // Es muss mindestens der letzte Level auch besucht worden sein.
             if (!report || !report.success || !report.levels || !report.success.levels) return [];
-            if (report.locVersionId) {
-                const location = await MyStorage.location.getValue(report.title) || {name: report.title};
-                return await Location.guessVersionById(location, report.locVersionId);
-            }
+            if (report.locVersionId) return await Location.guessVersionById(report.title, report.locVersionId, report);
 
-            const reportSource = await MyStorage.reportArchiveSources.getValue(report.reportId);
+            if (!Report.isVollstaendigLevel(report)) return [];
+            const reportSource = reportSourceOpt || await MyStorage.reportArchiveSources.getValue(report.reportId);
             if (!reportSource) return [];
-            const location = await MyStorage.location.getValue(report.title) || {name: report.title};
-            if ((report.success.levels[1] > report.success.levels[0] + 1) || !this.isVollstaendig(report, true)) {
+            const versionIdArray = this.getVersionIdArray(report, reportSource);
+            if (versionIdArray[versionIdArray.length - 1] === "X_X") {
                 // Unvollständiger Dungeon wir haben nicht alle Level: wir versuchen zu raten
-                const versionId = this.getVersionId(report, reportSource);
-                report.locVersionId = versionId;
+                report.locVersionId = versionIdArray;
                 await MyStorage.reportArchive.setValue(report);
-                return await Location.guessVersionById(location, versionId);
+                return await Location.guessVersionById(report.title, versionIdArray, report);
             }
             // wir haben alle Level geladen
-            const versionNr = await Location.getVersionById(location, this.getVersionId(report, reportSource));
+            const versionNr = await Location.getVersionById(report.title, versionIdArray);
             report.locVersion = versionNr;
             await MyStorage.reportArchive.setValue(report);
             return [versionNr];
         }
 
-        static getVersionId(report, reportSource) {
+        /**
+         * @return ein Array mit Titeln der einzelnen Level. Sofern nicht komplett alle Level des Dungeons erreicht wurden, wird am
+         * Ende ein Platzhalter eingeührt.
+         */
+        static getVersionIdArray(report, reportSource) {
             const versionId = [];
-            for (const level of reportSource.levels) {
+            for (let i = 0, l = Math.min(report.success.levels[0] + 1, report.success.levels[1]); i < l; i++) {
+                const level = reportSource.levels[i];
                 const doc = _util.getDocumentFor(level);
                 const navLevels = doc.getElementsByClassName("navigation levels")[0];
-                if (navLevels) {
-                    const ueberschrift = navLevels.parentElement.getElementsByTagName("h3")[0].textContent;
-                    versionId.push(ueberschrift);
-                }
+                const ueberschrift = navLevels.parentElement.getElementsByTagName("h3")[0].textContent;
+                versionId.push(ueberschrift);
             }
-            if (report.success.levels[1] > reportSource.levels.length) {
+            if (report.success.levels[1] > versionId.length) {
                 versionId.push("X_X"); // Markierung, dass es noch keine finale Versionskennzeichnung ist
             }
             return versionId;
@@ -1553,11 +1761,180 @@
             return Object.keys(location.versions).length > 1;
         }
 
+        static async deleteSources(reportId) {
+            await MyStorage.reportArchiveSources.deleteValue(reportId);
+            const report = await MyStorage.reportArchive.getValue(reportId);
+            delete report.statistik;
+            delete report.gegenstaende;
+            delete report.levels;
+            delete report.space;
+            await MyStorage.reportArchive.setValue(report);
+            if (report.favAuto) await AutoFavorit.checkAutoFavoritenFor(report);
+        }
+
     }
 
+    /**
+     * Markiert entsprechende reports mit
+     * .favAuto = ["group"]
+     */
+    class AutoFavorit {
+
+        static TAG_GROUP = "group";
+        static TAG_ALL = "all";
+        static TAG_GROUP_SEASON = "groupSeason";
+        static TAG_ALL_SEASON = "allSeason";
+
+        static TAG_COLORS = {
+            [this.TAG_ALL]: "black",
+            [this.TAG_GROUP]: "lightblue",
+            [this.TAG_ALL_SEASON]: "orange",
+            [this.TAG_GROUP_SEASON]: "magenta",
+        }
+
+        static description = "\nEs wird von der Anwendung her pro Gruppe mit maximal möglicher Mitgliederanzahl, pro Dungeon und pro Dungeonversion jeweils der letzte Datensatz hiermit markiert. Diese Datensätze sind standardmäßig von der automatischen Löschung ausgenommen.";
+
+        static TAG_DESC = {
+            [this.TAG_GROUP]: "Auto-Favorit pro Gruppe." + this.description,
+            [this.TAG_ALL]: "Auto-Favorit gruppenübergreifend." + this.description,
+            [this.TAG_GROUP_SEASON]: "Auto-Favorit pro Saison." + this.description,
+            [this.TAG_ALL_SEASON]: "Auto-Favorit gruppenübergreifend pro Saison." + this.description,
+        }
+
+        /**
+         * Überprüft alle Dungeon Auto-Favoriten.
+         */
+        static async checkAutoFavoriten(specificTagName) {
+            console.log("checkAutoFavoriten... " + (specificTagName ? "[" + specificTagName + "]" : ""));
+            await this.#checkAllAutoFavoritenOn(await MyStorage.reportArchive.getAll(), specificTagName);
+            console.log("checkAutoFavoriten finished! " + (specificTagName ? "[" + specificTagName + "]" : ""));
+        }
+
+        /**
+         * Überprüft den Auto-Favoriten für den angegebenen Dungeon und Gruppe.
+         */
+        static async checkAutoFavoritenFor(report) {
+            const reports = (await MyStorage.reportArchive.getAll()).filter(current => current.title === report.title);
+            await this.#checkAllAutoFavoritenOn(reports);
+        }
+
+        /**
+         * Überprüft alle Dungeon Auto-Favoriten für die übergebenen Reports.
+         */
+        static async #checkAllAutoFavoritenOn(reports, specificTagName) {
+            if (specificTagName) {
+                await this.#checkAutoFavoritenIntern(reports, specificTagName);
+            } else {
+                await this.#checkAutoFavoritenIntern(reports, this.TAG_GROUP);
+                await this.#checkAutoFavoritenIntern(reports, this.TAG_ALL);
+            }
+        }
+
+        static async #domainGroup(report) {
+            const myVersions = await Report.getVersions(report);
+            if (!myVersions || myVersions.length === 0) return [];
+            const result = [];
+            for (const version of myVersions) {
+                result.push(report.gruppe_id + ";" + report.title + ";" + version); // pro Gruppe, Dungeonname und Version
+            }
+            return result;
+        }
+
+        static async #domainAll(report) {
+            const myVersions = await Report.getVersions(report);
+            if (!myVersions || myVersions.length === 0) return [];
+            const result = [];
+            for (const version of myVersions) {
+                result.push(report.title + ";" + version); // pro Gruppe, Dungeonname und Version
+            }
+            return result;
+        }
+
+        static #domains = {
+            "group": this.#domainGroup,
+            "all": this.#domainAll,
+        }
+
+        /**
+         * Auto-Favoriten abhängig von der getAutoFavoritIds-Methode.
+         * @param reports
+         * @param tagName autoFavorit-tagName
+         * @param asyncMapperMethod (report) -> Identifier
+         */
+        static async #checkAutoFavoritenIntern(reports, tagName) {
+            const asyncMapperMethod = this.#domains[tagName];
+            const favorites = {};
+            const _ids = {};
+            for (const report of reports) {
+                const ids = await asyncMapperMethod(report);
+                _ids[report.reportId] = ids;
+                if (!Report.isVollstaendigLevel(report)) continue; // nur Reports, wo alle erreichten Level gespeichert wurden
+                if (!ids) continue;
+                for (const id of ids) {
+                    const lastFavorit = favorites[id];
+                    if (lastFavorit) {
+                        favorites[id] = this.#checkPrefer(lastFavorit, report);
+                    } else {
+                        favorites[id] = report;
+                    }
+                }
+            }
+            for (const report of reports) {
+                const ids = _ids[report.reportId];
+                let sollAutoFavorit = false;
+                for (const id of ids) {
+                    if (favorites[id] && (favorites[id].reportId === report.reportId)) {
+                        sollAutoFavorit = true;
+                        break;
+                    }
+                }
+
+                const istAutoFavorit = !!(report.favAuto && report.favAuto.includes(tagName));
+                if (istAutoFavorit !== sollAutoFavorit) {
+                    if (sollAutoFavorit) {
+                        report.favAuto = report.favAuto || [];
+                        report.favAuto.push(tagName);
+                    } else {
+                        _util.arrayRemove(report.favAuto, tagName);
+                        if (report.favAuto.length === 0) delete report.favAuto;
+                    }
+                    await MyStorage.reportArchive.setValue(report);
+                }
+            }
+        }
+
+        /**
+         * Welcher der beiden Report überwiegt als Auto-Favorit?
+         */
+        static #checkPrefer(report1, report2) {
+            // Größere Memberzahl gewinnt
+            if (report1.success.members && report2.success.members) {
+                const members1 = report1.success.members[1];
+                const members2 = report2.success.members[1];
+                if (members1 !== members2) return members1 > members2 ? report1 : report2;
+            }
+            // Größere Levelzahl gewinnt
+            const levels1 = report1.success.levels[0];
+            const levels2 = report2.success.levels[0];
+            if (levels1 !== levels2) return levels1 > levels2 ? report1 : report2;
+            // Größere Anzahl an geschafften Räumen gewinnt
+            if (report1.success.rooms && report2.success.rooms) {
+                const success1 = Report.getSuccessRoomRate(report1);
+                const success2 = Report.getSuccessRoomRate(report2);
+                if (success1 !== success2) return success1 > success2 ? report1 : report2;
+            }
+            // Der neuere Report gewinnt
+            return report1.ts > report2.ts ? report1 : report2;
+        }
+    }
+
+    /**
+     * Hier werden u.a. die verschiedenen Versionen eines Dungeons gespeichert.
+     */
     class Location {
 
-        static async getVersionById(location, versionIdArray) {
+        static async getVersionById(locationName, versionIdArray) {
+            const location = await MyStorage.location.getValue(locationName) || {name: locationName};
             const versions = location.versions || (location.versions = {});
             const versionIdString = this.getVersionIdString(versionIdArray);
             let result = versions[versionIdString];
@@ -1576,28 +1953,24 @@
             } else {
                 result = Object.keys(versions).length + 1;
                 versions[versionIdString] = result;
-                if (location.name === "Ahnenforschung") {
-                    console.log("getVersionById-Add: ", result, versionIdArray, versionIdString);
-                }
                 await MyStorage.location.setValue(location);
                 return result;
             }
         }
 
         /**
-         * Wir haben nicht alle Level Daten aber wir versuchen aus den bekannten Versionen abzuleiten
+         * Der Dungeon wurde nicht vollständig abgeschlossen. Alle absolvierten Level sind aber lückenlos gespeichert.
+         * Wir versuchen die Version zu erraten.
          */
-        static async guessVersionById(location, incompleteVersionIdArray) {
+        static async guessVersionById(locationName, incompleteVersionIdArray, debugReport) {
+            const location = await MyStorage.location.getValue(locationName) || {name: locationName};
             const versions = location.versions || (location.versions = {});
             const versionIdString = this.getVersionIdString(incompleteVersionIdArray);
             const results = [];
-            const matchingVersions = this.getMatchingVersions(location, versionIdString, false);
+            const matchingVersions = this.getMatchingVersions(location, versionIdString, false, debugReport);
             if (matchingVersions.length === 0) {
                 const newVersionNr = Object.keys(versions).length + 1;
                 versions[versionIdString] = newVersionNr;
-                if (location.name === "Ahnenforschung") {
-                    console.log("guessVersionById-Add: ", newVersionNr, incompleteVersionIdArray, versionIdString);
-                }
                 await MyStorage.location.setValue(location);
                 results.push(newVersionNr);
             } else if (matchingVersions.length === 1) {
@@ -1615,17 +1988,49 @@
             return results;
         }
 
-        static getMatchingVersions(location, versionIdString, exactMatch) {
-            versionIdString = versionIdString.replaceAll(/\|X_X$/g, "");
+        static async addNewVersion(location) {
+            const newVersionNr = Object.keys(versions).length + 1;
+            versions[versionIdString] = newVersionNr;
+            await MyStorage.location.setValue(location);
+            results.push(newVersionNr);
+        }
+
+        static getMatchingVersions(location, versionIdString, fullqualifiedPath, debugReport) {
+            const versionIdStringCleaned = versionIdString.replaceAll(/\|X_X$/g, "|");
+            fullqualifiedPath = !versionIdString.match(/\|X_X$/g);
             const results = [];
             for (const [id, versionNr] of Object.entries(location.versions)) {
-                const cleanedVersionId = id.replaceAll(/\|X_X$/g, "");
-                if ((!exactMatch && (cleanedVersionId.startsWith(versionIdString) || versionIdString.startsWith(cleanedVersionId)))
-                    || (exactMatch && versionIdString.startsWith(cleanedVersionId))) {
-                    results.push([id, versionNr]);
-                }
+                if (this.isMatching(versionIdString, versionIdStringCleaned, id, fullqualifiedPath, debugReport)) results.push([id, versionNr]);
             }
             return results;
+        }
+
+        /**
+         * 4. Fälle:
+         * 1) wir haben einen vollständige Pfad und treffen auf einen vollständige Pfad => es muss exakt sein
+         * 2) wir haben einen vollständigen Pfad und treffen auf einen unvollständigen Pfad => der vorhandene Pfad wird erweitert
+         * 3) wir haben einen unvollständigen Pfad und treffen auf einen vollständigen Pfad => wir liefern ihn unverändert zurück
+         * 4) wir haben einen unvollständigen Pfad und treffen auf einen unvollständigen Pfad => wenn es der einzige ist, erweitern wir ihn
+         */
+        static isMatching(curId, curIdCleaned, id, fullqualifiedPath, debugReport) {
+            const istUnvollstaendig = id.match(/\|X_X$/g);
+            const cleanedVersionId = id.replaceAll(/\|X_X$/g, "|");
+            if (fullqualifiedPath) {
+                if (istUnvollstaendig) {
+                    if (curIdCleaned.startsWith(cleanedVersionId)) {
+                        return true;
+                    }
+                } else {
+                    if (id === curIdCleaned) {
+                        return true;
+                    }
+                }
+            } else {
+                if (cleanedVersionId.startsWith(curIdCleaned) || curIdCleaned.startsWith(cleanedVersionId)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         static getVersionIdString(versionIdArray) {
@@ -1634,14 +2039,56 @@
 
     }
 
-    class MyStorage {
-        static indexedDb = new Storages.IndexedDb("WoDReportArchiv", Mod.dbname); // Mod.dbname
-        static reportArchive = this.indexedDb.createObjectStore("reportArchive", "reportId");
-        static reportArchiveSources = this.indexedDb.createObjectStore("reportArchiveSources", "reportId");
-        static location = this.indexedDb.createObjectStore("location", "name");
-        static locationGroup = this.indexedDb.createObjectStore("locationGroup", "name");
+    class Settings {
+        static #cache;
 
-        // static deletelkshflsdf = this.indexedDb.deleteObjectStore("reportSources");
+        static async get(fresh) {
+            if (!this.#cache || fresh) {
+                this.#cache = await MyStorage.settings.getValue(Mod.modname);
+                if (!this.#cache) this.#cache = {name: Mod.modname};
+                this.initValue("autoLoeschen", false);
+                this.initValue("autoLoeschenTage", 14);
+                this.initValue("autoFavoritAll", true);
+                this.initValue("autoFavoritGroup", true);
+                this.initValue("maxResults", 100);
+                await this.save();
+            }
+            return this.#cache;
+        }
+
+        static initValue(name, value) {
+            if (!(name in this.#cache)) this.#cache[name] = value;
+        }
+
+        static async save() {
+            await MyStorage.settings.setValue(this.#cache);
+        }
+    }
+
+    class MyStorage {
+        static indexedDb = new _Storages.IndexedDb("WoDReportArchiv", Mod.dbname);
+        /**
+         * Meta-Daten für einen Kammpfbericht
+         */
+        static reportArchive = this.indexedDb.createObjectStore("reportArchive", "reportId");
+        /**
+         * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
+         */
+        static reportArchiveExt = this.indexedDb.createObjectStore("reportArchiveExt", "reportId");
+        /**
+         * Quell-Dateien der Kampfberichte
+         */
+        static reportArchiveSources = this.indexedDb.createObjectStore("reportArchiveSources", "reportId");
+        /**
+         * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
+         */
+        static location = this.indexedDb.createObjectStore("location", "name");
+        /**
+         * Einstellungen dieser Mod.
+         */
+        static settings = this.indexedDb.createObjectStore("settings", "name");
+
+        static item = this.indexedDb.createObjectStore("item", "id");
 
         static getReportDBMeta() {
             return this.reportArchive;
@@ -1655,44 +2102,40 @@
             await this.reportArchiveSources.setValue(report);
         }
 
+        static async putToExt(reportId, memberList) {
+            const reportExt = await this.reportArchiveExt.getValue(reportId) || {reportId: reportId, members: {}};
+            for (const [name, entry] of Object.entries(memberList)) {
+                const member = reportExt.members[name] || (reportExt.members[name] = {});
+                for (const [entryKey, entryValue] of Object.entries(entry)) {
+                    member[entryKey] = entryValue;
+                }
+            }
+            await this.reportArchiveExt.setValue(reportExt);
+            return reportExt;
+        }
+
+        static async submitLoot(report, reportExt) {
+            for (const member of Object.values(reportExt.members)) {
+                if (member.loot) {
+                    for (const item of member.loot) {
+                        if (member.stufe) {
+                            await _WoDStorages.addLootSafe(item.name, report.title, report.ts, report.world, member.stufe);
+                        } else {
+                            if (report.stufe) {
+                                await _WoDStorages.addLootUnsafe(item.name, report.title, report.ts, report.world, report.stufe);
+                            } else {
+                                console.error("Keine Stufe gefunden: ", report, reportExt);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
     }
 
     class WoD {
-        static isSchlacht() {
-            return _util.getWindowPage() === "combat_report.php";
-        }
 
-        // Types: Dungeon/Quest, Schlacht-Report, Duell (Solo, Gruppe, Duell)
-        // wod/spiel/clanquest/combat_report.php?battle=8414&report=59125 (battle scheint nicht relevant zu sein!? Seite kann auch so aufgerufen werden)
-        // wod/spiel/tournament/duell.php
-        static getFullReportBaseData(doc) {
-            doc = doc || document;
-            const form = doc.getElementsByName("the_form")[0];
-            const titleSplit = doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/);
-            const title = titleSplit[1].trim();
-            const ts = _WoD.getTimestampFromString(titleSplit[0].trim());
-            let reportId;
-            let schlacht;
-            if (form["report_id[0]"]) {
-                reportId = form["report_id[0]"].value;
-            } else if (form["report"]) {
-                reportId = form["report"].value;
-                schlacht = "Unbekannte Schlacht";
-                const schlachtLink = document.querySelector("h1 a");
-                if (schlachtLink) schlacht = schlachtLink.textContent.trim();
-            }
-            const myWorld = _WoD.getMyWorld();
-            return {
-                reportId: myWorld + reportId,
-                id: reportId,
-                world: myWorld,
-                ts: ts,
-                title: title, // Bei einem Dungeon z.B. der Dungeonname
-                gruppe: _WoD.getMyGroup(),
-                gruppe_id: _WoD.getMyGroupId(),
-                schlacht: schlacht,
-            };
-        }
 
     }
 
@@ -1911,7 +2354,7 @@
         }
 
         static async htmlExportFullReportAsZip(reportId) {
-            const zip = await _File.getJSZip();
+            const zip = await _Libs.getJSZip();
             const reportSources = await MyStorage.getSourceReport(reportId);
             const reportMeta = await MyStorage.reportArchive.getValue(reportId);
 
@@ -1929,10 +2372,9 @@
                     addHTML("Level" + (i + 1) + ".html", level);
                 }
             }
-            console.log("will create zip", zip);
             const downloadFileName = reportMeta.gruppe + "_" + reportMeta.title + "_" + _util.formatDateAndTime(new Date(reportMeta.ts)).replaceAll(".", "_") + ".zip";
             zip.generateAsync({type: "blob"}).then(function (content) {
-                console.log("File is ready!");
+                console.log("File '" + downloadFileName + "' is ready!");
                 _File.forDownload(downloadFileName, content);
             }).catch(error => console.error("Zip-Erro: ", error));
         }
