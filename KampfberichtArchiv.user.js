@@ -2,11 +2,11 @@
 // @name           [WoD] Kampfbericht Archiv
 // @namespace      demawi
 // @description    Lässt einen die Seiten der Kampfberichte direkt downloaden
-// @version        0.1
+// @version        0.10
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -21,8 +21,9 @@
 
     const _Storages = demawiRepository.import("Storages");
     const _WoD = demawiRepository.import("WoD");
-    const _WoDStorages = demawiRepository.import("WoDStorages");
+    const _WoDGroupDb = demawiRepository.import("WoDGroupDb");
     const _WoDParser = demawiRepository.import("WoDParser");
+    const _WoDLootDb = demawiRepository.import("WoDLootDb");
     const _util = demawiRepository.import("util");
     const _UI = demawiRepository.import("UI");
     const _File = demawiRepository.import("File");
@@ -115,10 +116,16 @@
             }
 
             const reportData = _WoD.getFullReportBaseData();
-            let reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
+            const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
+            if (!reportMeta.group_season) {
+                const heroIds = WoD.getAllHeroIds();
+                const groupId = _WoD.getMyGroupId();
+                const groupName = _WoD.getMyGroupName();
+                reportMeta.group_season = await _WoDGroupDb.getSeasonForGroup(groupId, groupName, heroIds);
+            }
             if (!reportMeta.schlacht) reportMeta.schlacht = reportData.schlacht; // kommt evtl. nachträglich erst herein
             if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe;
-            let reportSource = await MyStorage.getSourceReport(reportData.reportId) || {reportId: reportData.reportId};
+            const reportSource = await MyStorage.getSourceReport(reportData.reportId) || {reportId: reportData.reportId};
             console.log("Current Report ", reportData, reportMeta, reportSource);
 
             if (title.textContent.trim().startsWith("Kampfstatistik")) {
@@ -131,6 +138,7 @@
                 const memberList = _WoDParser.parseKampfberichtGegenstaende();
                 const reportExt = await MyStorage.putToExt(reportSource.reportId, memberList);
                 await MyStorage.submitLoot(reportMeta, reportExt);
+                if ((await Settings.get()).lootSummary) await ItemLootSummary.einblenden(memberList);
             } else if (title.textContent.trim().startsWith("Kampfbericht")) {
                 const form = _WoD.getMainForm();
                 const levelNr = _WoD.isSchlacht() ? 1 : form.current_level.value;
@@ -179,15 +187,15 @@
             await MyStorage.reportArchive.setValue(reportMeta);
             await MyStorage.setSourceReport(reportSource);
 
-            if (Report.isVollstaendig(reportMeta)) await AutoFavorit.checkAutoFavoritenFor(reportMeta);
+            if (Report.isVollstaendig(reportMeta)) await AutoFavorit.recheckAutoFavoritenForReport(reportMeta);
         }
 
     }
 
     class FilterQuery {
         static FAVORIT_MANUELL = "Manuell";
-        static FAVORIT_AUTO_GROUP = "Auto (Gruppe)";
-        static FAVORIT_AUTO_ALL = "Auto (Alle)";
+        static FAVORIT_AUTO_ALL = "Auto (gruppenübergreifend)";
+        static FAVORIT_AUTO_GROUP = "Auto (Je Gruppe)";
 
         dateMin;
         dateMax;
@@ -202,7 +210,7 @@
             this.dateMax;
             this.dateMin;
             this.worldSelection = [_WoD.getMyWorld()];
-            this.groupSelection = [_WoD.getMyGroup()];
+            this.groupSelection = [_WoD.getMyGroupName()];
             this.dungeonSelection = [];
         }
     }
@@ -214,6 +222,9 @@
         static COLOR_GREEN = "rgb(62, 156, 62)";
         static COLOR_RED = "rgb(203, 47, 47)";
         static COLOR_YELLOW = "rgb(194, 194, 41)";
+        static PAGE_TYPE_STAT = "Statistik";
+        static PAGE_TYPE_ITEMS = "Items";
+        static PAGE_TYPE_REPORT = "Berichtseite";
 
         static async recreateReporting() {
             console.log("recreateReporting...");
@@ -230,8 +241,6 @@
 
         static async migrate() {
             console.log("Start migration");
-
-            await AutoFavorit.checkAutoFavoriten();
 
             if (false) {
                 for (const oldReportId of await MyStorage.reportArchive.getAllKeys()) {
@@ -281,22 +290,22 @@
 
             // Zuerst Auto-Favoriten erst dann Löschen
             if (settings.updateAutoFavoritAll) {
-                await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL);
+                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL, !settings.autoFavoritAll);
                 delete settings.updateAutoFavoritAll;
                 await Settings.save();
             }
-            if (settings.updateAutoFavoritAllSeason) {
-                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL_SEASON);
+            if (false && settings.updateAutoFavoritAllSeason) {
+                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL_SEASON, !settings.autoFavoritAllSeason);
                 delete settings.updateAutoFavoritAllSeason;
                 await Settings.save();
             }
             if (settings.updateAutoFavoritGroup) {
-                await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP);
+                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP, !settings.autoFavoritGroup);
                 delete settings.updateAutoFavoritGroup;
                 await Settings.save();
             }
-            if (settings.updateAutoFavoritGroupSeason) {
-                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP_SEASON);
+            if (false && settings.updateAutoFavoritGroupSeason) {
+                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP_SEASON, !settings.autoFavoritGroupSeason);
                 delete settings.updateAutoFavoritGroupSeason;
                 await Settings.save();
             }
@@ -331,7 +340,7 @@
 
         static async onKampfberichteSeite() {
             //await MyStorage.indexedDb.cloneTo("wodDB_Backup3");
-            // await this.rewriteExt();
+            //await this.rewriteExt();
             //await MyStorage.indexedDb.deleteObjectStore("items");
             // await this.resyncVersions();
             // await AutoFavorit.checkAutoFavoriten();
@@ -355,47 +364,47 @@
 
             const thisObject = this;
 
-            this.archivButton = _UI.createButton(" 📦", async function () {
-                thisObject.title.removeChild(thisObject.archivButton);
+            const buttons = {};
+
+            buttons.archivButton = _UI.createButton(" 📦", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Archiv";
                 await ArchivSearch.showArchiv(thisObject.anchor);
-                thisObject.title.appendChild(thisObject.wodContentButton);
-                thisObject.title.appendChild(thisObject.statisticsButton);
-                thisObject.title.appendChild(thisObject.settingButton);
+                thisObject.title.appendChild(buttons.wodContentButton);
+                thisObject.title.appendChild(buttons.statisticsButton);
+                thisObject.title.appendChild(buttons.settingButton);
             });
-            this.archivButton.title = "Archiv anzeigen";
-            this.statisticsButton = _UI.createButton(" 📊", async function () {
+            buttons.archivButton.title = "Archiv anzeigen";
+            buttons.statisticsButton = _UI.createButton(" 📊", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Statistiken";
                 await MainPage.showStatistics();
-                thisObject.title.appendChild(thisObject.wodContentButton);
-                thisObject.title.appendChild(thisObject.archivButton);
-                thisObject.title.appendChild(thisObject.settingButton);
+                thisObject.title.appendChild(buttons.wodContentButton);
+                thisObject.title.appendChild(buttons.archivButton);
+                thisObject.title.appendChild(buttons.settingButton);
             });
-            this.statisticsButton.title = "Statistik anzeigen";
-            this.wodContentButton = _UI.createButton(" ↩", async function () {
+            buttons.statisticsButton.title = "Statistik anzeigen";
+            buttons.wodContentButton = _UI.createButton(" ↩", async function () {
                 thisObject.title.innerHTML = "Kampfberichte";
                 await MainPage.showWodOverview();
-                thisObject.title.appendChild(thisObject.archivButton);
-                thisObject.title.appendChild(thisObject.statisticsButton);
-                //thisObject.title.appendChild(thisObject.settingButton);
+                thisObject.title.appendChild(buttons.archivButton);
+                thisObject.title.appendChild(buttons.statisticsButton);
+                thisObject.title.appendChild(buttons.settingButton);
             });
-            this.wodContentButton.title = "Zurück zu den Kampfberichten";
-            this.settingButton = _UI.createButton(" ⚙", async function () {
+            buttons.wodContentButton.title = "Zurück zu den Kampfberichten";
+            buttons.settingButton = _UI.createButton(" ⚙", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Archiv-Einstellungen";
                 await MainPage.showSettings();
-                thisObject.title.appendChild(thisObject.wodContentButton);
-                thisObject.title.appendChild(thisObject.archivButton);
-                thisObject.title.appendChild(thisObject.statisticsButton);
+                thisObject.title.appendChild(buttons.wodContentButton);
+                thisObject.title.appendChild(buttons.archivButton);
+                thisObject.title.appendChild(buttons.statisticsButton);
             });
-            this.settingButton.style.fontSize = "14px";
-            this.settingButton.title = "Einstellungen anzeigen";
+            buttons.settingButton.style.fontSize = "14px";
+            buttons.settingButton.title = "Einstellungen anzeigen";
 
+            delete buttons.wodContentButton.style.fontSize;
 
-            delete this.wodContentButton.style.fontSize;
-
-            thisObject.title.appendChild(thisObject.archivButton);
-            thisObject.title.appendChild(thisObject.statisticsButton);
-            //thisObject.title.appendChild(thisObject.settingButton);
+            thisObject.title.appendChild(buttons.archivButton);
+            thisObject.title.appendChild(buttons.statisticsButton);
+            thisObject.title.appendChild(buttons.settingButton);
 
             ArchivSearch.preInit();
             await this.completeDungeonInformations(false, this.wodContent);
@@ -522,12 +531,26 @@
                         reportId: reportId,
                         title: curTR.children[1].textContent.trim(),
                         ts: _WoD.getTimestampFromString(curTR.children[0].textContent.trim()),
-                        gruppe: _WoD.getMyGroup(),
+                        gruppe: _WoD.getMyGroupName(),
                         gruppe_id: _WoD.getMyGroupId(),
                         world: _WoD.getMyWorld(),
                     }
                     await MyStorage.reportArchive.setValue(reportMeta);
                 }
+                // TODO: Spezial: zerstörte Gegenstände einblenden!?
+                const reportExt = await MyStorage.reportArchiveExt.getValue(reportMeta.reportId);
+                if (reportExt && reportExt.members) {
+                    for (const [member, items] of Object.entries(reportExt.members)) {
+                        if (items.equip) {
+                            for (const curEquip of items.equip) {
+                                if (curEquip.hp && curEquip.hp[0] === 0) {
+                                    //console.log("Zerstörtes Item: " + new Date(reportMeta.ts), curEquip.name + " (" + member + ")");
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // console.log("Report: ", new Date(reportMeta.ts), reportMeta);
 
                 const getTitle = async function (report) {
@@ -748,6 +771,7 @@
             const settingTable = document.createElement("div");
             await this.createAutoFavorit(settingTable, settings);
             await this.createLoeschautomatik(settingTable, settings);
+            await this.createLootSummary(settingTable, settings);
             return settingTable;
         }
 
@@ -810,12 +834,27 @@
                 }
             }
             await updateVisibility();
-            tableContent.push(["Automatisches Löschen", autoLoeschen]);
+            tableContent.push(["Automatisches Löschen:", autoLoeschen]);
             tableContent.push([autoLoeschenTageLabel, autoLoeschenTage]);
 
             const result = _UI.createTable(tableContent)
-            result.style.backgroundColor = MainPage.COLOR_GREEN;
             settingTable.append(result);
+        }
+
+        static async createLootSummary(settingTable, settings) {
+            this.addHeader(settingTable, "Sonstiges", "");
+            const tableContent = [];
+
+            const lootSummaryCheckbox = this.createCheckBox(() => settings.lootSummary,
+                async function (value) {
+                    settings.lootSummary = value;
+                    await Settings.save();
+                });
+
+            tableContent.push(["Zusammenfassung Gegenstandsseite: ", lootSummaryCheckbox])
+
+            const autoFavoritTable = _UI.createTable(tableContent);
+            settingTable.append(autoFavoritTable);
         }
 
         static async createAutoFavorit(settingTable, settings) {
@@ -870,10 +909,9 @@
                 return wrapper;
             }
 
-            tableContent.push([autoLoeschenFavoritLabelAll, getFavoritCheckBox(autoLoeschenFavoritAll, AutoFavorit.TAG_ALL), getFavoritCheckBox(autoLoeschenFavoritAllSeason, AutoFavorit.TAG_ALL_SEASON)]);
-            tableContent.push([autoLoeschenFavoritLabelGroup, getFavoritCheckBox(autoLoeschenFavoritGroup, AutoFavorit.TAG_GROUP), getFavoritCheckBox(autoLoeschenFavoritGroupSeason, AutoFavorit.TAG_GROUP_SEASON)]);
-            const autoFavoritTable = _UI.createTable(tableContent, ["", "Saisonübergreifend", "pro Saison"])
-            autoFavoritTable.style.backgroundColor = MainPage.COLOR_GREEN;
+            tableContent.push([autoLoeschenFavoritLabelAll, getFavoritCheckBox(autoLoeschenFavoritAll, AutoFavorit.TAG_ALL), Settings.SEASONS_ACTIVATED ? getFavoritCheckBox(autoLoeschenFavoritAllSeason, AutoFavorit.TAG_ALL_SEASON) : ""]);
+            tableContent.push([autoLoeschenFavoritLabelGroup, getFavoritCheckBox(autoLoeschenFavoritGroup, AutoFavorit.TAG_GROUP), Settings.SEASONS_ACTIVATED ? getFavoritCheckBox(autoLoeschenFavoritGroupSeason, AutoFavorit.TAG_GROUP_SEASON) : ""]);
+            const autoFavoritTable = _UI.createTable(tableContent, Settings.SEASONS_ACTIVATED ? ["", "Saisonübergreifend", "pro Saison"] : "");
             settingTable.append(autoFavoritTable);
         }
 
@@ -895,6 +933,194 @@
                 await consumer(result.checked);
             }
             return result;
+        }
+    }
+
+    class ItemLootSummary {
+
+        static async einblenden(memberList) {
+            const eingesammeltPre = {};
+            const beschaedigtPre = [];
+            const verlorenPre = {};
+            const vgsPre = {};
+            let gold = 0;
+            let gesamtschaden = 0;
+            const messages = [];
+
+            for (const [member, items] of Object.entries(memberList)) {
+                gold += items.gold;
+                const lootToList = items.ko ? verlorenPre : eingesammeltPre;
+                if (items.exceed) messages.push([member + " hat seine Lagerkapazität überschritten! (" + items.exceed + ")", MainPage.COLOR_RED]);
+                if (items.full) messages.push([member + " konnte aufgrund eines vollen Rucksacks nicht mehr alles einsammeln!", MainPage.COLOR_YELLOW]);
+                for (const curItem of (items.loot || [])) {
+                    const item = lootToList[curItem.name] || (lootToList[curItem.name] = {from: []});
+                    item.from.push(member);
+                    if (curItem.vg) item.vg = item.vg || 0 + curItem.vg;
+                    if (curItem.unique) item.unique = true;
+                }
+                for (const curEquip of items.equip) {
+                    if (curEquip.hp && curEquip.hp[2]) {
+                        beschaedigtPre.push({item: curEquip, owner: member});
+                        gesamtschaden += curEquip.hp[2];
+                    }
+                    if (curEquip.vg) {
+                        const memberVGs = vgsPre[member] || (vgsPre[member] = {});
+                        const item = memberVGs[curEquip.name + (curEquip.gems || "")] || (memberVGs[curEquip.name + (curEquip.gems || "")] = {
+                            name: curEquip.name,
+                            id: curEquip.id,
+                            vg: [0, 0, 0],
+                        });
+                        item.vg[0] += curEquip.vg[0];
+                        item.vg[1] += curEquip.vg[0];
+                        if (curEquip.vg[2]) {
+                            item.vg[2] += Number(curEquip.vg[2]);
+                            item.vg[1] += -Number(curEquip.vg[2]);
+                        }
+                    }
+                }
+            }
+            messages.push(["Gesammeltes Gold: " + gold + ", im Durchschnitt: " + (Math.round(10 * gold / Object.keys(memberList).length) / 10)]);
+
+            const title = document.querySelector("h2");
+
+            const summaryContainer = document.createElement("div");
+            summaryContainer.classList.add("nowod");
+            for (const warning of messages) {
+                const entry = document.createElement("div");
+                entry.style.display = "table";
+                entry.innerHTML = warning[0];
+                if (warning[1]) entry.style.backgroundColor = warning[1];
+                summaryContainer.append(entry);
+            }
+
+            let [eingesammeltData, eingesammeltCount] = this.getItemLootAndDropTable(eingesammeltPre, true);
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(eingesammeltData, ["Anzahl", "eingesammelte Items: " + eingesammeltCount])));
+
+            let [verlorenData, verlorenCount] = this.getItemLootAndDropTable(verlorenPre);
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(verlorenData, ["Anzahl", "verlorene Items: " + verlorenCount])));
+
+            let [data, count] = this.getItemDamageTable(beschaedigtPre);
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, ["Held", "HP", gesamtschaden, "beschädigte Items: " + count])));
+
+            [data, count] = this.getItemUsedTable(vgsPre);
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, ["Held", {
+                data: "Anw.",
+                title: "Übrig/Mitgenommen (Verbraucht)"
+            }, "", "verwendete VGs: " + count])));
+
+            title.parentElement.insertBefore(summaryContainer, title.nextSibling);
+        }
+
+        static getFullItemNode(itemName, instanceId, destroyed, remainHPPicture, debug) {
+            let finding;
+            if (instanceId) {
+                const searchFor = "&id=" + instanceId;
+                finding = document.querySelector(".content_table a[href*=\"" + searchFor + "\"]");
+            } else {
+                const searchFor = "/item/" + _util.fixedEncodeURIComponent(itemName).replaceAll("%20", "+");
+                finding = document.querySelector(".content_table a[href*=\"" + searchFor + "\"]:not([href*=\"&id=\"])");
+            }
+            if (!finding) {
+                console.log("Cant find: ", itemName, instanceId, destroyed, debug);
+                return itemName;
+            }
+            const newNode = finding.parentElement.cloneNode(true);
+            const infoImg = newNode.querySelector("img[src*=\"inf.gif\"]");
+            if (infoImg) infoImg.parentElement.removeChild(infoImg); // Dies ist ein Gruppengegenstand entfernen
+            const aHref = newNode.querySelector("a");
+            if (destroyed) aHref.classList.add("item_destroyed");
+            else aHref.classList.remove("item_destroyed");
+            if (!remainHPPicture) newNode.removeChild(newNode.children[0]);
+            return newNode;
+        }
+
+        static flowLayout(div) {
+            div.style.display = "inline-flex";
+            div.style.fontSize = "90%";
+            div.style.padding = "5px";
+            div.style.border = 0;
+            return div;
+        }
+
+        static getItemUsedTable(preData) {
+            const result = [];
+            for (const [member, items] of Object.entries(preData).sort(([a, a1], [b, b1]) => a.localeCompare(b))) {
+                let namePrinted = false;
+                for (const [itemIdentifier, item] of Object.entries(items).sort(([a, a1], [b, b1]) => a1.name.localeCompare(b1.name))) {
+                    if (item.vg[2] === 0) continue;
+                    const used = item.vg[0] + "/" + item.vg[1] + " (" + item.vg[2] + ")";
+                    const used1 = item.vg[0] + "/" + item.vg[1];
+                    const used2 = item.vg[2];
+                    const itemNode = this.getFullItemNode(item.name, item.id, item.vg[0] === 0);
+                    const desc = itemNode.innerHTML;
+                    const color = item.vg[0] === 0 ? MainPage.COLOR_RED : (item.vg[0] < -item.vg[2] ? MainPage.COLOR_YELLOW : "");
+                    result.push([namePrinted ? "" : member, {
+                        data: used1,
+                        style: "text-align:center;background-color:" + color
+                    }, {
+                        data: used2,
+                        style: "text-align:center;background-color:" + color
+                    }, desc]);
+                    namePrinted = true;
+                }
+            }
+            return [result, result.length];
+        }
+
+        static getItemDamageTable(beschaedigtPre) {
+            const result = [];
+            let lastOwner;
+            for (const entry of beschaedigtPre.sort((a, b) => {
+                let result = a.owner.localeCompare(b.owner);
+                if (result !== 0) return result;
+                return a.item.name.localeCompare(b.item.name);
+            })) {
+                const item = entry.item;
+                let hp = item.hp[0] + "/" + item.hp[1] + " (" + item.hp[2] + ")";
+                let hp1 = item.hp[0] + "/" + item.hp[1];
+                let hp2 = item.hp[2];
+                const itemNode = this.getFullItemNode(item.name, item.id, item.hp[0] === 0, true, item);
+                itemNode.children[0].style.width = "15px";
+                itemNode.children[0].style.height = "15px";
+                let desc = itemNode.innerHTML;
+                let held = lastOwner !== entry.owner ? entry.owner : "";
+                const color = item.hp[0] === 0 ? MainPage.COLOR_RED : (item.hp[0] < 7 ? MainPage.COLOR_YELLOW : "");
+                result.push([held, {data: hp1, style: "text-align:center;background-color:" + color}, {
+                    data: hp2,
+                    style: "text-align:center;background-color:" + color
+                }, desc]);
+                lastOwner = entry.owner;
+            }
+            return [result, beschaedigtPre.length];
+        }
+
+        static getItemLootAndDropTable(eingesammeltPre, gesammelt) {
+            const eingesammelt = [];
+            let eingesammeltCount = 0;
+            let firstVG = true;
+            for (const [itemName, entry] of Object.entries(eingesammeltPre).sort(([a, a2], [b, b2]) => {
+                let result = ((a2.vg / a2.vg) || 0) - ((b2.vg / b2.vg) || 0); // Nicht Verbrauchsgegenstände zuerst
+                if (result !== 0) return result;
+                result = (a2.unique && 1 || 0) - (b2.unique && 1 || 0);
+                if (result !== 0) return result;
+                return a.localeCompare(b);
+            })) {
+                eingesammeltCount += entry.from.length;
+                let anzahl = entry.vg ? entry.vg : (entry.from.length > 1 ? entry.from.length : "");
+                const itemLink = this.getFullItemNode(itemName, entry.id);
+                const ownerAnzeige = gesammelt && !entry.vg && !entry.unique;
+                let addStyle = "";
+                if (firstVG && entry.vg) {
+                    addStyle = "border-top: 3px solid white;"
+                    firstVG = false;
+                }
+                let name = itemLink.innerHTML + (ownerAnzeige ? " (" + entry.from.join(", ") + ")" : "");
+                eingesammelt.push([{data: anzahl, style: "text-align:center;" + addStyle}, {
+                    data: name,
+                    style: addStyle
+                }]);
+            }
+            return [eingesammelt, eingesammeltCount];
         }
     }
 
@@ -1318,8 +1544,8 @@
             }
             this.nurFavoritenSelect.innerHTML += "<option></option>";
             this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_MANUELL + "</option>";
-            this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_AUTO_GROUP + "</option>";
             this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_AUTO_ALL + "</option>";
+            this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_AUTO_GROUP + "</option>";
             content.push(["Favoriten", this.nurFavoritenSelect]);
 
             this.typeSelect = document.createElement("select");
@@ -1439,22 +1665,18 @@
             return input;
         }
 
-        static async showSite(report, reportSiteHTML, kampfbericht, kampfstatistik) {
+        static async showPage(reportSource, reportSiteHTML, pageType) {
             MainPage.anchor.removeChild(MainPage.anchor.children[0]);
             const doc = _util.getDocumentFor(reportSiteHTML);
             const mainContent = doc.getElementsByClassName("main_content")[0];
-            // console.log("ShowSite: ", report, doc.getElementsByClassName("main_content"));
             const temp = document.createElement("div");
             temp.innerHTML = mainContent.outerHTML;
             MainPage.anchor.append(temp);
             MainPage.title.scrollIntoView();
             const statExecuter = this.getErweiterteKampfstatistikExecuter();
             if (statExecuter) {
-                const dbSourceReport = await MyStorage.reportArchiveSources.getValue(report.reportId);
-                try {
-                    await statExecuter(kampfbericht, kampfstatistik, dbSourceReport);
-                } catch (e) {
-                }
+                const dbSourceReport = await MyStorage.reportArchiveSources.getValue(reportSource.reportId);
+                await statExecuter(pageType === MainPage.PAGE_TYPE_REPORT, pageType === MainPage.PAGE_TYPE_STAT, dbSourceReport);
             }
             let inputs = temp.getElementsByTagName("input");
             for (const elem of inputs) {
@@ -1489,26 +1711,31 @@
                             addOnclick(a => ArchivSearch.showArchiv());
                             break;
                         case "Statistik":
-                            addOnclick(report.statistik ? a => ArchivSearch.showSite(report, report.statistik, false, true) : null);
+                            addOnclick(reportSource.statistik ? a => ArchivSearch.showPage(reportSource, reportSource.statistik, MainPage.PAGE_TYPE_STAT) : null);
                             break;
                         case "Gegenstände":
-                            addOnclick(report.gegenstaende ? a => ArchivSearch.showSite(report, report.gegenstaende) : null);
+                            addOnclick(reportSource.gegenstaende ? a => ArchivSearch.showPage(reportSource, reportSource.gegenstaende, MainPage.PAGE_TYPE_ITEMS) : null);
                             break;
                         case "Bericht":
-                            const level = report.levels && report.levels[0];
-                            addOnclick(level ? a => ArchivSearch.showSite(report, level, true, false) : null);
+                            const level = reportSource.levels && reportSource.levels[0];
+                            addOnclick(level ? a => ArchivSearch.showPage(reportSource, level, MainPage.PAGE_TYPE_REPORT) : null);
                             break;
                         default:
                             const matches = input.value.match(/Level.*(\d+)/);
                             if (matches) {
-                                const level = report.levels && report.levels[matches[1] - 1];
-                                addOnclick(level ? a => ArchivSearch.showSite(report, level, true, false) : null);
+                                const level = reportSource.levels && reportSource.levels[matches[1] - 1];
+                                addOnclick(level ? a => ArchivSearch.showPage(reportSource, level, MainPage.PAGE_TYPE_REPORT) : null);
                             }
                             break;
                     }
                 }
             }
 
+            if (pageType === MainPage.PAGE_TYPE_ITEMS) {
+                const reportExt = await MyStorage.reportArchiveExt.getValue(reportSource.reportId);
+                const members = reportExt && reportExt.members;
+                if (members) ItemLootSummary.einblenden(members);
+            }
         }
 
         static createReportActions(reportMeta, result) {
@@ -1539,7 +1766,7 @@
             statistik.onclick = async function (e) {
                 e.preventDefault();
                 const reportSource = await getReportSource();
-                if (reportSource.statistik) ArchivSearch.showSite(reportSource, reportSource.statistik, false, true);
+                if (reportSource.statistik) ArchivSearch.showPage(reportSource, reportSource.statistik, MainPage.PAGE_TYPE_STAT);
             }
 
             const gegenstaende = document.createElement("input");
@@ -1550,7 +1777,7 @@
             gegenstaende.onclick = async function (e) {
                 e.preventDefault();
                 const reportSource = await getReportSource();
-                if (reportSource.gegenstaende) ArchivSearch.showSite(reportSource, reportSource.gegenstaende);
+                if (reportSource.gegenstaende) ArchivSearch.showPage(reportSource, reportSource.gegenstaende, MainPage.PAGE_TYPE_ITEMS);
             }
 
             const bericht = document.createElement("input");
@@ -1561,7 +1788,7 @@
             bericht.onclick = async function (e) {
                 e.preventDefault();
                 const reportSource = await getReportSource();
-                if (reportSource.levels) ArchivSearch.showSite(reportSource, reportSource.levels[0], true, false);
+                if (reportSource.levels) ArchivSearch.showPage(reportSource, reportSource.levels[0], MainPage.PAGE_TYPE_REPORT);
             }
 
             return result;
@@ -1769,7 +1996,7 @@
             delete report.levels;
             delete report.space;
             await MyStorage.reportArchive.setValue(report);
-            if (report.favAuto) await AutoFavorit.checkAutoFavoritenFor(report);
+            if (report.favAuto) await AutoFavorit.recheckAutoFavoritenForReport(report);
         }
 
     }
@@ -1786,9 +2013,9 @@
         static TAG_ALL_SEASON = "allSeason";
 
         static TAG_COLORS = {
-            [this.TAG_ALL]: "black",
+            [this.TAG_ALL]: "orange",
             [this.TAG_GROUP]: "lightblue",
-            [this.TAG_ALL_SEASON]: "orange",
+            [this.TAG_ALL_SEASON]: "black",
             [this.TAG_GROUP_SEASON]: "magenta",
         }
 
@@ -1804,16 +2031,16 @@
         /**
          * Überprüft alle Dungeon Auto-Favoriten.
          */
-        static async checkAutoFavoriten(specificTagName) {
-            console.log("checkAutoFavoriten... " + (specificTagName ? "[" + specificTagName + "]" : ""));
-            await this.#checkAllAutoFavoritenOn(await MyStorage.reportArchive.getAll(), specificTagName);
+        static async checkAutoFavoritenForTagName(specificTagName, deactivated) {
+            console.log("checkAutoFavoriten... " + (specificTagName ? "[" + specificTagName + "]" : "") + " " + (deactivated ? "deaktiviert" : "aktiviert"));
+            await this.#checkAllAutoFavoritenOn(await MyStorage.reportArchive.getAll(), specificTagName, deactivated);
             console.log("checkAutoFavoriten finished! " + (specificTagName ? "[" + specificTagName + "]" : ""));
         }
 
         /**
          * Überprüft den Auto-Favoriten für den angegebenen Dungeon und Gruppe.
          */
-        static async checkAutoFavoritenFor(report) {
+        static async recheckAutoFavoritenForReport(report) {
             const reports = (await MyStorage.reportArchive.getAll()).filter(current => current.title === report.title);
             await this.#checkAllAutoFavoritenOn(reports);
         }
@@ -1821,12 +2048,12 @@
         /**
          * Überprüft alle Dungeon Auto-Favoriten für die übergebenen Reports.
          */
-        static async #checkAllAutoFavoritenOn(reports, specificTagName) {
-            if (specificTagName) {
-                await this.#checkAutoFavoritenIntern(reports, specificTagName);
-            } else {
-                await this.#checkAutoFavoritenIntern(reports, this.TAG_GROUP);
-                await this.#checkAutoFavoritenIntern(reports, this.TAG_ALL);
+        static async #checkAllAutoFavoritenOn(reports, specificTagName, deactivated) {
+            if (specificTagName) { // Ein bestimmter AutoFavorit soll nochmal überprüft werden. Z.B. bei einer Änderung der Einstellung.
+                await this.#checkAutoFavoritenIntern(reports, specificTagName, deactivated);
+            } else { // Ein Report hat sich geändert, nur wenn AutoFavoriten aktiviert sind müssen wir hier auch checken
+                if ((await Settings.get()).autoFavoritGroup) await this.#checkAutoFavoritenIntern(reports, AutoFavorit.TAG_GROUP);
+                if ((await Settings.get()).autoFavoritAll) await this.#checkAutoFavoritenIntern(reports, AutoFavorit.TAG_ALL);
             }
         }
 
@@ -1861,7 +2088,19 @@
          * @param tagName autoFavorit-tagName
          * @param asyncMapperMethod (report) -> Identifier
          */
-        static async #checkAutoFavoritenIntern(reports, tagName) {
+        static async #checkAutoFavoritenIntern(reports, tagName, deactivated) {
+            if (deactivated) {
+                console.log("Lösche alle Favoriten Tags für '" + tagName + "'", reports.length);
+                for (const report of reports) {
+                    if (report.favAuto && report.favAuto.includes(tagName)) {
+                        _util.arrayRemove(report.favAuto, tagName);
+                        if (report.favAuto.length === 0) delete report.favAuto;
+                        await MyStorage.reportArchive.setValue(report);
+                    }
+                }
+                return;
+            }
+
             const asyncMapperMethod = this.#domains[tagName];
             const favorites = {};
             const _ids = {};
@@ -2040,24 +2279,27 @@
     }
 
     class Settings {
+        static SEASONS_ACTIVATED = false;
         static #cache;
+        static DEFAULT_SETTING = {
+            autoLoeschen: false,
+            autoLoeschenTage: 14,
+            autoFavoritAll: true,
+            autoFavoritGroup: true,
+            maxResults: 100,
+            lootSummary: true,
+        }
 
         static async get(fresh) {
             if (!this.#cache || fresh) {
                 this.#cache = await MyStorage.settings.getValue(Mod.modname);
                 if (!this.#cache) this.#cache = {name: Mod.modname};
-                this.initValue("autoLoeschen", false);
-                this.initValue("autoLoeschenTage", 14);
-                this.initValue("autoFavoritAll", true);
-                this.initValue("autoFavoritGroup", true);
-                this.initValue("maxResults", 100);
+                for (const [key, value] of Object.entries(this.DEFAULT_SETTING)) {
+                    if (!(key in this.#cache)) this.#cache[key] = value;
+                }
                 await this.save();
             }
             return this.#cache;
-        }
-
-        static initValue(name, value) {
-            if (!(name in this.#cache)) this.#cache[name] = value;
         }
 
         static async save() {
@@ -2088,8 +2330,6 @@
          */
         static settings = this.indexedDb.createObjectStore("settings", "name");
 
-        static item = this.indexedDb.createObjectStore("item", "id");
-
         static getReportDBMeta() {
             return this.reportArchive;
         }
@@ -2119,10 +2359,10 @@
                 if (member.loot) {
                     for (const item of member.loot) {
                         if (member.stufe) {
-                            await _WoDStorages.addLootSafe(item.name, report.title, report.ts, report.world, member.stufe);
+                            await _WoDLootDb.addLootSafe(item.name, report.title, report.ts, report.world, member.stufe);
                         } else {
                             if (report.stufe) {
-                                await _WoDStorages.addLootUnsafe(item.name, report.title, report.ts, report.world, report.stufe);
+                                await _WoDLootDb.addLootUnsafe(item.name, report.title, report.ts, report.world, report.stufe);
                             } else {
                                 console.error("Keine Stufe gefunden: ", report, reportExt);
                             }
@@ -2136,6 +2376,18 @@
 
     class WoD {
 
+        static getAllHeroIds() {
+            let result = {};
+            for (const cur of document.querySelectorAll(".content_table a[href*=\"/profile.php\"]")) {
+                const id = new URL(cur.href).searchParams.get("id");
+                if (result[id]) break;
+                result[id] = true;
+                if (Object.keys(result).length >= 12) break;
+            }
+            result = Object.keys(result);
+            console.log("HeorIds: ", result);
+            return result;
+        }
 
     }
 

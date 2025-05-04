@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18.7
+// @version        0.21
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -25,8 +25,8 @@
 (function () {
     'use strict';
 
-    const Storages = demawiRepository.import("Storages");
-    const BBCodeExporter = demawiRepository.import("BBCodeExporter");
+    const _Storages = demawiRepository.import("Storages");
+    const _BBCodeExporter = demawiRepository.import("BBCodeExporter");
     const _WoD = demawiRepository.import("WoD");
     const _WoDParser = demawiRepository.import("WoDParser");
     const _ReportParser = demawiRepository.import("ReportParser");
@@ -34,15 +34,13 @@
 
     class Mod {
         static dbname = "wodDB";
-        static version = "0.20";
+        static version = "0.21";
         static stand = "01.02.2025";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
-        static currentReportDataVersion = 7;
+        static currentReportDataVersion = 8;
 
         static thisReport;
         static thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
-        static outputAnchor;
-        static runSafe;
 
         /**
          * Einstiegspunkt der Anwendung. Falls von externer Mod aufgerufen wird, sollten die Parameter entsprechend gesetzt werden.
@@ -62,25 +60,26 @@
                 return;
             }
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
-                let levelData = _ReportParser.readKampfbericht(document);
+                let [levelData, errors] = await _ReportParser.readKampfbericht(document);
                 if (levelData) {
-                    Mod.outputAnchor = Mod.createOutputAnchor();
+                    OutputAnchor.init();
                     Mod.thisLevelDatas = [levelData];
                     let roundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
                     let hinweisText = ": " + roundCount + " Runden";
-                    Mod.outputAnchor.setTitle(hinweisText);
+                    OutputAnchor.setTitle.setTitle(hinweisText);
                 }
             }
             if (kampfbericht || WoD.istSeite_Kampfbericht()) { // Einzelseite
-                Mod.outputAnchor = Mod.createOutputAnchor();
-                Mod.runSafe(async function () {
+                OutputAnchor.init();
+                OutputAnchor.runSafe(async function () {
                     // cur_rep_id für Dungeons, report bei Schlachten
                     const reportData = _WoD.getFullReportBaseData();
                     const reportId = reportData.reportId;
                     thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
                     console.log("ReportId: ", reportId, thisObject.thisReport);
 
-                    var [levelData, levelNr] = thisObject.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
+                    var [levelData, levelNr, errors] = await thisObject.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
+                    OutputAnchor.reportWarnings(errors);
                     if (levelData) {
                         let roundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
 
@@ -92,17 +91,16 @@
                         if (reportProgress.missingReports.length > 0) {
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                         }
-                        Mod.outputAnchor.setTitle(hinweisText);
+                        OutputAnchor.setTitle(hinweisText);
                         Mod.thisLevelDatas = [];
                         Mod.thisLevelDatas[levelNr - 1] = levelData;
-                        thisObject.thisReport.ts = new Date().getTime(); // reportData.ts;
                         await MyStorage.getReportStatsDB().setValue(thisObject.thisReport);
                     }
                 });
             }
             if (kampfstatistik || WoD.istSeite_Kampfstatistik()) { // Statistikseite (keine Zwischenspeicherung nur Anzeige)
-                Mod.outputAnchor = Mod.createOutputAnchor();
-                Mod.runSafe(async function () {
+                OutputAnchor.init();
+                OutputAnchor.runSafe(async function () {
                     const reportData = _WoD.getFullReportBaseData();
                     const reportId = reportData.reportId;
                     thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
@@ -121,10 +119,10 @@
                         if (reportProgress.foundReportCount < reportProgress.levelCount) {
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                         }
-                        Mod.outputAnchor.setTitle(hinweisText);
+                        OutputAnchor.setTitle(hinweisText);
                         Mod.thisLevelDatas = thisObject.thisReport.levelDatas;
                     } else {
-                        Mod.outputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
+                        OutputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
                     }
                     MyStorage.validateAllReports(); // no await
                 });
@@ -139,16 +137,18 @@
             const statReport = await MyStorage.getReportStatsDB().getValue(reportId);
             let changed = false;
             for (let i = 0, l = dbReportSource.levels.length; i < l; i++) {
-                if (!statReport.levelData || !statReport.levelData[i]) {
+                if (!statReport.levelDatas || !statReport.levelDatas[i]) {
                     const doc = _util.getDocumentFor(dbReportSource.levels[i]);
-                    this.readKampfberichtAndStoreIntoReport(doc, statReport, reportId);
+                    await this.readKampfberichtAndStoreIntoReport(doc, statReport, reportId);
                     changed = true;
                 }
             }
-            if (changed) await MyStorage.getReportStatsDB().setValue(statReport);
+            if (changed) {
+                await MyStorage.getReportStatsDB().setValue(statReport);
+            }
         }
 
-        static readKampfberichtAndStoreIntoReport(container, report, reportId) {
+        static async readKampfberichtAndStoreIntoReport(container, report, reportId) {
             var levelNr;
             var levelCount;
             console.log("Reporting", reportId, report);
@@ -162,13 +162,15 @@
                     report.levelCount = navigationBar.children.length - 1;
                 }
             }
-            const levelData = _ReportParser.readKampfbericht(container);
+            console.log("Read Kampfbericht: ", reportId, levelNr);
+            const [levelData, errors] = await _ReportParser.readKampfbericht(container);
             report.id = reportId;
             if (!report.levelDatas) {
                 report.levelDatas = [];
             }
             report.levelDatas[levelNr - 1] = levelData;
-            return [levelData, levelNr];
+            report.ts = new Date().getTime(); // reportData.ts;
+            return [levelData, levelNr, errors];
         }
 
         static getReportProgress() {
@@ -183,12 +185,13 @@
             if (Mod.thisReport) {
                 levelCount = Mod.thisReport.maxLevels || Mod.thisReport.levelCount;
                 levelDatas = Mod.thisReport.levelDatas;
+                console.log("ThisReport: ", Mod.thisReport);
 
                 for (var i = 0, l = levelCount; i < l; i++) {
                     if (levelDatas.length > i) {
                         const levelData = levelDatas[i];
-                        const thisLevelRoundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
                         if (levelData) {
+                            const thisLevelRoundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
                             const curAreaCount = Object.keys(levelData.areas).length;
                             const areaRoundCounts = Array();
                             levelData.areas.forEach(area => areaRoundCounts.push(area.rounds.length));
@@ -215,72 +218,104 @@
             }
         }
 
+    }
+
+    class OutputAnchor {
+        static #foundError;
+        static #warnings = [];
+        static #header;
+        static #content;
+        static #collapsible;
+
         // erzeugt den Punkt wo wir uns mit der UI ranhängen können
-        static createOutputAnchor() {
+        static init() {
             // Ausgabe
-            var headings = document.getElementsByTagName("h2");
+            let headings = document.getElementsByTagName("h2");
             if (WoD.istSeite_AbenteuerUebungsplatz()) { // im Abenteuer
                 headings = document.getElementsByTagName("h1");
             }
-            var content = document.createElement("div");
-            content.classList.add("nowod");
-            content.hidden = true;
-            var header = document.createElement("div");
-            header.classList.add("nowod");
-            header.innerHTML = "Erweiterte Kampfstatistiken";
+            this.#content = document.createElement("div");
+            this.#content.classList.add("nowod");
+            this.#content.hidden = true;
+            this.#header = document.createElement("div");
+            this.#header.classList.add("nowod");
+            this.#header.innerHTML = "Erweiterte Kampfstatistiken";
             var firstClick = true;
-            var foundError;
-            const collapsible = util.createCollapsible("20px", true, function (hide) {
-                content.hidden = hide;
-                if (foundError) {
-                    const zeileUndSpalte = foundError.stack.match(/:(\d+:\d+)/)[1]
-                    content.innerHTML = foundError + " v" + Mod.version + " -> " + zeileUndSpalte + "Forum <a target='_blank' href='" + Mod.forumLink + "'>Link ins Forum</a>"
-                        + "<br>Wer selber nachschauen möchte: der Error inklusive Link wurde auch in die Entwicklerkonsole geschrieben";
+            const thisObject = this;
+            this.#collapsible = util.createCollapsible("20px", true, function (hide) {
+                thisObject.#content.hidden = hide;
+                if (thisObject.#foundError) {
+                    thisObject.#content.innerHTML = thisObject.getHTMLFromError(thisObject.#foundError);
                 } else if (firstClick) {
                     firstClick = false;
-                    const anchor = document.createElement("div");
-                    content.appendChild(anchor);
+                    if (thisObject.#warnings.length > 0) {
+                        for (const warning of thisObject.#warnings) {
+                            const msgElem = document.createElement("div");
+                            msgElem.innerHTML = thisObject.getHTMLFromWarning(warning);
+                            thisObject.#content.append(msgElem);
+                        }
+                    }
+                    const resultAnchor = document.createElement("div");
+                    thisObject.#content.appendChild(resultAnchor);
                     const view = new QueryModel.StatQuery("heroes", "attack", []);
                     const initialStatView = new Viewer.StatView(view, true, false);
-                    new Viewer.StatTable(initialStatView, Mod.thisLevelDatas, anchor);
-                    content.append(document.createElement("br"));
+                    new Viewer.StatTable(initialStatView, Mod.thisLevelDatas, resultAnchor);
+                    thisObject.#content.append(document.createElement("br"));
                 }
             });
-            headings[0].parentNode.insertBefore(header, headings[0].nextSibling);
-            headings[0].parentNode.insertBefore(content, header.nextSibling);
+            headings[0].parentNode.insertBefore(this.#header, headings[0].nextSibling);
+            headings[0].parentNode.insertBefore(thisObject.#content, this.#header.nextSibling);
+        }
 
-            function setTitle(titleMessage) {
-                header.innerHTML = "Erweiterte Kampfstatistiken" + titleMessage;
-                header.append(collapsible);
+        static getHTMLFromError(error) {
+            const zeileUndSpalte = error.stack.match(/:(\d+:\d+)/)[1];
+            return error + " v" + Mod.version + " -> " + zeileUndSpalte + "Forum <a target='_blank' href='" + Mod.forumLink + "'>Link ins Forum</a>"
+                + "<br>Wer selber nachschauen möchte: der Error inklusive Link wurde auch in die Entwicklerkonsole geschrieben";
+        }
+
+        static getHTMLFromWarning(error) {
+            const zeileUndSpalte = error.stack.match(/:(\d+:\d+)/)[1];
+            return error + " v" + Mod.version + " -> " + zeileUndSpalte + "Forum <a target='_blank' href='" + Mod.forumLink + "'>Link ins Forum</a>"
+                + "<br>Wer selber nachschauen möchte: der Error inklusive Link wurde auch in die Entwicklerkonsole geschrieben";
+        }
+
+        static reportWarnings(warnings) {
+            for (const warning of warnings) {
+                this.#warnings.push(warning);
             }
+        }
 
-            function logError(error) {
-                setTitle("<span title='" + error + "'>⚠️ Ein Fehler ist aufgetreten, es konnten diesmal leider keine Statistiken erstellt werden!</span>");
-                foundError = error;
-                if (error.additionals) {
-                    console.error("Ein Fehler wurde abgefangen!", error, ...error.additionals);
-                } else {
-                    console.error("Ein Fehler wurde abgefangen!", error);
+        static setTitle(titleMessage) {
+            this.#header.innerHTML = "Erweiterte Kampfstatistiken" + titleMessage;
+            this.#header.append(this.#collapsible);
+        }
+
+        static logRuntimeError(error) {
+            this.setTitle("<span title='" + error + "'>⚠️ Ein Fehler ist aufgetreten, es konnten diesmal leider keine Statistiken erstellt werden!</span>");
+            this.#foundError = error;
+            if (error.additionals) {
+                console.error("Ein Fehler wurde abgefangen!", error, ...error.additionals);
+            } else {
+                console.error("Ein Fehler wurde abgefangen!", error);
+            }
+        }
+
+        /**
+         * führt die Funktion in einem gesicherten Kontext aus, um aufkommende Fehler abzufangen und konform anzuzeigen
+         * jeglicher Code sollte in diesem Kontext laufen
+         */
+        static runSafe(asyncFunction) {
+            try {
+                const thisObject = this;
+                const functionResult = asyncFunction()
+                if (functionResult && functionResult.catch) {
+                    functionResult.catch(error => {
+                        thisObject.logRuntimeError(error);
+                    });
                 }
+            } catch (error) {
+                this.logRuntimeError(error);
             }
-
-            // führt die Funktion in einem gesicherten Kontext aus, um aufkommende Fehler abzufangen und konform anzuzeigen
-            // jeglicher Code sollte in diesem Kontext laufen
-            Mod.runSafe = function (asyncFunction) {
-                try {
-                    const functionResult = asyncFunction()
-                    if (functionResult && functionResult.catch) {
-                        functionResult.catch(error => {
-                            logError(error);
-                        });
-                    }
-                } catch (error) {
-                    logError(error);
-                }
-            }
-            return {
-                setTitle: setTitle
-            };
         }
     }
 
@@ -486,7 +521,7 @@
             "skillType": {
                 name: "AngriffsTyp",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    return SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.type, "sub", "skillType");
+                    return SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.angriffstyp, "sub", "skillType");
                 }
             },
             "skill": {
@@ -568,7 +603,7 @@
                     curStats.statRoot = statRoot;
                     const filterKriterium = SearchEngine.FilterKriterien[queryFilter.spec];
                     if (!filterKriterium) {
-                        throw error("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
+                        throw _util.error("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
                     }
                     const subStats = filterKriterium.apply(statRoot, curStats, queryFilter, action, target, statTarget, damage);
                     if (!subStats) return subStats;
@@ -707,7 +742,7 @@
                                 SearchEngine.addUnitId(action, action.unit);
                                 action.targets.forEach(target => {
                                     if (statQuery.type === "attack" || statQuery.type === "defense") {
-                                        if (target.type !== "Angriff") { // Es wurde eine Verteidigungs-Probe gewürfelt
+                                        if (target.typ !== "Parade") { // Es wurde eine Verteidigungs-Probe gewürfelt
                                             return;
                                         }
                                     }
@@ -823,12 +858,16 @@
                 super();
                 const center = this.center;
                 const Column = Viewer.Column;
-                this.columns.push(new Column("Aktionen", center("Aktionen<br>(aktive:passive)"), stat => {
-                    let activeActions = statView.query.side === "heroes" ? stat.actionsHelden : stat.actionsMonster;
-                    let passiveActions = statView.query.side === "heroes" ? stat.actionsMonster : stat.actionsHelden;
-                    activeActions = util.arrayFilter(activeActions, action => action.type !== "init");
-                    passiveActions = util.arrayFilter(passiveActions, action => action.type !== "init");
-                    return center(activeActions.length + ":" + passiveActions.length)
+                this.columns.push(new Column("Aktionen", center("Aktionen<br>(Aktiv:Passiv)"), stat => {
+                    let aktivaActions = stat.actions;
+                    aktivaActions = util.arrayFilter(aktivaActions, action => action.type !== "init");
+                    aktivaActions = util.arrayFilter(aktivaActions, action => stat.actionClassification(action).fromMe);
+
+                    let passivaActions = stat.actions;
+                    passivaActions = util.arrayFilter(passivaActions, action => action.type !== "init");
+                    passivaActions = util.arrayFilter(passivaActions, action => stat.actionClassification(action).atMe);
+
+                    return center(aktivaActions.length + ":" + passivaActions.length);
                 }));
                 this.columns.push(new Column("HP", center("HP<br>Rundenbeginn<br>(min-max)"), stat => {
                     const hps = Array();
@@ -855,16 +894,16 @@
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).fromMe);
 
-                    let heal = util.arrayFilter(actions, action => action.fertigkeit.type === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.type === "Wirkung").length;
+                    let heal = util.arrayFilter(actions, action => action.fertigkeit.typ === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.typ === "Verbesserung" || action.fertigkeit.typ === "Ruft Helfer").length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
                 this.columns.push(new Column("Aktionsarten", center("Passiva<br>(Parade / Geheilt / Gebufft)"), stat => {
                     let actions = stat.actions;
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).atMe);
-                    let heal = util.arrayFilter(actions, action => action.fertigkeit.type === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.type === "Wirkung").length;
+                    let heal = util.arrayFilter(actions, action => action.fertigkeit.typ === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.typ === "Verbesserung" || action.fertigkeit.typ === "Ruft Helfer").length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
             }
@@ -944,8 +983,8 @@
                 const awColumn = new Column("Angriffswürfe", center("AW Ø<br>(min-max)"), dmgStat => {
                     var aw = Array(); // Angriffswerte
                     dmgStat.actions.forEach(action => {
-                        if (!action.fertigkeit) {
-                            console.error("Fertigkeit nicht gefunden: ", action);
+                        if (!action.fertigkeit || !action.fertigkeit.wurf) {
+                            console.error("Fertigkeit oder Wurf nicht gefunden: ", action);
                         }
                         aw.push(Number(action.fertigkeit.wurf.value));
                     });
@@ -1018,7 +1057,7 @@
                 for (const column of tableView.columns) {
                     const curHeader = column.header;
                     if (!curHeader || !curHeader.startsWith("<td")) {
-                        throw error("Header-Zelle muss immer mit <td anfangen!", column.id, curHeader);
+                        throw _util.error("Header-Zelle muss immer mit <td anfangen!", column.id, curHeader);
                     }
                     header.innerHTML += curHeader;
                 }
@@ -1032,7 +1071,7 @@
                     for (const column of tableView.columns) {
                         const columnResult = column.cellRenderer(statResult);
                         if (!columnResult.startsWith("<td")) {
-                            throw error("Zelleneintrag muss immer mit <td anfangen!", column.id, columnResult);
+                            throw _util.error("Zelleneintrag muss immer mit <td anfangen!", column.id, columnResult);
                         }
                         line.innerHTML += columnResult;
                     }
@@ -1324,7 +1363,7 @@
                         toBBCodeButtonContainer.removeChild(toBBCodeDone);
                         toBBCodeButtonContainer.append(toBBCodeButton);
                     }, 1500);
-                    navigator.clipboard.writeText(BBCodeExporter.toBBCode(table));
+                    navigator.clipboard.writeText(_BBCodeExporter.toBBCode(table));
                 }
 
                 this.anchor.appendChild(table);
@@ -1672,11 +1711,11 @@
             }
             return objStore;
         }
-        static indexedDb = new Storages.IndexedDb("WoDStats+", Mod.dbname);
+        static indexedDb = new _Storages.IndexedDb("WoDStats+", Mod.dbname);
         static reportStats = this.adjust(this.indexedDb.createObjectStore("reportStats", "reportId"));
 
         /**
-         * @returns {Storages.ObjectStorage}
+         * @returns {_Storages.ObjectStorage}
          */
         static getReportStatsDB() {
             return this.reportStats;
@@ -1691,13 +1730,15 @@
                 if (!report.ts || report.ts < compareDate.getTime()) {
                     await reportDB.deleteValue(report.reportId);
                 } else {
-                    const mySpace = JSON.stringify(report).length;
-                    if (mySpace > 20000000)
-                        console.log("ReportStats: ", report.reportId, (Math.round(10 * mySpace / 1024 / 1025) / 10 + " MB"), report);
-                    spaceSum += mySpace
+                    if (false) {
+                        const mySpace = JSON.stringify(report).length;
+                        if (mySpace > 20000000)
+                            console.log("ReportStats: ", report.reportId, (Math.round(10 * mySpace / 1024 / 1025) / 10 + " MB"), report);
+                        spaceSum += mySpace
+                    }
                 }
             }
-            console.log("ReportStats-Space: " + (Math.round(10 * spaceSum / 1024 / 1025) / 10 + " MB"));
+            //console.log("ReportStats-Space: " + (Math.round(10 * spaceSum / 1024 / 1025) / 10 + " MB"));
         }
 
     }
@@ -1848,7 +1889,7 @@
             collapsible.onclick = function () {
                 collapsed = !collapsed;
                 updateCollapserSrc();
-                Mod.runSafe(function () {
+                OutputAnchor.runSafe(function () {
                     fnCallback(collapsed);
                 })
             }
@@ -1863,13 +1904,6 @@
 
     }
 
-    function error(errorMsg, ...additionals) {
-        const error = new Error(errorMsg);
-        error.additionals = additionals;
-        return error;
-    }
-
     Mod.startMod();
 
-})
-();
+})();

@@ -356,6 +356,10 @@ class demawiRepository {
                 const objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
                 objectStore.indexedDb = this;
                 this.objectStores.push(objectStore);
+                if (this.dbConnection) {
+                    this.closeConnection(this.dbConnection);
+                    this.dbConnection = undefined;
+                }
                 return objectStore;
             }
 
@@ -382,11 +386,13 @@ class demawiRepository {
                 return this.dbConnection;
             }
 
-            closeConnection(request, dbConnection) {
-                delete request.onerror;
-                delete request.onblocked;
-                delete request.onupgradeneeded;
-                delete dbConnection.onversionchange;
+            closeConnection(dbConnection, request) {
+                if (request) {
+                    delete request.onerror;
+                    delete request.onblocked;
+                    delete request.onupgradeneeded;
+                    delete dbConnection.onversionchange;
+                }
                 dbConnection.close();
             }
 
@@ -401,7 +407,7 @@ class demawiRepository {
                         let needNewStores = !thisObject.areAllObjectStoresSynced(dbConnection);
                         // console.log("DBconnect success! (" + thisObject.dbname + ") Need update: " + needNewStores, event);
                         if (needNewStores) {
-                            thisObject.closeConnection(request, dbConnection);
+                            thisObject.closeConnection(dbConnection, request);
                             resolve(thisObject.dbConnect(new Date().getTime())); // force upgrade
                         } else {
                             resolve(event.target.result);
@@ -420,7 +426,7 @@ class demawiRepository {
                         console.log("DBconnect upgradeneeded [" + thisObject.dbname + "]", event);
                         let dbConnection = event.target.result;
                         await thisObject.syncObjectStores(dbConnection);
-                        thisObject.closeConnection(request, dbConnection);
+                        thisObject.closeConnection(dbConnection, request);
                         resolve(thisObject.dbConnect());
                     }
                 });
@@ -651,7 +657,41 @@ class demawiRepository {
             return this.#indexedDb || (this.#indexedDb = new _.Storages.IndexedDb("WoDReportArchiv", "wodDB"));
         }
 
-        static async #getObjectStore(storageId) {
+        static getGroupDb() {
+            return this.#getCreateObjectStore("group", "id");
+        }
+
+        static getSkillsDb() {
+            return this.#getCreateObjectStore("skill", "name");
+        }
+
+        static getLootDb() {
+            return this.#getCreateObjectStore("itemLoot", "id");
+        }
+
+        /**
+         * Einträge in Kampfberichten, die keinen Skill aber einen Effekt enthalten,
+         * können über diese Datenbank spezifiziert werden.
+         */
+        static getSkillsUnknownDb() {
+            return this.#getCreateObjectStore("skillUnknown", "id");
+        }
+
+        /**
+         * Liefert den Object-Store, wenn er noch nicht existiert, wird er angelegt.
+         */
+        static #getCreateObjectStore(name, key, indizes) {
+            let result = this.#objectStores[name];
+            if (result) return result;
+            result = this.#getDb().createObjectStore(name, key, indizes);
+            this.#objectStores[name] = result;
+            return result;
+        }
+
+        /**
+         * Liefert den Object-Store nur, wenn er bereits existiert
+         */
+        static async #getObjectStoreIfExists(storageId) {
             let objectStore = this.#objectStores[storageId];
             if (objectStore === undefined) {
                 objectStore = await this.#getDb().getObjectStore(storageId) || false;
@@ -659,6 +699,10 @@ class demawiRepository {
             }
             return objectStore;
         }
+
+    }
+
+    static WoDLootDb = class {
 
         /**
          * Wenn die Stufe direkt aus dem Kampfbericht-Level kommt.
@@ -679,7 +723,7 @@ class demawiRepository {
          * @param heldenstufeUngesichert die Stufe des eingeloggten Nutzers
          */
         static async #addLoot(itemName, locationName, timestamp, world, heldenstufeGesichert, heldenstufeUngesichert) {
-            const itemLootStore = await this.#getObjectStore("itemLoot");
+            const itemLootStore = await _.WoDStorages.getLootDb();
             const key = itemName.toLowerCase();
             const item = await itemLootStore.getValue(key) || {id: key};
             const lootTable = item.loot || (item.loot = {});
@@ -698,6 +742,120 @@ class demawiRepository {
         static #setNumberValue(obj, property, value) {
             value = Number(value);
             if (!isNaN(value)) obj[property] = value;
+        }
+    }
+
+    static WoDGroupDb = class {
+        static async getSeasonForGroup(groupId, groupName, heroIds) {
+            const groupDb = _.WoDStorages.getGroupDb();
+            let group = await groupDb.getValue(groupId);
+            const now = new Date().getTime();
+            if (!group) {
+                group = {id: groupId, seasons: [{from: now, to: now, name: groupName}], heroes: heroIds};
+                await groupDb.setValue(group);
+                return 1;
+            }
+            const matching = this.matchesOne(group.heroes, heroIds);
+            if (matching) {
+                const currentSeasonNr = group.seasons.length;
+                const currentSeason = group.seasons[currentSeasonNr - 1];
+                currentSeason.to = now;
+                currentSeason.name = groupName;
+                await groupDb.setValue(group);
+                return currentSeasonNr;
+            } else {
+                group.seasons.push({from: now, to: now, name: groupName});
+                await groupDb.setValue(group);
+                return group.seasons.length;
+            }
+        }
+
+        /**
+         * Es muss nur ein Eintrag übereinstimmen.
+         */
+        static matchesOne(list1, list2) {
+            for (const cur of list2) {
+                if (list1.includes(cur)) return true;
+            }
+            return false;
+        }
+    }
+
+    static WoDSkillsDb = class {
+        static #skillDataVersion = 1;
+
+        static TYP = {
+            ANGRIFF: "Angriff",
+            VERSCHLECHTERUNG: "Verschlechterung",
+            HEILUNG: "Heilung",
+            VERBESSERUNG: "Verbesserung",
+            RUFT_HELFER: "Ruft Helfer",
+            INITIATIVE: "Initiative",
+        }
+
+        static ANGRIFFSTYP = {
+            NAHKAMPF: "Nahkampf",
+            FERNKAMPF: "Fernkampf",
+            ZAUBER: "Zauber",
+            SOZIAL: "Sozial",
+            FALLE_ENTSCHAERFEN: "Falle entschärfen",
+            FALLE_AUSLOESEN: "Falle auslösen",
+            NATURGEWALT: "Naturgewalt",
+            KRANKHEIT: "Krankheit",
+            VERSCHRECKEN: "Verschrecken",
+        }
+
+        static async getSkill(skillName) {
+            const skillDb = _.WoDStorages.getSkillsDb();
+            let skill = await skillDb.getValue(skillName);
+            if (skill && skill.v === this.#skillDataVersion) return skill;
+            // ad-hoc load
+            skill = {name: skillName, v: this.#skillDataVersion};
+            const doc = await _.util.loadHTMLDocument(this.getSkillUrl(skillName));
+            this.#parseSkillBeschreibung(doc, skill);
+            if (!skill.typ) {
+                console.warn("Skill '" + skillName + "' kann nicht bestimmt werden", doc);
+                return;
+            }
+            await skillDb.setValue(skill);
+            console.log("Skill-Bestimmung '" + skillName + "'", skill);
+            return skill;
+        }
+
+        static getSkillUrl(skillName) {
+            return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(skillName);
+        }
+
+        static #parseSkillBeschreibung(doc, skill) {
+            for (const entryTR of doc.querySelectorAll(".content_table tr:nth-child(2) > td:nth-child(2) tr")) {
+                const value = entryTR.children[1].textContent.trim();
+                switch (entryTR.children[0].textContent.trim()) {
+                    case "Typ":
+                        // Aktive Angriffe: Angriff, Verschlechterung
+                        // Aktive Sonstiges: Heilung, Verbesserung, Ruft Helfer, Initiative
+                        // Passiv: Parade
+                        skill.typ = value;
+                        break;
+                    case "Verwendbar":
+                        const verwendung = (skill.verwendung = {});
+                        const vr = value.includes("in Vorrunde");
+                        if (vr) verwendung.vr = 1;
+                        const hr = value.includes("in Runde");
+                        if (hr) verwendung.hr = 1;
+                        const heilung = (value === "zur Heilung");
+                        if (heilung) verwendung.h = 1;
+                        const parade = (value === "als Parade");
+                        if (parade) verwendung.p = 1;
+                        break;
+                    case "Angriffstyp": // bei typ = Angriff, Parade, Verschlechterung
+                        // Nahkampf, Fernkampf, Zauber, Sozial, Falle entschärfen, Verschrecken, Falle auslösen, Naturgewalt, Krankheit
+                        skill.angriffstyp = value;
+                        break;
+                    default:
+                        // aktuell egal
+                        break;
+                }
+            }
         }
 
     }
@@ -724,7 +882,7 @@ class demawiRepository {
             return _.WoD.getValueFromMainForm("wod_post_world", doc);
         }
 
-        static getMyGroup(doc) {
+        static getMyGroupName(doc) {
             return _.WoD.getValueFromMainForm("gruppe_name", doc);
         }
 
@@ -812,13 +970,14 @@ class demawiRepository {
                 ts = this.getTimestampFromString(titleSplit[0].trim());
             }
 
+
             const myWorld = this.getMyWorld(doc);
             const result = {
                 reportId: myWorld + reportId, // um mehrere Welten zu unterstützen sollte diese ID verwendet werden
                 world: myWorld,
                 ts: ts, // zu welchem Zeitpunkt der Dungeon stattgefunden hat
                 title: title, // Bei einem Dungeon z.B. der Dungeonname
-                gruppe: this.getMyGroup(doc),
+                gruppe: this.getMyGroupName(doc),
                 gruppe_id: this.getMyGroupId(doc),
                 schlacht: schlacht, // Name der Schlacht
                 stufe: this.getMyStufe(doc),
@@ -886,8 +1045,8 @@ class demawiRepository {
          * {
          *  <heldname>:
          *     { // Member
-         *         money: 123, // erhaltenes Gold
-         *         exeed: trueOpt, // optional, wenn der User seine Anzahl an Gegenständen überschritten hatten
+         *         gold: 123, // erhaltenes Gold
+         *         exceed: trueOpt, // optional, wenn der User seine Anzahl an Gegenständen überschritten hatten
          *         full: trueOpt, // optional, wenn der Rucksack zu voll ist (gibts das?)
          *         ko: trueOpt, // wenn der Charakter bewusstlos geworden ist
          *         loot: [
@@ -919,12 +1078,18 @@ class demawiRepository {
                 member.equip = [];
                 const memberTableUeberschriften = head.nextElementSibling.nextElementSibling.querySelectorAll("h3");
                 const equipped = memberTableUeberschriften[0].nextElementSibling.querySelectorAll("tr");
-                for (let i = 1, l = equipped.length; i < l; i++) {
+                for (let i = 1, l = equipped.length; i < l; i++) { // erst ab Zeile 1
                     const tr = equipped[i];
                     const item = {};
                     member.equip.push(item);
                     item.name = tr.children[1].textContent.trim();
-                    const imgs = tr.querySelectorAll("img");
+                    const itemA = tr.querySelector("a");
+                    let href = itemA.href;
+                    if (!href.includes("?")) { // Fehler von WoD, manchmal wird kein Fragezeichen Initial verwendet
+                        href = href.replace("&", "?");
+                    }
+                    item.id = new URL(href).searchParams.get("id");
+                    if (itemA.classList.contains("item_unique")) item.unique = true;
                     for (const img of tr.querySelectorAll("img")) {
                         const gemMatch = img.src.match(/gem_(.*)\.png/);
                         if (gemMatch && gemMatch[1] !== "0") item.gems = (item.gems || "") + gemMatch[1];
@@ -932,7 +1097,7 @@ class demawiRepository {
                         if (mgemMatch) item.mgems = (item.mgems || "") + mgemMatch[1];
                     }
 
-                    let hpMatch = tr.children[2].textContent.match(/(\d*)\/(\d*) \((.*)\)/);
+                    let hpMatch = (tr.children[2].textContent.trim() + tr.children[3].textContent.trim()).match(/(\d*)\/(\d*)\((.*)\)/);
                     if (hpMatch) item.hp = [Number(hpMatch[1]), Number(hpMatch[2]), Number(hpMatch[3])];
                     else {
                         hpMatch = tr.children[2].textContent.match(/(\d*)\/(\d*)/);
@@ -955,7 +1120,7 @@ class demawiRepository {
                             if (text.includes("nichts gefunden")) break; // einfach ignorieren
                             const goldMatch = text.match(/hat (\d*) gefunden\.$/);
                             if (goldMatch) {
-                                member.money = goldMatch[1];
+                                member.gold = Number(goldMatch[1]);
                                 break;
                             }
                             if (text.includes("ist leider bewusstlos geworden")) {
@@ -992,7 +1157,7 @@ class demawiRepository {
                     }
                 }
             }
-            //console.log("Übersicht Gegenstände", result);
+            console.log("Übersicht Gegenstände", result);
             return result;
         }
 
@@ -1182,17 +1347,10 @@ class demawiRepository {
                 return new JSZip();
             } else {
                 this.jszip_loaded = true;
-                await this.loadViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js")
+                await _.util.evalViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js")
                 console.log("JSZip loaded: " + JSZip.version);
                 return new JSZip();
             }
-        }
-
-        static async loadViaXMLRequest(url) {
-            var xmlHttp = new XMLHttpRequest();
-            xmlHttp.open("GET", url, false); // false for synchronous request
-            xmlHttp.send(null);
-            unsafeWindow.eval(xmlHttp.responseText);
         }
 
         static async loadViaInjection(url) {
@@ -1265,8 +1423,19 @@ class demawiRepository {
                 for (const cur of headerArray) {
                     const td = document.createElement("th");
                     tr.append(td);
-                    td.style.textAlign = "center";
-                    td.innerHTML = cur;
+                    if (cur.tagName) {
+                        td.style.textAlign = "center";
+                        td.innerHTML = "";
+                        td.append(cur);
+                    } else if (typeof cur === "object") {
+                        for (const [key, value] of Object.entries(cur)) {
+                            if (key === "data") td.innerHTML = value;
+                            else td[key] = cur[key];
+                        }
+                    } else {
+                        td.style.textAlign = "center";
+                        td.innerHTML = cur;
+                    }
                 }
             }
             let row = true;
@@ -1278,7 +1447,18 @@ class demawiRepository {
                 for (const cur of curLine) {
                     const td = document.createElement("td");
                     tr.append(td);
-                    td.innerHTML = cur;
+                    if (cur.tagName) {
+                        td.innerHTML = "";
+                        td.append(cur);
+                    } else if (typeof cur === "object") {
+                        for (const [key, value] of Object.entries(cur)) {
+                            if (key === "data") {
+                                if (value.tagName) td.append(value);
+                                else td.innerHTML = value;
+                            } else td[key] = cur[key];
+                        }
+                    } else td.innerHTML = cur;
+
                 }
             }
             return table;
@@ -1328,6 +1508,25 @@ class demawiRepository {
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
     static util = class {
+
+        static async evalViaXMLRequest(url) {
+            const responseText = await this.loadViaXMLRequest(url);
+            unsafeWindow.eval(responseText);
+        }
+
+        static async loadViaXMLRequest(url) {
+            var xmlHttp = new XMLHttpRequest();
+            xmlHttp.open("GET", url, false); // false for synchronous request
+            xmlHttp.send(null);
+            if (xmlHttp.status !== 200) return;
+            return xmlHttp.responseText;
+        }
+
+        static async loadHTMLDocument(url) {
+            const responseText = await this.loadViaXMLRequest(url);
+            if (!responseText) return;
+            return this.getDocumentFor(responseText);
+        }
 
         static cloneObject(obj) {
             return JSON.parse(JSON.stringify(obj));
@@ -1490,11 +1689,23 @@ class demawiRepository {
             error.additionals = additionals;
             return error;
         }
+
+        static fixedEncodeURIComponent(str) {
+            return encodeURIComponent(str).replace(/[!'()*]/g, function (c) {
+                return '%' + c.charCodeAt(0).toString(16);
+            });
+        }
     }
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
     static ReportParser = function () {
+
+        let warnings;
+        const addWarning = function (msg, ...args) {
+            warnings.push(_.util.error(msg, ...args));
+            console.warn(msg, ...args);
+        }
 
         class UnitId {
             name;
@@ -1515,10 +1726,10 @@ class demawiRepository {
             monster;
             actions; // aufgeteilt in vorrunde, regen, initiative, runde
 
-            constructor(nr, roundTR) {
+            async load(nr, roundTR) {
                 let statusTables = roundTR.getElementsByClassName("rep_status_table"); // üblicherweise sollten es immer 2 sein, nur am Ende des Kampfes dann 4
                 if (statusTables.length !== 2 && statusTables.length !== 4) {
-                    console.error("Es wurden keine zwei StatusTable in einer Runde gefunden: " + statusTables.length);
+                    addWarning("Es wurden keine zwei StatusTable in einer Runde gefunden: " + statusTables.length)
                 }
                 this.helden = GruppenStatus.parse(statusTables[0], true);
                 this.monster = GruppenStatus.parse(statusTables[1], false);
@@ -1559,9 +1770,9 @@ class demawiRepository {
                         const actionTD = currentActionTR.children[1];
                         const targetTD = currentActionTR.children[2];
                         if (hatInitiativeWurf) { // Vorrunden-Aktion
-                            Actions.parse(this, currentActionTR, iniTD, actionTD, targetTD).forEach(a => runde.push(a));
+                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => runde.push(a));
                         } else { // Runden-Aktion
-                            Actions.parse(this, currentActionTR, null, actionTD, targetTD).forEach(a => vorrunde.push(a));
+                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => vorrunde.push(a));
                         }
                     }
                 }
@@ -1571,6 +1782,29 @@ class demawiRepository {
                     regen: regen,
                     runde: runde,
                 };
+                delete this.heldenSpawns;
+                delete this.monsterSpawns;
+            }
+
+            spawnUnit(execUnit, newUnitId, node) {
+                let spawnArray;
+                if (execUnit.isHero) {
+                    spawnArray = this.heldenSpawns = this.heldenSpawns || (this.heldenSpawns = []);
+                } else {
+                    spawnArray = this.monsterSpawns = this.monsterSpawns || (this.monsterSpawns = []);
+                }
+                const srcRef = node.innerHTML;
+                const typeRef = node.outerHTML;
+                spawnArray.push({
+                    id: newUnitId,
+                    stufe: "?",
+                    position: "?",
+                    hp: "?",
+                    mp: "?",
+                    zustand: "?",
+                    srcRef: srcRef,
+                    typeRef: typeRef,
+                })
             }
 
             emptyRound() {
@@ -1584,12 +1818,13 @@ class demawiRepository {
 
             //Einen Lookup ausführen, damit die Unit auch immer alle möglichen Information (z.B. Position) trägt.
             unitLookup(unitId) {
-                var lookupUnit = ReportParser.unitSearch(unitId, this.helden);
+                if (unitId.isEreignis) return unitId;
+                let lookupUnit = ReportParser.unitSearch(unitId, this.helden);
+                if (!lookupUnit) lookupUnit = ReportParser.unitSearch(unitId, this.monster);
+                if (!lookupUnit && this.heldenSpawns) lookupUnit = ReportParser.unitSearch(unitId, this.heldenSpawns);
+                if (!lookupUnit && this.monsterSpawns) lookupUnit = ReportParser.unitSearch(unitId, this.monsterSpawns);
                 if (!lookupUnit) {
-                    lookupUnit = ReportParser.unitSearch(unitId, this.monster);
-                }
-                if (!lookupUnit) {
-                    console.error("Unit konnte nicht in der aktuellen Runde gefunden werden!", unitId);
+                    addWarning("Unit konnte nicht in der aktuellen Runde gefunden werden!", unitId);
                     return {
                         id: unitId,
                     };
@@ -1616,7 +1851,7 @@ class demawiRepository {
                     this.result = 1;
                 }
                 if (this.result > -1) {
-                    this.type = "Angriff";
+                    this.typ = "Parade";
                     const pwMatch = strLine.match(/(\(|\/)(\d+)(\)|\/)/); // Eine Zahl wo vorher ( od. / kommt und nachher ) oder /
                     if (pwMatch) {
                         this.fertigkeit = {wurf: pwMatch[2]};
@@ -1626,7 +1861,7 @@ class demawiRepository {
                 } else {
                     var matching = strLine.match(/\+(\d*) HP/)
                     if (matching) { // Single Target Heal
-                        this.type = "Heilung";
+                        this.typ = "Heilung";
                         this.wirkung = {
                             what: "HP",
                             value: matching[1],
@@ -1701,9 +1936,7 @@ class demawiRepository {
                     return "Mana";
                 else if (stringLine.includes("Arkaner Schaden"))
                     return "Arkan";
-                console.error("DamageType kann nicht bestimmt werden: " + stringLine);
-                throw new Error("...");
-                return "???";
+                addWarning("DamageType kann nicht bestimmt werden: " + stringLine);
             }
         }
 
@@ -1815,7 +2048,7 @@ class demawiRepository {
         class GruppenStatus {
 
             static parse(statusTable, heldenJaNein) {
-                var statusTRs = statusTable.children[0].children
+                var statusTRs = statusTable.children[0].children;
                 if (statusTRs[1].innerText.includes("keine kampfbereiten Gegner")) return;
                 var result = Array();
                 for (var i = 1, l = statusTRs.length; i < l; i++) { // ohne Header
@@ -1847,6 +2080,15 @@ class demawiRepository {
         }
 
         class Action {
+            static HAT_ANGRIFFSTYP = {
+                "Angriff": true,
+                "Verschlechterung": true,
+                "Verbesserung": false,
+                "Parade": true,
+                "Heilung": false,
+                "Ruft Helfer": false,
+            }
+
             unit;
             fertigkeit;
             targets;
@@ -1858,20 +2100,32 @@ class demawiRepository {
 
         }
 
-        class Actions {
+        class ActionParser {
 
-            static parse(curRound, actionTR, initiativeTD, actionTD, targetTD) {
+
+            /**
+             * Gibt eine Liste von Actions zurück.
+             *
+             * Als Liste deshalb, weil einige Aktionen mehrere Würfe in einer Aktion haben. Diese wirken auf unterschiedliche Bereiche.
+             * Hierfür werden dann mehrere Aktionen angelegt.
+             */
+            static async parse(curRound, actionTR, actionTD, targetTD) {
+                const unitHref = actionTD.querySelector("a[href*=\"/hero/\"]") || actionTD.querySelector("a[href*=\"/npc/\"]");
+                const execUnit = curRound.unitLookup(ReportParser.getUnitIdFromElement(unitHref));
+
                 var actionText = actionTD.innerText;
                 var who;
                 var wurf;
                 var mp;
-                const [fertigkeiten, unit] = this.actionParse(curRound, actionTD);
+                const [fertigkeiten, unit] = await this.actionParse(curRound, actionTD, targetTD);
                 // Parse Targets
                 var curTargetUnit
                 var currentTarget
                 var currentLine = [];
                 var lineNr = 0;
                 var targets = [];
+
+                const istRuftHelfer = fertigkeiten[0].typ === _.WoDSkillsDb.TYP.RUFT_HELFER;
 
                 function addTarget() {
                     var line = _.util.arrayMap(currentLine, a => a.textContent).join("");
@@ -1881,10 +2135,14 @@ class demawiRepository {
                 }
 
                 for (const curElement of targetTD.childNodes) {
-                    const unitIdCheck = ReportParser.getUnitIdFromElement(curElement, unit.id);
-                    if (unitIdCheck) {
+                    const unitId = ReportParser.getUnitIdFromElement(curElement, unit.id);
+                    if (unitId) {
                         lineNr = 1;
-                        curTargetUnit = curRound.unitLookup(unitIdCheck);
+                        if (istRuftHelfer) {
+                            curRound.spawnUnit(execUnit, unitId, curElement);
+                        } else {
+                            curTargetUnit = curRound.unitLookup(unitId);
+                        }
                         currentLine.push(curElement);
                         currentTarget = null;
                     } else if (lineNr === -1) {
@@ -1932,33 +2190,43 @@ class demawiRepository {
                 return actions;
             }
 
-            static actionParse(curRound, actionTD) {
-                const fertigkeit = {};
-                const childNodes = actionTD.childNodes;
-                const items = Array();
-                var unit;
+            /**
+             * Holt aus dem 'actionTD' die Informationen heraus.
+             * Unit: wer führt die Aktion aus
+             */
+            static async actionParse(curRound, actionTD, targetTD) {
+                const fertigkeit = {
+                    items: [],
+                };
+
+                let unit;
                 const wuerfe = Array();
                 for (const curNode of actionTD.childNodes) {
                     switch (curNode.tagName) {
                         case "IMG":
-                            // z.B. Veredelungen => ignore
-                            break;
+                            break; // z.B. Veredelungen => ignore
                         case "A":
                             if (curNode.href.includes("/hero/") || curNode.href.includes("/npc/")) {
                                 unit = curRound.unitLookup(ReportParser.getUnitIdFromElement(curNode));
                             } else if (curNode.href.includes("/skill/")) {
                                 fertigkeit.name = curNode.textContent.trim();
-                                fertigkeit.typeRef = curNode.outerHTML;
                                 fertigkeit.wirkungen = Wirkung.getWirkungenFromElement(curNode);
+                                fertigkeit.typeRef = curNode.outerHTML;
+                                try {
+                                    const skill = await _.WoDSkillsDb.getSkill(fertigkeit.name);
+                                    if (skill.typ) fertigkeit.typ = skill.typ;
+                                    if (skill.angriffstyp) fertigkeit.angriffstyp = skill.angriffstyp;
+                                } catch (e) {
+                                    throw _.util.error("Fertigkeit: '" + fertigkeit.name + "' kann nicht bestimmt werden");
+                                }
                             } else if (curNode.href.includes("/item/")) {
-                                items.push({
+                                fertigkeit.items.push({
                                     name: curNode.textContent.trim(),
                                     srcRef: curNode.outerHTML,
                                     wirkungen: Wirkung.getWirkungenFromElement(curNode),
                                 });
                             } else {
-                                console.error("Unbekanntes A-Element in Action!", curNode.textContent, curNode);
-                                throw Error("Unbekanntes A-Element in Action!");
+                                addWarning("Unbekanntes A-Element in Action!", curNode.textContent, curNode);
                             }
                             break;
                         case "SPAN":
@@ -1966,231 +2234,96 @@ class demawiRepository {
                                 //unitIdx = curNode.textContent;
                             } else if (curNode.className === "rep_mana_cost") {
                                 fertigkeit.mp = curNode.textContent.match(/(\d*) MP/)[1];
-                            } else if (curNode.className === "rep_gain") { // z.B. "Dunkles Erwachen"
-                                let mpGain = curNode.textContent.match(/\.(\d*) MP/);
+                            } else if (curNode.className === "rep_gain" || curNode.className === "rep_loss") { // z.B. "Dunkles Erwachen"
+                                let mpGain = curNode.textContent.match(/(.*) MP/);
                                 if (mpGain) {
-                                    fertigkeit.mpGain = mpGain[1];
+                                    fertigkeit.mpGain = Number(mpGain[1]);
                                 } else {
-                                    let hpGain = curNode.textContent.match(/\.(\d*) HP/);
+                                    let hpGain = curNode.textContent.match(/(.d*) HP/);
                                     if (hpGain) {
-                                        fertigkeit.hpGain = hpGain[1];
+                                        fertigkeit.hpGain = Number(hpGain[1]);
                                     } else {
-                                        _.util.error("Rep_Gain kann nicht aufgelöst werden", curNode.textContent);
-                                    }
-                                }
-                            } else if (curNode.className === "rep_loss") { // z.B. "Dunkles Erwachen"
-                                let mpGain = curNode.textContent.match(/\.(\d*) MP/);
-                                if (mpGain) {
-                                    fertigkeit.mpGain = -mpGain[1];
-                                } else {
-                                    let hpGain = curNode.textContent.match(/\.(\d*) HP/);
-                                    if (hpGain) {
-                                        fertigkeit.hpGain = -hpGain[1];
-                                    } else {
-                                        _.util.error("Rep_Loss kann nicht aufgelöst werden", curNode.textContent);
+                                        addWarning("Rep_Gain/Rep_Loss kann nicht aufgelöst werden '" + curNode.textContent + "'", curNode);
                                     }
                                 }
                             } else if (curNode.getAttribute("onmouseover") && curNode.children[0].tagName === "A") { // Unit-Wrap z.B. für Helfer
                                 unit = curRound.unitLookup(ReportParser.getUnitIdFromElement(curNode.children[0]));
                             } else {
-                                console.error("Unbekanntes SPAN-Element in Action!", actionTD, curNode);
-                                throw Error("Unbekanntes SPAN-Element in Action!");
+                                addWarning("Unbekanntes SPAN-Element in Action!", actionTD, curNode);
                             }
                             break;
                         case "":
                         case undefined: {
-                            let text = curNode.textContent.trim();
-                            if (!unit) {
-                                // only flavour text without unit reference
-                                unit = {
-                                    name: "? Ereignis",
-                                    id: {
-                                        name: "? Ereignis",
-                                    },
-                                    isHero: false,
-                                    isEreignis: true,
-                                }
-                                fertigkeit.unit = unit;
-                            }
-                            if (text.length < 2) break; // skip
-
-                            const textArray = text.trim().split("/");
-                            textArray.forEach(curText => {
-                                    curText = curText.trim();
-                                    let wurfMatcher = curText.match(/^(\D*)?(\d+)[\.\)]?$/);
-                                    if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
-                                        fertigkeit.type = "Fernkampf";
-                                    } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
-                                        fertigkeit.type = "Fernkampf";
-                                    } else if (curText.startsWith("Eine Flasche mit billigem Fusel nähert sich euch auf einer wirklich beeindruckenden Bahn. Kopf runter!")) { // "Offene Rechnung"
-                                        fertigkeit.type = "Fernkampf";
-                                        wuerfe.push({
-                                            value: 100, // ??
-                                        })
-                                    } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen") || curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) { // z.B. "Dunkles Erwachen"
-                                        fertigkeit.type = "Nahkampf";
-                                    } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
-                                        || curText.startsWith("aus, sie dörrt Körper und Geist aus und lässt euch geschwächt zurück.") // Goldene Dracheneier
-                                    ) {
-                                        fertigkeit.type = "Naturgewalt";
-                                    } else if (curText.startsWith("Die Lemmingflut hat diesen massiven Felsblock")) { // Reise nach Keras
-                                        fertigkeit.type = "Naturgewalt";
-                                        wuerfe.push({
-                                            value: 100, // >53
-                                        })
-                                    } else if (curText.startsWith("auf sein Ziel und brüllt mit harter Stimme: DU gehörst mir!") || curText.startsWith("deutet mit seiner Waffe auf einen Gegner und brüllt mit harter Stimme: DU gehörst mir!") // "Sagenumwobener Zwergenstieg"
-                                        || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
-                                    ) {
-                                        fertigkeit.type = "Sozial";
-                                        if (curText.startsWith("sind einfach überall!")) {
-                                            wuerfe.push({
-                                                value: 40,
-                                            })
-                                        }
-                                    } else if (curText.startsWith("Ups - da ist wohl jemand untergetaucht und hat")) { // Offene Rechnung
-                                        fertigkeit.type = "Krankheit";
-                                    } else if (curText.startsWith("Oh je, was sind das nun wieder für")) {
-                                        fertigkeit.type = "Sozial";
-                                    } else if (curText.includes("Lass mich ziehen") // Eine Reise nach Keras
-                                        || curText.includes("Was willst du überhaupt von mir?") // Eine Reise nach Keras
-                                    ) {
-                                        fertigkeit.type = "Zauber";
-                                        wuerfe.push({
-                                            value: 0, // ??
-                                        })
-                                    } else if (curText.includes("Der beschwerliche Aufstieg hat eure Stärksten")) { // Eine Reise nach Keras
-                                        fertigkeit.type = "Zauber";
-                                        wuerfe.push({
-                                            value: 1000, // ??
-                                        })
-                                    } else if (curText.startsWith("verhilft dem Rentier zu besondern Fähigkeiten.")) {// Eine Reise nach Keras)
-                                        fertigkeit.type = "Naturgewalt";
-                                        wuerfe.push({
-                                            value: 100, // >17
-                                        })
-                                    } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe")
-                                        || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")
-                                        || curText.includes("Eine Flasche mit warmem Glühwein. Dieses Getränk belebt und hält wohlig warm.") // Reise nach Keras
-                                        || curText.includes("Resolut schiebt sich") // Hut ab!
-                                    ) {
-                                        fertigkeit.type = "Ereignis";
-                                    } else if (curText.startsWith("Mit ungeahnter Wucht lösen sich Teile der schwarzen Substanz von Dnobs Körper und fliegen in alle Richtungen")) { // Herz der Schatten
-                                        fertigkeit.type = "Fernkampf";
-                                    } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")
-                                        || curText.startsWith("Das Rentier geht eine innige Beziehung zu einem Helden ein") // Eine Reise nach Keras
-                                        || curText.startsWith("Das Rentier erhält die innige Beziehung zu einem") // Eine Reise nach Keras
-                                        || curText.includes("Räumt den Stein weg, ihr Narren") // Eine Reise nach Keras
-                                        || curText.startsWith("Hargow braucht offenbar Platz um sich ausreichend um Xeron zu kümmern") // Eine Reise nach Keras
-                                    ) {
-                                        fertigkeit.type = "Wirkung";
-                                    } else if (curText.startsWith("Weitere Menschen schließen sich der Gruppe an")) { // offene Rechnung, Herbeirufung
-                                        fertigkeit.type = "Ereignis";
-                                    } else if (curText.startsWith("Einer von euch war unvorsichtig genug")) {
-                                        fertigkeit.type = "Falle";
-                                        wuerfe.push({
-                                            value: 70, // >67
-                                        })
-                                    }
-                                    if (wurfMatcher) { // wurf
-                                        let wo = wurfMatcher[1];
-                                        if (wo && wo.endsWith(":")) {
-                                            wo = wo.replace(":", "").trim();
-                                        }
-                                        wuerfe.push({
-                                            value: wurfMatcher[2],
-                                            dest: wo,
-                                        })
-                                    } else if (!fertigkeit.type) {
-                                        curText = curText.replace("(", "").replace(")", "").trim();
-                                        switch (curText) {
-                                            case "auf":
-                                            case "":
-                                            case "Das": // z.B. "Urlaub in den Bergen"
-                                            case "Der": // "Sagenumwobener Zwergenstieg"
-                                            case "mit seiner Waffe deutet": // "Sagenumwobener Zwergenstieg"
-                                            case "geht von": // Goldene Dracheneier
-                                            case "Mit seinem": // Goldene Dracheneier
-                                            case "entreißt": // Goldene Dracheneier
-                                                break;
-                                            case "ruft voller Schmerzen um Hilfe...": // z.B. Dungeon "Urlaub in den Bergen"
-                                            case "hält sein Opfer fest gefangen und verursacht tiefe Wunden...": // z.B. Dungeon "Urlaub in den Bergen" (verursacht wohl Schaden)
-                                            case "befindet sich in eurer Gefangenschaft - er wird kontrolliert von:": // z.B. Dungeon "Katz und Maus"
-                                            case "wird getragen von": // z.B. Weißzahnturm Lvl4 wirkt auf 2 Charaktere
-                                            // Debuff: "Den Alchemisten tragen"
-                                            case "wirkt":
-                                                fertigkeit.type = "Wirkung";
-                                                break;
-                                            case "heilt mittels":
-                                                fertigkeit.type = "Heilung";
-                                                break;
-                                            case "greift per Fernkampf an":
-                                                fertigkeit.type = "Fernkampf";
-                                                break;
-                                            case "greift im Nahkampf an":
-                                                fertigkeit.type = "Nahkampf";
-                                                break;
-                                            case "greift magisch an":
-                                                fertigkeit.type = "Zauber";
-                                                break;
-                                            case "greift sozial an":
-                                                fertigkeit.type = "Sozial";
-                                                break;
-                                            case "greift hinterhältig an":
-                                                fertigkeit.type = "Hinterhalt";
-                                                break;
-                                            case "verseucht":
-                                                fertigkeit.type = "Krankheit";
-                                                break;
-                                            case "entschärft":
-                                                fertigkeit.type = "Falle entschärfen";
-                                                break;
-                                            case "wirkt als Naturgewalt auf":
-                                                fertigkeit.type = "Naturgewalt";
-                                                break;
-                                            case "wird ausgelöst auf":
-                                                fertigkeit.type = "Falle";
-                                                break;
-                                            case "erwirkt eine Explosion gegen":
-                                                fertigkeit.type = "Explosion";
-                                                break;
-                                            case "ruft herbei mittels":
-                                                fertigkeit.type = "Herbeirufung";
-                                                break;
-                                            case "verschreckt":
-                                                fertigkeit.type = "Verschrecken";
-                                                break;
-                                            default:
-                                                console.error("Unbekannter Fertigkeits-Typ(1) ", "'" + curText + "'", actionTD);
-                                                throw Error("Unbekannter Fertigkeits-Typ!(1)");
-                                                break;
-                                        }
-                                    }
-                                }
-                            )
-                            ;
-
                             break;
                         }
                         default:
-                            console.error("Unbekannter Tag '" + curNode.tagName + "' Element in Action!", curNode);
-                            throw Error("Unbekannter Tag '" + curNode.tagName + "' Element in Action!");
+                            addWarning("Unbekannter Tag '" + curNode.tagName + "' Element in Action!", curNode);
                             break;
                     }
                 }
-                fertigkeit.items = items;
 
-                if (!fertigkeit.type) {
-                    switch (fertigkeit.name) {
-                        case "Stinkt gewaltig": // z.B. Manufaktur im verlassenden Tal
-                            fertigkeit.type = "Krankheit";
-                            break;
-                        default:
-                            console.error("Unbekannter Fertigkeits-Typ(2)", fertigkeit, actionTD);
-                            fertigkeit.type = "Unbekannt: " + fertigkeit.name;
-                            _.util.error("Unbekannter Fertigkeits-Typ", fertigkeit, actionTD);
-                            break;
+                if (!fertigkeit.typ) { // Es wurde kein Skill im actionTD gefunden. Versuchen über potenzielle Paraden diesen abzuleiten.
+                    const unknownIdentifier = this.getIdentifierOfTheUnknown(actionTD);
+                    const unknownSkillDb = _.WoDStorages.getSkillsUnknownDb();
+                    const unknownEntry = await unknownSkillDb.getValue(unknownIdentifier) || {id: unknownIdentifier};
+                    // TODO: weiter definieren in welchem Dungeon und in welchem Level, gab es nen variablen Wurf oder ist der auch unbekannt?
+
+                    const genutzterSkillA = targetTD.querySelector("a[href*=\"/skill/\"]");
+                    if (genutzterSkillA) {
+                        const skill = await _.WoDSkillsDb.getSkill(genutzterSkillA.textContent);
+                        if (skill) {
+                            fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF; // kann Angriff oder Verschlechterung sein!!
+                            fertigkeit.angriffstyp = skill.angriffstyp;
+
+                            unknownEntry.typ = fertigkeit.typ;
+                            unknownIdentifier.angriffstyp = fertigkeit.angriffstyp;
+                            console.log("Automatische Skill-Ableitung => " + fertigkeit.angriffstyp, actionTD, actionTD.textContent);
+                        }
+                    }
+                    await unknownSkillDb.setValue(unknownEntry);
+
+                    if (!fertigkeit.typ) {
+                        addWarning("Eine Fertigkeit konnte nicht automatisch bestimmt werden und fällt in das Fallback", actionTD, actionTD.textContent, unknownIdentifier);
                     }
                 }
+
+
+                // Würfe bestimmen und Fallback für Einträge ohne Fertigkeits-Link
+                const tempFertigkeit = {};
+                for (const curNode of actionTD.childNodes) {
+                    switch (curNode.tagName) {
+                        case "":
+                        case undefined: {
+                            this.iterationOnTextNode(actionTD, curNode, tempFertigkeit, wuerfe);
+                            break;
+                        }
+                    }
+                }
+                if (!fertigkeit.typ && tempFertigkeit.typ) fertigkeit.typ = tempFertigkeit.typ;
+                if (!fertigkeit.angriffstyp && tempFertigkeit.angriffstyp) fertigkeit.angriffstyp = tempFertigkeit.angriffstyp;
+
+                if (!fertigkeit.typ) {
+                    addWarning("Unbekannter Fertigkeits-Typ: " + fertigkeit.typ, fertigkeit);
+                    throw _.util.error("Unbekannter Fertigkeits-Typ: " + fertigkeit.typ, fertigkeit);
+                }
+                if (!fertigkeit.angriffstyp && Action.HAT_ANGRIFFSTYP[fertigkeit.typ]) {
+                    addWarning("Benötigter Angriffstyp für: " + fertigkeit.typ, fertigkeit);
+                    throw _.util.error("Benötigter Angriffstyp für: " + fertigkeit.typ, fertigkeit);
+                }
+
+                if (!unit) {
+                    // Wir haben keine Unit-Referenz gefunden wird insofern irgendein Ereignis sein.
+                    unit = {
+                        name: "Ereignis",
+                        id: {
+                            name: "Ereignis",
+                        },
+                        isHero: false,
+                        isEreignis: true,
+                    }
+                    fertigkeit.unit = unit;
+                }
+
                 const fertigkeiten = Array();
                 if (wuerfe.length <= 1) {
                     fertigkeit.wurf = wuerfe[0];
@@ -2200,9 +2333,137 @@ class demawiRepository {
                         const temp = _.util.cloneObject(fertigkeit);
                         temp.wurf = wurf;
                         fertigkeiten.push(temp);
-                    })
+                    });
                 }
                 return [fertigkeiten, unit];
+            }
+
+            static getIdentifierOfTheUnknown(actionTD) {
+                const definitionElem = actionTD.cloneNode(true);
+                for (let i = 0; i < definitionElem.childNodes.length; i++) {
+                    const cur = definitionElem.childNodes[i];
+                    if (cur.tagName) {
+                        definitionElem.removeChild(cur);
+                        i--;
+                    }
+                }
+                return definitionElem.textContent.replace(/ ?\(.*\) ?/g, "").replaceAll("\n", "").trim(); // Alle Klammer+inhalte beseitigen.
+            }
+
+            static iterationOnTextNode(actionTD, curNode, fertigkeit, wuerfe) {
+                let text = curNode.textContent.trim();
+                if (text.length < 2) return;
+
+                const textArray = text.trim().split("/");
+                textArray.forEach(curText => {
+                        curText = curText.trim();
+                        let wurfMatcher = curText.match(/^(\D*)?(\d+)[.)]?(\D*)?$/);
+                        if (wurfMatcher) { // wurf
+                            let wo = wurfMatcher[1];
+                            if (wo && wo.endsWith(":")) {
+                                wo = wo.replace(":", "").trim();
+                            }
+                            wuerfe.push({
+                                value: wurfMatcher[2],
+                                dest: wo,
+                            })
+                        }
+                        if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Fernkampf";
+                        } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Fernkampf";
+                        } else if (curText.startsWith("Eine Flasche mit billigem Fusel nähert sich euch auf einer wirklich beeindruckenden Bahn. Kopf runter!")) { // "Offene Rechnung"
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Fernkampf";
+                            wuerfe.push({
+                                value: 100, // ??
+                            })
+                        } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen")) { // z.B. "Dunkles Erwachen"
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Nahkampf";
+                        } else if (curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) {
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "?";
+                        } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
+                            || curText.startsWith("aus, sie dörrt Körper und Geist aus und lässt euch geschwächt zurück.") // Goldene Dracheneier
+                        ) {
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Naturgewalt";
+                        } else if (curText.startsWith("Die Lemmingflut hat diesen massiven Felsblock")) { // Reise nach Keras
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Naturgewalt";
+                            wuerfe.push({
+                                value: 100, // >53
+                            })
+                        } else if (curText.startsWith("auf sein Ziel und brüllt mit harter Stimme: DU gehörst mir!") || curText.startsWith("deutet mit seiner Waffe auf einen Gegner und brüllt mit harter Stimme: DU gehörst mir!") // "Sagenumwobener Zwergenstieg"
+                            || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
+                        ) {
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Sozial";
+                            if (curText.startsWith("sind einfach überall!")) {
+                                wuerfe.push({
+                                    value: 40,
+                                })
+                            }
+                        } else if (curText.startsWith("Ups - da ist wohl jemand untergetaucht und hat")) { // Offene Rechnung
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Krankheit";
+                        } else if (curText.startsWith("Oh je, was sind das nun wieder für")) {
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Sozial";
+                        } else if (curText.includes("Lass mich ziehen") // Eine Reise nach Keras
+                            || curText.includes("Was willst du überhaupt von mir?") // Eine Reise nach Keras
+                        ) {
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Zauber";
+                            wuerfe.push({
+                                value: 0, // ??
+                            })
+                        } else if (curText.includes("Der beschwerliche Aufstieg hat eure Stärksten")) { // Eine Reise nach Keras
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Zauber";
+                            wuerfe.push({
+                                value: 1000, // ??
+                            })
+                        } else if (curText.startsWith("verhilft dem Rentier zu besondern Fähigkeiten.")) {// Eine Reise nach Keras)
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Naturgewalt";
+                            wuerfe.push({
+                                value: 100, // >17
+                            })
+                        } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe")
+                            || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")
+                            || curText.includes("Eine Flasche mit warmem Glühwein. Dieses Getränk belebt und hält wohlig warm.") // Reise nach Keras
+                            || curText.includes("Resolut schiebt sich") // Hut ab!
+                        ) {
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Ereignis";
+                        } else if (curText.startsWith("Mit ungeahnter Wucht lösen sich Teile der schwarzen Substanz von Dnobs Körper und fliegen in alle Richtungen")) { // Herz der Schatten
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Fernkampf";
+                        } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")
+                            || curText.startsWith("Das Rentier geht eine innige Beziehung zu einem Helden ein") // Eine Reise nach Keras
+                            || curText.startsWith("Das Rentier erhält die innige Beziehung zu einem") // Eine Reise nach Keras
+                            || curText.includes("Räumt den Stein weg, ihr Narren") // Eine Reise nach Keras
+                            || curText.startsWith("Hargow braucht offenbar Platz um sich ausreichend um Xeron zu kümmern") // Eine Reise nach Keras
+                        ) {
+                            fertigkeit.typ = "Verbesserung";
+                            fertigkeit.angriffstyp = "Wirkung";
+                        } else if (curText.startsWith("Weitere Menschen schließen sich der Gruppe an")) { // offene Rechnung, Herbeirufung
+                            fertigkeit.typ = "Ruft Helfer";
+                            fertigkeit.angriffstyp = "Ereignis";
+                        } else if (curText.startsWith("Einer von euch war unvorsichtig genug")) {
+                            fertigkeit.typ = "Angriff";
+                            fertigkeit.angriffstyp = "Falle auslösen";
+                            wuerfe.push({
+                                value: 70, // >67
+                            })
+                        }
+
+                    }
+                )
             }
 
         }
@@ -2221,7 +2482,8 @@ class demawiRepository {
                 }
             }
 
-            static readKampfbericht(container) {
+            static async readKampfbericht(container) {
+                warnings = [];
                 const roundContentTable = this.#getContentTable(container);
                 const areas = Array();
                 let curArea;
@@ -2246,13 +2508,16 @@ class demawiRepository {
                             curArea = {rounds: Array()};
                             areas.push(curArea);
                         }
-                        curArea.rounds.push(new Round(curArea.rounds.length + 1, roundTR));
+                        const round = new Round();
+                        await round.load(curArea.rounds.length + 1, roundTR);
+                        curArea.rounds.push(round);
                     }
                     closeArea(curArea);
                 }
                 result.areas = areas;
+                if (warnings.length > 0) result.warnings = warnings;
                 console.log("Parsed Report: ", result);
-                return result;
+                return [result, warnings];
             }
 
             /**
@@ -2292,7 +2557,7 @@ class demawiRepository {
             //im Target kann auch "sich" stehen, das wird dann entsprechend durch die zusätzliche Angabe "unitId" ersetzt.
             static getUnitIdFromElement(element, unitId) {
                 if (!element) { // Ereignis
-                    return new UnitId("? Ereignis", undefined, false, true);
+                    return new UnitId("Ereignis", undefined, false, true);
                 }
                 if (!element.tagName) {
                     if (element.textContent.includes("sich")) {

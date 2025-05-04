@@ -3,7 +3,7 @@
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
 // @include        https://*.world-of-dungeons.*/wod/spiel/*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.3
+// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
 // ==/UserScript==
 // *************************************************************
 // *** [WoD] Item-Datenbank                                  ***
@@ -19,7 +19,8 @@
 
     const _Storages = demawiRepository.import("Storages");
     const _WoDStorages = demawiRepository.import("WoDStorages");
-    const BBCodeExporter = demawiRepository.import("BBCodeExporter");
+    const _WoDLootDb = demawiRepository.import("WoDLootDb");
+    const _BBCodeExporter = demawiRepository.import("BBCodeExporter");
     const _File = demawiRepository.import("File");
     const _WoD = demawiRepository.import("WoD");
     const _util = demawiRepository.import("util");
@@ -230,7 +231,7 @@
                 searchContainerTitle.append(toBBCodeButton);
 
                 async function updateMissingButton() {
-                    const allItems = await MyStorage.getItemSourceDB().parse();
+                    const allItems = await MyStorage.getItemSourceDB().getAll();
                     var itemsToLoad = 0;
                     var allItemCount = 0;
                     for (const item of allItems) {
@@ -265,7 +266,7 @@
                 resultContainer.append(originalResultTable);
 
                 toBBCodeButton.onclick = function () {
-                    navigator.clipboard.writeText(BBCodeExporter.toBBCode(resultContainer));
+                    navigator.clipboard.writeText(_BBCodeExporter.toBBCode(resultContainer));
                 }
 
                 WoD.getSuchfeld().onkeydown = function (event) {
@@ -324,9 +325,9 @@
                 async function getItemResult() {
                     var items;
                     if (itemDBSearch.checked) {
-                        items = await MyStorage.getItemDB().parse();
+                        items = await MyStorage.getItemDB().getAll();
                     } else {
-                        items = await MyStorage.getItemSourceDB().parse();
+                        items = await MyStorage.getItemSourceDB().getAll();
                     }
                     const itemResult = Array();
                     for (const item of items) {
@@ -1263,7 +1264,7 @@
 
         static async rewriteAllItemsFromSource() {
             console.log("rewriteAllItemsFromSource");
-            let itemSources = await MyStorage.getItemSourceDB().parse();
+            let itemSources = await MyStorage.getItemSourceDB().getAll();
             for (const itemSource of itemSources) {
                 if (itemSource.invalid) {
                     await MyStorage.getItemDB().deleteValue(itemSource.name);
@@ -1603,7 +1604,6 @@
             if (!stufe) console.log("Keine Stufe gefunden: ", report);
             const timeString = (report && report.time) || titleSplit[0].trim();
             const timestamp = _util.parseStandardTimeString(_WoD.getTimeString(timeString));
-            console.log("Timestamp: ", timestamp, _WoD.getTimeString(timeString));
             const world = _WoD.getMyWorld();
             // console.log("Found Items: " + doc.getElementsByTagName("h3"));
             for (const elem of doc.getElementsByTagName("h3")) {
@@ -1617,7 +1617,7 @@
             if (!table) return;
             for (const aHref of table.getElementsByClassName("report")) {
                 const itemName = util.getItemNameFromElement(aHref);
-                await _WoDStorages.addLootUnsafe(itemName, dungeonName, timestamp, world, stufe);
+                await _WoDLootDb.addLootUnsafe(itemName, dungeonName, timestamp, world, stufe);
             }
         }
 
@@ -1729,7 +1729,7 @@
         static AUSWAHL_IDS = [3, 4, 5, 6, 7, 10, 11];
 
         static getItemUrl(itemName) {
-            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + encodeURIComponent(itemName);
+            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _util.fixedEncodeURIComponent(itemName);
         }
 
         static getSuchfeld() {
