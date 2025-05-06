@@ -203,7 +203,7 @@ class demawiRepository {
                 for (var i = 0, l = objectStoresRead.length; i < l; i++) {
                     let readFrom = objectStoresRead[i];
                     let writeTo = objectStoresWrite[i];
-                    for (const cur of await readFrom.parse()) {
+                    for (const cur of await readFrom.getAll()) {
                         await writeTo.setValue(cur);
                     }
                 }
@@ -622,7 +622,7 @@ class demawiRepository {
 
             async cloneTo(toObjectStore, overwrite) {
                 console.log("Clone objectstore '" + this.storageId + "' to '" + toObjectStore.storageId + "'...");
-                if (!overwrite && await toObjectStore.getAllKeys().length !== 0) {
+                if (!overwrite && (await toObjectStore.getAllKeys()).length !== 0) {
                     console.error("Zielobjectstore '" + toObjectStore.storageId + "' ist nicht leer!");
                     return;
                 }
@@ -637,8 +637,8 @@ class demawiRepository {
          * Der Ziel-Storage muss dabei leer sein.
          */
         static async migrate(from, to) {
-            if ((await this.to.parse()).length > 0) return; // nur migrieren wenn die Zieldatenbank leer ist
-            const db = await this.from.parse();
+            if ((await this.to.getAll()).length > 0) return; // nur migrieren wenn die Zieldatenbank leer ist
+            const db = await this.from.getAll();
             for (const report of db) {
                 this.to.setValue(report);
             }
@@ -704,28 +704,86 @@ class demawiRepository {
 
     static WoDLootDb = class {
 
+        static async getValue(itemId) {
+            return await _.WoDStorages.getLootDb().getValue(itemId);
+        }
+
+        static async isDungeonUnique(itemId) {
+            itemId = itemId.toLowerCase();
+            const itemLoot = await this.getValue(itemId);
+            let location;
+            for (const loot of Object.values(itemLoot.loot)) {
+                if (!location) location = loot.loc;
+                else if (location !== loot.loc) return false;
+            }
+            return true;
+        }
+
+        static async hasLootedBefore(itemName, groupSeasonId, timestamp) {
+            const id = itemName.toLowerCase();
+            const lootDef = await _.WoDLootDb.getValue(id);
+            const groupsDef = lootDef.groups;
+            if (!groupsDef) return false;
+            const groupDef = groupsDef[groupSeasonId];
+            if (!groupDef) return false;
+            for (const ts of Object.keys(groupDef)) {
+                if (Number(ts) < timestamp) return true;
+            }
+            return false;
+        }
+
+        static async getLootedBefore(itemName, groupSeasonId, timestamp) {
+            const id = itemName.toLowerCase();
+            const lootDef = await _.WoDLootDb.getValue(id);
+            const groupsDef = lootDef.groups;
+            if (!groupsDef) return false;
+            const groupDef = groupsDef[groupSeasonId];
+            if (!groupDef) return false;
+            let count = 0;
+            for (const [ts, def] of Object.entries(groupDef)) {
+                if (Number(ts) < timestamp) count = def.count;
+            }
+            return count;
+        }
+
         /**
          * Wenn die Stufe direkt aus dem Kampfbericht-Level kommt.
          */
-        static async addLootSafe(itemName, locationName, timestamp, world, stufe) {
-            await this.#addLoot(itemName, locationName, timestamp, world, stufe);
+        static async addLootSafe(itemName, count, locationName, timestamp, world, groupSeasonId, stufe) {
+            return await this.addLoot(itemName, count, locationName, timestamp, world, groupSeasonId, stufe, undefined);
         }
 
         /**
          * Wenn die Stufe nur über den eingeloggten User kommt.
          */
-        static async addLootUnsafe(itemName, locationName, timestamp, world, stufe) {
-            await this.#addLoot(itemName, locationName, timestamp, world, undefined, stufe);
+        static async addLootUnsafe(itemName, count, locationName, timestamp, world, groupSeasonId, stufe) {
+            return await this.addLoot(itemName, count, locationName, timestamp, world, groupSeasonId, undefined, stufe);
         }
 
         /**
+         * Für den allgemeinen Loot interessiert uns nur, ob etwas gedroppt ist aber nicht wieviel.
+         * Für die Gruppe interessiert uns auch die Menge.
+         *
+         * @param count hier die genaue Menge wie viel von dem Item gelootet wurde, kann auch 0 sein, nur um den allgemeinen Drop zu verzeichnen. Der count wird nur für den Gruppenloot verwendet.
          * @param heldenstufeGesichert die Stufe aus den Kampfberichten
          * @param heldenstufeUngesichert die Stufe des eingeloggten Nutzers
+         * TODO: LootTabelle ab einer bestimmten Anzahl kürzen
+         * TODO: locationVersion noch hinzufügen. Wird aber wohl optional werden
          */
-        static async #addLoot(itemName, locationName, timestamp, world, heldenstufeGesichert, heldenstufeUngesichert) {
+        static async addLoot(itemName, count, locationName, timestamp, world, groupSeasonId, heldenstufeGesichert, heldenstufeUngesichert) {
+            if (!groupSeasonId) {
+                console.error("GroupSeasonId wurde beim Loot nicht übermittelt!", itemName);
+                return;
+            }
+            if (!heldenstufeGesichert && !heldenstufeUngesichert) {
+                console.error("Heldestufe wurde beim Loot nicht übermittelt!", itemName);
+                return;
+            }
             const itemLootStore = await _.WoDStorages.getLootDb();
             const key = itemName.toLowerCase();
-            const item = await itemLootStore.getValue(key) || {id: key};
+            const item = await itemLootStore.getValue(key) || {id: key, groups: {}};
+
+            // Allgemeiner Loot: Timestamp => World, LocationName, Stufe(Stufe_)
             const lootTable = item.loot || (item.loot = {});
             const curLoot = lootTable[timestamp] || (lootTable[timestamp] = {});
             curLoot.world = world;
@@ -736,7 +794,18 @@ class demawiRepository {
             } else {
                 this.#setNumberValue(curLoot, "stufe_", curLoot.stufe_ || heldenstufeUngesichert);
             }
+
+            if (count > 0) {
+                // Gruppen Loot: groupSeasonId => Timestamp => LocationName, Count
+                const groupsTable = item.groups || (item.groups = {});
+                const groupLoot = groupsTable[groupSeasonId] || (groupsTable[groupSeasonId] = {});
+                const curGroupLoot = groupLoot[timestamp] || (groupLoot[timestamp] = {});
+                curGroupLoot.loc = locationName;
+                curGroupLoot.count = count;
+            }
+
             await itemLootStore.setValue(item);
+            return item;
         }
 
         static #setNumberValue(obj, property, value) {
@@ -745,35 +814,77 @@ class demawiRepository {
         }
     }
 
+    /**
+     * season.heroes enthält alle heroIds die jemals in der Gruppe waren.
+     * Die Season ändert sich erst, wenn gar keine ID mehr gefunden werden kann.
+     */
     static WoDGroupDb = class {
-        static async getSeasonForGroup(groupId, groupName, heroIds) {
+
+        static async getGroupSeasonId(world, groupId, groupName, heroIds) {
+            return world + groupId + "#" + await this.getGroupSeasonNr(world, groupId, groupName, heroIds);
+        }
+
+        static async getGroupSeasonNr(world, groupId, groupName, heroIds) {
+            const [group, seasonNr] = await this.getGroupSeason(world, groupId, groupName, heroIds);
+            return seasonNr;
+        }
+
+        static async getGroupSeason(world, groupId, groupName, heroIds) {
+            if (heroIds.length === 0) throw new Error("Eine Gruppe kann ohne HeldenIds nicht gefunden werden!");
+            if (typeof heroIds[0] !== "number") throw new Error("HeldenIds müssen immer vom Typ 'number' sein! Es war stattdessen: '" + (typeof heroIds[0]) + "'");
+
             const groupDb = _.WoDStorages.getGroupDb();
-            let group = await groupDb.getValue(groupId);
+            let group = await groupDb.getValue(world + groupId);
             const now = new Date().getTime();
             if (!group) {
-                group = {id: groupId, seasons: [{from: now, to: now, name: groupName}], heroes: heroIds};
+                const newSeason = {from: now, to: now, name: groupName, heroes: heroIds};
+                group = {id: world + groupId, seasons: [newSeason]};
                 await groupDb.setValue(group);
-                return 1;
+                return [group, 1];
             }
-            const matching = this.matchesOne(group.heroes, heroIds);
-            if (matching) {
-                const currentSeasonNr = group.seasons.length;
-                const currentSeason = group.seasons[currentSeasonNr - 1];
-                currentSeason.to = now;
-                currentSeason.name = groupName;
-                await groupDb.setValue(group);
-                return currentSeasonNr;
+
+            let [foundSeasonNr, foundSeason] = this.#findMatchingSeason(group.seasons, heroIds);
+            if (foundSeason) {
+                let changed = false;
+                if (heroIds.includes(_.WoD.getMyHeroIdFirst())) { // prüft, ob der aktuelle SessionHero auch Teil der Gruppe ist
+                    foundSeason.to = now;
+                    foundSeason.name = groupName;
+                    changed = true;
+                }
+                if (this.#addIfNotExist(heroIds, foundSeason.heroes)) changed = true;
+                if (changed) await groupDb.setValue(group);
+                return [group, foundSeasonNr];
             } else {
-                group.seasons.push({from: now, to: now, name: groupName});
+                const newSeason = {from: now, to: now, name: groupName, heroes: heroIds};
+                group.seasons.push(newSeason);
                 await groupDb.setValue(group);
-                return group.seasons.length;
+                return [group, group.seasons.length];
             }
+        }
+
+        static #addIfNotExist(fromList, toList) {
+            let changed = false;
+            for (const cur of fromList) {
+                if (!toList.includes(cur)) {
+                    changed = true;
+                    toList.push(cur);
+                }
+            }
+            return changed;
+        }
+
+        static #findMatchingSeason(seasons, heroIds) {
+            for (let i = 0, l = seasons.length; i < l; i++) {
+                const season = seasons[i];
+                if (this.#matchesOne(season.heroes, heroIds)) return [i + 1, season];
+            }
+            return [];
         }
 
         /**
          * Es muss nur ein Eintrag übereinstimmen.
          */
-        static matchesOne(list1, list2) {
+        static #matchesOne(list1, list2) {
             for (const cur of list2) {
                 if (list1.includes(cur)) return true;
             }
@@ -782,7 +893,7 @@ class demawiRepository {
     }
 
     static WoDSkillsDb = class {
-        static #skillDataVersion = 1;
+        static #skillDataVersion = 2;
 
         static TYP = {
             ANGRIFF: "Angriff",
@@ -803,6 +914,8 @@ class demawiRepository {
             NATURGEWALT: "Naturgewalt",
             KRANKHEIT: "Krankheit",
             VERSCHRECKEN: "Verschrecken",
+            HINTERHALT: "Hinterhalt",
+            EXPLOSION: "Explosion",
         }
 
         static async getSkill(skillName) {
@@ -810,8 +923,10 @@ class demawiRepository {
             let skill = await skillDb.getValue(skillName);
             if (skill && skill.v === this.#skillDataVersion) return skill;
             // ad-hoc load
-            skill = {name: skillName, v: this.#skillDataVersion};
-            const doc = await _.util.loadHTMLDocument(this.getSkillUrl(skillName));
+            skill = {name: skillName, v: this.#skillDataVersion, ts: new Date().getTime()};
+            const content = await _.util.loadViaXMLRequest(this.getSkillUrlAlsPopup(skillName));
+            skill.src = content;
+            const doc = await _.util.getDocumentFor(content);
             this.#parseSkillBeschreibung(doc, skill);
             if (!skill.typ) {
                 console.warn("Skill '" + skillName + "' kann nicht bestimmt werden", doc);
@@ -822,7 +937,7 @@ class demawiRepository {
             return skill;
         }
 
-        static getSkillUrl(skillName) {
+        static getSkillUrlAlsPopup(skillName) {
             return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(skillName);
         }
 
@@ -867,13 +982,14 @@ class demawiRepository {
         /**
          * Nutzt zur Sicherheit die letzte "the_form" des Dokumentes, falls Seiten aus dem Archiv angezeigt werden.
          */
-        static getMainForm(doc) {
+        static getMainForm(doc, first) {
             const forms = (doc || document).getElementsByName("the_form");
+            if (first) return forms[0];
             return forms[forms.length - 1];
         }
 
-        static getValueFromMainForm(valueType, doc) {
-            const form = _.WoD.getMainForm(doc);
+        static getValueFromMainForm(valueType, doc, first) {
+            const form = _.WoD.getMainForm(doc, first);
             if (!form) return;
             return form[valueType].value;
         }
@@ -894,6 +1010,13 @@ class demawiRepository {
             return _.WoD.getValueFromMainForm("session_hero_id", doc);
         }
 
+        /**
+         * Gibt das gesichert erste Vorkommen der session_hero_id zurück
+         */
+        static getMyHeroIdFirst(doc) {
+            return _.WoD.getValueFromMainForm("session_hero_id", doc, true);
+        }
+
         static getMyHeroName(doc) {
             return _.WoD.getValueFromMainForm("heldenname", doc);
         }
@@ -904,6 +1027,40 @@ class demawiRepository {
 
         static getMyStufe(doc) {
             return Number(_.WoD.getValueFromMainForm("stufe", doc));
+        }
+
+        static getMyGroupSeasonNr(doc) {
+            doc = doc || document;
+            let current = doc.querySelector(".gadget_body") || doc;
+            const groupId = this.getMyGroupId(doc);
+            const groupName = this.getMyGroupName(doc);
+            const heroIds = this.getAllHeroIds(current);
+            const world = this.getMyWorld(doc);
+            return _.WoDGroupDb.getGroupSeasonNr(world, groupId, groupName, heroIds);
+        }
+
+        /**
+         * Darf nur auf ein
+         */
+        static async getMyGroupSeasonId(doc) {
+            doc = doc || document;
+            const seasonNr = await this.getMyGroupSeasonNr(doc);
+            const world = this.getMyWorld(doc);
+            const groupId = this.getMyGroupId(doc);
+            return world + groupId + "#" + seasonNr;
+        }
+
+        static getAllHeroIds(node) {
+            node = node || document;
+            let result = {};
+            for (const cur of document.querySelectorAll(".content_table a[href*=\"/profile.php\"]")) {
+                const id = new URL(cur.href).searchParams.get("id");
+                if (result[id]) break;
+                result[id] = true;
+                if (Object.keys(result).length >= 12) break;
+            }
+            result = Object.keys(result).map(a => Number(a));
+            return result;
         }
 
         /**
@@ -1072,11 +1229,14 @@ class demawiRepository {
             doc = doc || document;
             const result = {};
             const headers = doc.querySelectorAll(".content_table h2");
-            for (const head of headers) {
+            for (const memberHead of headers) {
                 const member = {};
-                result[head.textContent] = member;
+                result[memberHead.textContent] = member;
+                member.id = Number(new URL(memberHead.querySelector("a").href, document.baseURI).searchParams.get("id")); // aufgrund von "../" am Anfang gibts hier keine Absolute location aus .href zurück.
                 member.equip = [];
-                const memberTableUeberschriften = head.nextElementSibling.nextElementSibling.querySelectorAll("h3");
+                let memberTable = memberHead.nextElementSibling;
+                if (memberTable.tagName !== "TABLE") memberTable = memberTable.nextElementSibling;
+                const memberTableUeberschriften = memberTable.querySelectorAll("h3");
                 const equipped = memberTableUeberschriften[0].nextElementSibling.querySelectorAll("tr");
                 for (let i = 1, l = equipped.length; i < l; i++) { // erst ab Zeile 1
                     const tr = equipped[i];
@@ -1429,8 +1589,11 @@ class demawiRepository {
                         td.append(cur);
                     } else if (typeof cur === "object") {
                         for (const [key, value] of Object.entries(cur)) {
-                            if (key === "data") td.innerHTML = value;
-                            else td[key] = cur[key];
+                            if (value === undefined) continue;
+                            if (key === "data") {
+                                if (value.tagName) td.append(value);
+                                else td.innerHTML = value;
+                            } else td[key] = cur[key];
                         }
                     } else {
                         td.style.textAlign = "center";
@@ -1452,6 +1615,7 @@ class demawiRepository {
                         td.append(cur);
                     } else if (typeof cur === "object") {
                         for (const [key, value] of Object.entries(cur)) {
+                            if (value === undefined) continue;
                             if (key === "data") {
                                 if (value.tagName) td.append(value);
                                 else td.innerHTML = value;
@@ -1706,19 +1870,29 @@ class demawiRepository {
             warnings.push(_.util.error(msg, ...args));
             console.warn(msg, ...args);
         }
+        let withSources = true;
 
         class UnitId {
             name;
-            index;
-            isHero;
-            isEreignis;
 
             constructor(name, index, isHero, isEreignis) {
                 this.name = name;
-                this.index = index;
-                this.isHero = isHero;
-                this.isEreignis = isEreignis;
+                if (index) this.idx = index;
+                if (isHero) this.isHero = 1;
+                if (isEreignis) this.isEreignis = 1;
             }
+
+            static findAny(elem, sichUnitId) {
+                if (sichUnitId && sichUnitId.id) throw new Error("Hier wurde keine UnitId verwendet", sichUnitId);
+                const unitHref = elem.querySelector("a[href*=\"/hero/\"]") || elem.querySelector("a[href*=\"/npc/\"]");
+                if (!unitHref) {
+                    for (const curNode of elem.childNodes) {
+                        if (!curNode.tagName && curNode.textContent === "sich") return sichUnitId;
+                    }
+                }
+                return ReportParser.getUnitIdFromElement(unitHref);
+            }
+
         }
 
         class Round {
@@ -1793,18 +1967,12 @@ class demawiRepository {
                 } else {
                     spawnArray = this.monsterSpawns = this.monsterSpawns || (this.monsterSpawns = []);
                 }
-                const srcRef = node.innerHTML;
-                const typeRef = node.outerHTML;
-                spawnArray.push({
-                    id: newUnitId,
-                    stufe: "?",
-                    position: "?",
-                    hp: "?",
-                    mp: "?",
-                    zustand: "?",
-                    srcRef: srcRef,
-                    typeRef: typeRef,
-                })
+                const unit = this.unknownUnit(newUnitId);
+                if (withSources) {
+                    unit.srcRef = node.innerHTML;
+                    unit.typeRef = node.outerHTML;
+                }
+                spawnArray.push(unit);
             }
 
             emptyRound() {
@@ -1816,29 +1984,40 @@ class demawiRepository {
                 };
             }
 
+            unknownUnit(unitId) {
+                return {
+                    id: unitId,
+                    stufe: "?",
+                    position: "?",
+                    hp: "?",
+                    mp: "?",
+                    zustand: "?",
+                }
+            }
+
             //Einen Lookup ausführen, damit die Unit auch immer alle möglichen Information (z.B. Position) trägt.
-            unitLookup(unitId) {
+            unitLookup(unitId, returnNullIfUnknown) {
                 if (unitId.isEreignis) return unitId;
                 let lookupUnit = ReportParser.unitSearch(unitId, this.helden);
                 if (!lookupUnit) lookupUnit = ReportParser.unitSearch(unitId, this.monster);
                 if (!lookupUnit && this.heldenSpawns) lookupUnit = ReportParser.unitSearch(unitId, this.heldenSpawns);
                 if (!lookupUnit && this.monsterSpawns) lookupUnit = ReportParser.unitSearch(unitId, this.monsterSpawns);
                 if (!lookupUnit) {
-                    addWarning("Unit konnte nicht in der aktuellen Runde gefunden werden!", unitId);
-                    return {
-                        id: unitId,
-                    };
+                    if (returnNullIfUnknown) return null;
+                    // gespawnt ohne vorher angekündigt worden zu sein
+                    // addWarning("Unit konnte nicht in der aktuellen Runde gefunden werden!", unitId);
+                    return this.unknownUnit(unitId);
                 }
                 return lookupUnit;
             }
         }
 
         class Target {
-            type;
-            fertigkeit;
-            wirkung; // z.B. bei direkter Heilung
-            result; // 0:Fehlschlag, 1:Erfolg, 2: Guter Erfolg, 3: Kritischer Erfolg
-            damage = []; // Achtung: hier wird auch der Overkill nicht abgezogen. Ist also evtl. mehr Schaden angezeigt als überhaupt HP beim Gegner noch vorhanden wären. Gilt das aber auch beim Heilen!?
+            // type;
+            // skill;
+            // wirkung; // z.B. bei direkter Heilung
+            //result; // 0:Fehlschlag, 1:Erfolg, 2: Guter Erfolg, 3: Kritischer Erfolg
+            // damage = []; // Achtung: hier wird auch der Overkill nicht abgezogen. Ist also evtl. mehr Schaden angezeigt als überhaupt HP beim Gegner noch vorhanden wären. Gilt das aber auch beim Heilen!?
 
             constructor(strLine) {
                 if (strLine.match(/: Fehlschlag/)) {
@@ -1854,7 +2033,7 @@ class demawiRepository {
                     this.typ = "Parade";
                     const pwMatch = strLine.match(/(\(|\/)(\d+)(\)|\/)/); // Eine Zahl wo vorher ( od. / kommt und nachher ) oder /
                     if (pwMatch) {
-                        this.fertigkeit = {wurf: pwMatch[2]};
+                        this.skill = {wurf: pwMatch[2]};
                     } else {
                         console.log("Keine Parade", strLine);
                     }
@@ -1868,6 +2047,11 @@ class demawiRepository {
                         }
                     }
                 }
+            }
+
+            addDamage(damage) {
+                if (!this.damage) this.damage = [];
+                this.damage.push(damage);
             }
         }
 
@@ -1988,10 +2172,12 @@ class demawiRepository {
                 const nodeCollector = document.createElement("div");
                 const result = [];
                 const finishNode = function () {
-                    result.push({
+                    const temp = {
                         quelle: quelle,
-                        wirkungen: thisObject.#getWirkungenFromMouseOverString(nodeCollector),
-                    });
+                    };
+                    const wirkungen = thisObject.#getWirkungenFromMouseOverString(nodeCollector);
+                    if (wirkungen) temp.fx = wirkungen;
+                    result.push(temp);
                 }
                 for (const curNode of elem.childNodes) {
                     if (curNode.tagName === "B") {
@@ -2065,11 +2251,14 @@ class demawiRepository {
                         hp: tds[4].innerText.trim(),
                         mp: tds[5].innerText.trim(),
                         zustand: tds[6].innerText.trim(),
-                        srcRef: srcRef,
-                        typeRef: typeRef,
+                    }
+                    if (withSources) {
+                        unit.srcRef = srcRef;
+                        unit.typeRef = typeRef;
                     }
                     if (unitLink) {
-                        unit.wirkungen = Wirkung.getWirkungenFromElement(unitLink.parentElement, true);
+                        const wirkungen = Wirkung.getWirkungenFromElement(unitLink.parentElement, true)
+                        if (wirkungen) unit.fx = wirkungen;
                     }
                     if (unit.position !== "") {
                         result.push(unit);
@@ -2090,9 +2279,8 @@ class demawiRepository {
             }
 
             unit;
-            fertigkeit;
+            skill;
             targets;
-            src;
 
             constructor(unit) {
                 this.unit = unit;
@@ -2102,7 +2290,6 @@ class demawiRepository {
 
         class ActionParser {
 
-
             /**
              * Gibt eine Liste von Actions zurück.
              *
@@ -2110,8 +2297,8 @@ class demawiRepository {
              * Hierfür werden dann mehrere Aktionen angelegt.
              */
             static async parse(curRound, actionTR, actionTD, targetTD) {
-                const unitHref = actionTD.querySelector("a[href*=\"/hero/\"]") || actionTD.querySelector("a[href*=\"/npc/\"]");
-                const execUnit = curRound.unitLookup(ReportParser.getUnitIdFromElement(unitHref));
+                const execUnitId = UnitId.findAny(actionTD);
+                const execUnit = curRound.unitLookup(execUnitId);
 
                 var actionText = actionTD.innerText;
                 var who;
@@ -2160,7 +2347,7 @@ class demawiRepository {
                                 lineNr = -1; // solange ignorieren bis eine neue Entität kommt
                             } else {
                                 const damage = new Damage(curElement);
-                                currentTarget.damage.push(damage);
+                                currentTarget.addDamage(damage);
                             }
                         } else {
                             currentLine.push(curElement);
@@ -2176,14 +2363,14 @@ class demawiRepository {
                 const myAction = new Action();
                 myAction.unit = unit;
                 myAction.targets = targets;
-                myAction.src = actionTR.outerHTML;
+                if (withSources) myAction.src = actionTR.outerHTML;
                 if (fertigkeiten.length === 1) {
-                    myAction.fertigkeit = fertigkeiten[0];
+                    myAction.skill = fertigkeiten[0];
                     actions.push(myAction);
                 } else {
                     fertigkeiten.forEach(fertigkeit => {
                         const temp = _.util.cloneObject(myAction);
-                        temp.fertigkeit = fertigkeiten[0];
+                        temp.fertigkeit = fertigkeit;
                         actions.push(temp);
                     });
                 }
@@ -2199,130 +2386,68 @@ class demawiRepository {
                     items: [],
                 };
 
-                let unit;
+                let actionUnit;
                 const wuerfe = Array();
-                for (const curNode of actionTD.childNodes) {
-                    switch (curNode.tagName) {
-                        case "IMG":
-                            break; // z.B. Veredelungen => ignore
-                        case "A":
-                            if (curNode.href.includes("/hero/") || curNode.href.includes("/npc/")) {
-                                unit = curRound.unitLookup(ReportParser.getUnitIdFromElement(curNode));
-                            } else if (curNode.href.includes("/skill/")) {
-                                fertigkeit.name = curNode.textContent.trim();
-                                fertigkeit.wirkungen = Wirkung.getWirkungenFromElement(curNode);
-                                fertigkeit.typeRef = curNode.outerHTML;
-                                try {
-                                    const skill = await _.WoDSkillsDb.getSkill(fertigkeit.name);
-                                    if (skill.typ) fertigkeit.typ = skill.typ;
-                                    if (skill.angriffstyp) fertigkeit.angriffstyp = skill.angriffstyp;
-                                } catch (e) {
-                                    throw _.util.error("Fertigkeit: '" + fertigkeit.name + "' kann nicht bestimmt werden");
-                                }
-                            } else if (curNode.href.includes("/item/")) {
-                                fertigkeit.items.push({
-                                    name: curNode.textContent.trim(),
-                                    srcRef: curNode.outerHTML,
-                                    wirkungen: Wirkung.getWirkungenFromElement(curNode),
-                                });
-                            } else {
-                                addWarning("Unbekanntes A-Element in Action!", curNode.textContent, curNode);
-                            }
-                            break;
-                        case "SPAN":
-                            if (curNode.style.fontSize === "0.65em") {
-                                //unitIdx = curNode.textContent;
-                            } else if (curNode.className === "rep_mana_cost") {
-                                fertigkeit.mp = curNode.textContent.match(/(\d*) MP/)[1];
-                            } else if (curNode.className === "rep_gain" || curNode.className === "rep_loss") { // z.B. "Dunkles Erwachen"
-                                let mpGain = curNode.textContent.match(/(.*) MP/);
-                                if (mpGain) {
-                                    fertigkeit.mpGain = Number(mpGain[1]);
-                                } else {
-                                    let hpGain = curNode.textContent.match(/(.d*) HP/);
-                                    if (hpGain) {
-                                        fertigkeit.hpGain = Number(hpGain[1]);
-                                    } else {
-                                        addWarning("Rep_Gain/Rep_Loss kann nicht aufgelöst werden '" + curNode.textContent + "'", curNode);
-                                    }
-                                }
-                            } else if (curNode.getAttribute("onmouseover") && curNode.children[0].tagName === "A") { // Unit-Wrap z.B. für Helfer
-                                unit = curRound.unitLookup(ReportParser.getUnitIdFromElement(curNode.children[0]));
-                            } else {
-                                addWarning("Unbekanntes SPAN-Element in Action!", actionTD, curNode);
-                            }
-                            break;
-                        case "":
-                        case undefined: {
-                            break;
-                        }
-                        default:
-                            addWarning("Unbekannter Tag '" + curNode.tagName + "' Element in Action!", curNode);
-                            break;
-                    }
-                }
 
-                if (!fertigkeit.typ) { // Es wurde kein Skill im actionTD gefunden. Versuchen über potenzielle Paraden diesen abzuleiten.
-                    const unknownIdentifier = this.getIdentifierOfTheUnknown(actionTD);
-                    const unknownSkillDb = _.WoDStorages.getSkillsUnknownDb();
-                    const unknownEntry = await unknownSkillDb.getValue(unknownIdentifier) || {id: unknownIdentifier};
-                    // TODO: weiter definieren in welchem Dungeon und in welchem Level, gab es nen variablen Wurf oder ist der auch unbekannt?
-
-                    const genutzterSkillA = targetTD.querySelector("a[href*=\"/skill/\"]");
-                    if (genutzterSkillA) {
-                        const skill = await _.WoDSkillsDb.getSkill(genutzterSkillA.textContent);
-                        if (skill) {
-                            fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF; // kann Angriff oder Verschlechterung sein!!
-                            fertigkeit.angriffstyp = skill.angriffstyp;
-
-                            unknownEntry.typ = fertigkeit.typ;
-                            unknownIdentifier.angriffstyp = fertigkeit.angriffstyp;
-                            console.log("Automatische Skill-Ableitung => " + fertigkeit.angriffstyp, actionTD, actionTD.textContent);
-                        }
-                    }
-                    await unknownSkillDb.setValue(unknownEntry);
-
-                    if (!fertigkeit.typ) {
-                        addWarning("Eine Fertigkeit konnte nicht automatisch bestimmt werden und fällt in das Fallback", actionTD, actionTD.textContent, unknownIdentifier);
-                    }
-                }
-
-
-                // Würfe bestimmen und Fallback für Einträge ohne Fertigkeits-Link
-                const tempFertigkeit = {};
-                for (const curNode of actionTD.childNodes) {
-                    switch (curNode.tagName) {
-                        case "":
-                        case undefined: {
-                            this.iterationOnTextNode(actionTD, curNode, tempFertigkeit, wuerfe);
-                            break;
-                        }
-                    }
-                }
-                if (!fertigkeit.typ && tempFertigkeit.typ) fertigkeit.typ = tempFertigkeit.typ;
-                if (!fertigkeit.angriffstyp && tempFertigkeit.angriffstyp) fertigkeit.angriffstyp = tempFertigkeit.angriffstyp;
-
-                if (!fertigkeit.typ) {
-                    addWarning("Unbekannter Fertigkeits-Typ: " + fertigkeit.typ, fertigkeit);
-                    throw _.util.error("Unbekannter Fertigkeits-Typ: " + fertigkeit.typ, fertigkeit);
-                }
-                if (!fertigkeit.angriffstyp && Action.HAT_ANGRIFFSTYP[fertigkeit.typ]) {
-                    addWarning("Benötigter Angriffstyp für: " + fertigkeit.typ, fertigkeit);
-                    throw _.util.error("Benötigter Angriffstyp für: " + fertigkeit.typ, fertigkeit);
-                }
-
-                if (!unit) {
-                    // Wir haben keine Unit-Referenz gefunden wird insofern irgendein Ereignis sein.
-                    unit = {
+                // Unit bestimmen
+                const unitNode = actionTD.querySelector("a[href*=\"/hero/\"], a[href*=\"/npc/\"]");
+                if (unitNode) {
+                    actionUnit = curRound.unitLookup(ReportParser.getUnitIdFromElement(unitNode));
+                } else {
+                    actionUnit = {
                         name: "Ereignis",
                         id: {
                             name: "Ereignis",
                         },
-                        isHero: false,
-                        isEreignis: true,
+                        isEreignis: 1,
                     }
-                    fertigkeit.unit = unit;
+                    fertigkeit.unit = actionUnit;
                 }
+
+                // Verwendete Gegenstände bestimmen
+                for (const curNode of actionTD.querySelectorAll("a[href*=\"/item/\"]")) {
+                    const item = {
+                        name: curNode.textContent.trim(),
+                    };
+                    const wirkungen = Wirkung.getWirkungenFromElement(curNode);
+                    if (wirkungen) item.fx = wirkungen;
+                    if (withSources) item.srcRef = curNode.outerHTML;
+                    fertigkeit.items.push(item);
+                }
+
+                // HP/MP-Gain/Loss bestimmen
+                for (const curNode of actionTD.querySelectorAll(".rep_gain, .rep_loss")) {
+                    let mpGain = curNode.textContent.match(/(.*) MP/);
+                    if (mpGain) {
+                        fertigkeit.mpGain = Number(mpGain[1]);
+                    } else {
+                        let hpGain = curNode.textContent.match(/(.d*) HP/);
+                        if (hpGain) {
+                            fertigkeit.hpGain = Number(hpGain[1]);
+                        } else {
+                            addWarning("Rep_Gain/Rep_Loss kann nicht aufgelöst werden '" + curNode.textContent + "'", curNode);
+                        }
+                    }
+                }
+
+                // Manakosten bestimmen
+                const manaCostNode = actionTD.querySelector(".rep_mana_cost");
+                if (manaCostNode) fertigkeit.mp = manaCostNode.textContent.match(/(\d*) MP/)[1];
+
+                // Fertigkeit .name .typ .angriffsart bestimmen
+                let unknownIdentifier;
+                this.bestimmeFertigkeitFromText(fertigkeit, actionTD);
+                if (!fertigkeit.typ) await this.bestimmeFertigkeitFromSkillA(fertigkeit, actionTD);
+                if (!fertigkeit.typ) unknownIdentifier = await this.bestimmeFertigkeitFromTarget(fertigkeit, actionTD, targetTD);
+
+                if (!fertigkeit.typ) {
+                    addWarning("Eine Fertigkeit konnte nicht automatisch bestimmt werden.", actionTD, unknownIdentifier);
+                } else {
+                    if (fertigkeit.typ === _.WoDSkillsDb.TYP.VERSCHLECHTERUNG) fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                }
+
+                // Würfe bestimmen
+                this.bestimmeWuerfe(actionTD, wuerfe);
 
                 const fertigkeiten = Array();
                 if (wuerfe.length <= 1) {
@@ -2335,14 +2460,118 @@ class demawiRepository {
                         fertigkeiten.push(temp);
                     });
                 }
-                return [fertigkeiten, unit];
+                return [fertigkeiten, actionUnit];
             }
+
+            static async bestimmeFertigkeitFromSkillA(fertigkeit, actionTD) {
+                const actionSkillA = actionTD.querySelector("a[href*=\"/skill/\"]");
+                if (actionSkillA) {
+                    fertigkeit.name = actionSkillA.textContent.trim();
+                    const wirkungen = Wirkung.getWirkungenFromElement(actionSkillA);
+                    if (wirkungen) fertigkeit.fx = wirkungen;
+                    if (withSources) fertigkeit.typeRef = actionSkillA.outerHTML;
+                    const dbSkill = await _.WoDSkillsDb.getSkill(fertigkeit.name);
+                    if (dbSkill.typ) fertigkeit.typ = dbSkill.typ;
+                    if (dbSkill.angriffstyp) fertigkeit.angriffstyp = dbSkill.angriffstyp;
+                }
+            }
+
+            /**
+             * Die Informationen konnten nicht über actionTD abgeleitet werden, wir versuchen es nun über das Target.
+             * Für die Aktion legen wir eine Identifikation in der skillUnknown-DB, welche dann zur Not auch später vom Benutzer noch befüllt werden kann.
+             */
+            static async bestimmeFertigkeitFromTarget(fertigkeit, actionTD, targetTD) {
+                const unknownIdentifier = this.getIdentifierOfTheUnknown(actionTD);
+                const unknownSkillDb = _.WoDStorages.getSkillsUnknownDb();
+                const unknownEntry = await unknownSkillDb.getValue(unknownIdentifier) || {id: unknownIdentifier};
+                if (unknownEntry.typ) fertigkeit.typ = unknownEntry.typ;
+                if (unknownEntry.angriffstyp) fertigkeit.angriffstyp = unknownEntry.angriffstyp;
+
+                // TODO: weiter definieren in welchem Dungeon und in welchem Level, gab es nen variablen Wurf oder ist der auch unbekannt?
+
+                // Check 1: Erst suchen wir, ob ein Skill anwgewendet wurde.
+                const targetSkillA = targetTD.querySelector("a[href*=\"/skill/\"]"); // Skill aus dem Target zur automatischen Ableitung
+                if (targetSkillA) {
+                    const paradeSkill = await _.WoDSkillsDb.getSkill(targetSkillA.textContent);
+                    // Verschlechterung wird ebenfalls auf Angriff gemappt!!!
+                    if (paradeSkill) {
+                        fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                        fertigkeit.angriffstyp = unknownEntry.angriffstyp = paradeSkill.angriffstyp;
+                    }
+                }
+                if (!fertigkeit.typ) { // Kein Skill in der Action und auch nicht im Target.
+                    /**
+                     * evtl. können wir zumindest ableiten, ob es sich um einen Angriff oder einen Buff handelt.
+                     */
+                    const text = targetTD.textContent;
+                    if (text.includes(": Erfolg") || text.includes(": guter Erfolg") || text.includes(": kritischer Erfolg") || text.includes(": Fehlschlag")) {
+                        fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.ANGRIFF; // kann ANGRIFF oder VERSCHLECHTERUNG sein!!
+                    } else if (text.match(/\+ \d* HP/) || text.match(/\+ \d* MP/)) {
+                        fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.HEILUNG;
+                    } else {
+                        const targetUnitId = UnitId.findAny(targetTD, actionUnit && actionUnit.id);
+                        if (targetUnitId) {
+                            const unitLookup = curRound.unitLookup(targetUnitId, true);
+                            if (!unitLookup) fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.RUFT_HELFER; // Units die vorher noch nicht bekannt waren spawnen
+                            else fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.VERBESSERUNG; // Eine bereits bekannte Unit würde verbessert werden
+                        }
+                    }
+                }
+
+                await unknownSkillDb.setValue(unknownEntry);
+                return unknownIdentifier;
+            }
+
+            static bestimmeFertigkeitFromText(fertigkeit, actionTD) {
+                for (const curNode of actionTD.childNodes) {
+                    switch (curNode.tagName) {
+                        case "":
+                        case undefined:
+                            const curText = curNode.textContent;
+                            if (curText.includes("heilt mittels")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.HEILUNG;
+                            } else if (curText.includes("greift per Fernkampf an")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.FERNKAMPF;
+                            } else if (curText.includes("greift im Nahkampf an")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.NAHKAMPF;
+                            } else if (curText.includes("greift magisch an")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.ZAUBER;
+                            } else if (curText.includes("greift sozial an")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.SOZIAL;
+                            } else if (curText.includes("greift hinterhältig an")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.HINTERHALT;
+                            } else if (curText.includes("wirkt als Naturgewalt auf")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.NATURGEWALT;
+                            } else if (curText.includes("wird ausgelöst auf")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.FALLE_AUSLOESEN;
+                            } else if (curText.includes("erwirkt eine Explosion gegen")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.EXPLOSION;
+                            } else if (curText.includes("ruft herbei mittels")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.RUFT_HELFER;
+                            }
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
+
 
             static getIdentifierOfTheUnknown(actionTD) {
                 const definitionElem = actionTD.cloneNode(true);
                 for (let i = 0; i < definitionElem.childNodes.length; i++) {
                     const cur = definitionElem.childNodes[i];
-                    if (cur.tagName) {
+                    if (cur.tagName === "A" && (cur.href.includes("/npc/") || cur.href.includes("/hero/"))) {
+                        definitionElem.replaceChild(document.createTextNode("XY"), cur);
+                    } else if (cur.tagName) {
                         definitionElem.removeChild(cur);
                         i--;
                     }
@@ -2350,120 +2579,38 @@ class demawiRepository {
                 return definitionElem.textContent.replace(/ ?\(.*\) ?/g, "").replaceAll("\n", "").trim(); // Alle Klammer+inhalte beseitigen.
             }
 
-            static iterationOnTextNode(actionTD, curNode, fertigkeit, wuerfe) {
-                let text = curNode.textContent.trim();
-                if (text.length < 2) return;
+            static bestimmeWuerfe(actionTD, wuerfe) {
+                for (const curNode of actionTD.childNodes) {
+                    switch (curNode.tagName) {
+                        case "":
+                        case undefined: {
+                            let text = curNode.textContent.trim();
+                            if (text.length < 2) break;
 
-                const textArray = text.trim().split("/");
-                textArray.forEach(curText => {
-                        curText = curText.trim();
-                        let wurfMatcher = curText.match(/^(\D*)?(\d+)[.)]?(\D*)?$/);
-                        if (wurfMatcher) { // wurf
-                            let wo = wurfMatcher[1];
-                            if (wo && wo.endsWith(":")) {
-                                wo = wo.replace(":", "").trim();
-                            }
-                            wuerfe.push({
-                                value: wurfMatcher[2],
-                                dest: wo,
-                            })
-                        }
-                        if (curText.startsWith("ballert in die Menge") || curText.startsWith("wirft einen Stuhl") || curText.startsWith("schleudert einen Stuhl")) { // z.B. "Dunkles Erwachen"
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Fernkampf";
-                        } else if (curText.startsWith("Mit einem Fauchen taucht")) { // z.B. "Ahnenforschung"
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Fernkampf";
-                        } else if (curText.startsWith("Eine Flasche mit billigem Fusel nähert sich euch auf einer wirklich beeindruckenden Bahn. Kopf runter!")) { // "Offene Rechnung"
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Fernkampf";
-                            wuerfe.push({
-                                value: 100, // ??
-                            })
-                        } else if (curText.startsWith("zieht euch eins mit dem abgebrochenen Tischbein drüber") || curText.startsWith("haut daneben und erwischt fast einen Kollegen")) { // z.B. "Dunkles Erwachen"
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Nahkampf";
-                        } else if (curText.startsWith("beißt mit ihren spitzen Zähnen zu und saugt von eurem Blut")) {
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "?";
-                        } else if (curText.startsWith("Der Boden ist nass und glitschig") // z.B. "Rückkehr zum Zeughaus"
-                            || curText.startsWith("aus, sie dörrt Körper und Geist aus und lässt euch geschwächt zurück.") // Goldene Dracheneier
-                        ) {
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Naturgewalt";
-                        } else if (curText.startsWith("Die Lemmingflut hat diesen massiven Felsblock")) { // Reise nach Keras
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Naturgewalt";
-                            wuerfe.push({
-                                value: 100, // >53
-                            })
-                        } else if (curText.startsWith("auf sein Ziel und brüllt mit harter Stimme: DU gehörst mir!") || curText.startsWith("deutet mit seiner Waffe auf einen Gegner und brüllt mit harter Stimme: DU gehörst mir!") // "Sagenumwobener Zwergenstieg"
-                            || curText.startsWith("sind einfach überall!") || curText.startsWith("euch all eurer Kräfte.") // Goldene Dracheneier
-                        ) {
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Sozial";
-                            if (curText.startsWith("sind einfach überall!")) {
-                                wuerfe.push({
-                                    value: 40,
-                                })
-                            }
-                        } else if (curText.startsWith("Ups - da ist wohl jemand untergetaucht und hat")) { // Offene Rechnung
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Krankheit";
-                        } else if (curText.startsWith("Oh je, was sind das nun wieder für")) {
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Sozial";
-                        } else if (curText.includes("Lass mich ziehen") // Eine Reise nach Keras
-                            || curText.includes("Was willst du überhaupt von mir?") // Eine Reise nach Keras
-                        ) {
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Zauber";
-                            wuerfe.push({
-                                value: 0, // ??
-                            })
-                        } else if (curText.includes("Der beschwerliche Aufstieg hat eure Stärksten")) { // Eine Reise nach Keras
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Zauber";
-                            wuerfe.push({
-                                value: 1000, // ??
-                            })
-                        } else if (curText.startsWith("verhilft dem Rentier zu besondern Fähigkeiten.")) {// Eine Reise nach Keras)
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Naturgewalt";
-                            wuerfe.push({
-                                value: 100, // >17
-                            })
-                        } else if (curText.startsWith("Borindasszas Unruhe erfaßt eure Gruppe")
-                            || curText.includes("streckt seine Linke in die Luft und ballt sie. Das hungrige Artefakt lässt einen Körper platzen und")
-                            || curText.includes("Eine Flasche mit warmem Glühwein. Dieses Getränk belebt und hält wohlig warm.") // Reise nach Keras
-                            || curText.includes("Resolut schiebt sich") // Hut ab!
-                        ) {
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Ereignis";
-                        } else if (curText.startsWith("Mit ungeahnter Wucht lösen sich Teile der schwarzen Substanz von Dnobs Körper und fliegen in alle Richtungen")) { // Herz der Schatten
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Fernkampf";
-                        } else if (curText.startsWith("versucht die aufgebrachten Gemüter zu")
-                            || curText.startsWith("Das Rentier geht eine innige Beziehung zu einem Helden ein") // Eine Reise nach Keras
-                            || curText.startsWith("Das Rentier erhält die innige Beziehung zu einem") // Eine Reise nach Keras
-                            || curText.includes("Räumt den Stein weg, ihr Narren") // Eine Reise nach Keras
-                            || curText.startsWith("Hargow braucht offenbar Platz um sich ausreichend um Xeron zu kümmern") // Eine Reise nach Keras
-                        ) {
-                            fertigkeit.typ = "Verbesserung";
-                            fertigkeit.angriffstyp = "Wirkung";
-                        } else if (curText.startsWith("Weitere Menschen schließen sich der Gruppe an")) { // offene Rechnung, Herbeirufung
-                            fertigkeit.typ = "Ruft Helfer";
-                            fertigkeit.angriffstyp = "Ereignis";
-                        } else if (curText.startsWith("Einer von euch war unvorsichtig genug")) {
-                            fertigkeit.typ = "Angriff";
-                            fertigkeit.angriffstyp = "Falle auslösen";
-                            wuerfe.push({
-                                value: 70, // >67
-                            })
-                        }
+                            const textArray = text.trim().split("/");
+                            textArray.forEach(curText => {
+                                    curText = curText.trim();
+                                    let wurfMatcher = curText.match(/^(\D*)?(\d+)[.)]?(\D*)?$/);
+                                    if (wurfMatcher) { // wurf
+                                        let wo = wurfMatcher[1];
+                                        if (wo && wo.endsWith(":")) {
+                                            wo = wo.replace(":", "").trim();
+                                        }
+                                        wuerfe.push({
+                                            value: wurfMatcher[2],
+                                            dest: wo,
+                                        })
+                                    }
 
+
+                                }
+                            )
+                            break;
+                        }
                     }
-                )
+                }
+
+
             }
 
         }
@@ -2482,8 +2629,11 @@ class demawiRepository {
                 }
             }
 
-            static async readKampfbericht(container) {
+            static async parseKampfbericht(container, activateSources) {
+                const startTime = new Date().getTime();
                 warnings = [];
+                withSources = activateSources;
+
                 const roundContentTable = this.#getContentTable(container);
                 const areas = Array();
                 let curArea;
@@ -2516,7 +2666,7 @@ class demawiRepository {
                 }
                 result.areas = areas;
                 if (warnings.length > 0) result.warnings = warnings;
-                console.log("Parsed Report: ", result);
+                console.log("Parsed Report in " + Math.round((new Date().getTime() - startTime) / 10) / 100 + " secs. With sources: " + withSources, result);
                 return [result, warnings];
             }
 
@@ -2535,13 +2685,15 @@ class demawiRepository {
              * Allgemeine Methode, um eine Unit in einem Array zu finden
              */
             static unitSearch(unitId, unitArray) {
+                if (unitId.id) throw new Error("Hier wurde keine UnitId genutzt!", unitId);
                 if (!unitArray) return;
-                for (var i = 0, l = unitArray.length; i < l; i++) {
-                    const curUnit = unitArray[i];
-                    if (curUnit.id.name === unitId.name && curUnit.id.index === unitId.index) {
+                for (const curUnit of unitArray) {
+                    if (curUnit.id.name === unitId.name && curUnit.id.idx === unitId.idx) {
                         return curUnit;
-                    } else if (this.unitNameOhneGestalt(curUnit.id.name) === this.unitNameOhneGestalt(unitId.name) && curUnit.id.index === unitId.index) { // evtl. Gestaltwechsel!? z.B. "Dunkles Erwachen"
-                        return curUnit;
+                    } else {
+                        if (this.unitNameOhneGestalt(curUnit.id.name) === this.unitNameOhneGestalt(unitId.name) && curUnit.id.idx === unitId.idx) { // evtl. Gestaltwechsel!? z.B. "Dunkles Erwachen"
+                            return curUnit;
+                        }
                     }
                 }
             }
@@ -2587,7 +2739,8 @@ class demawiRepository {
         }
 
         return ReportParser;
-    }();
+    }
+    ();
 }
 
 _ = demawiRepository;

@@ -41,7 +41,7 @@
             } else {
                 const title = document.getElementsByTagName("h1")[0];
                 if (title.textContent.trim() === "Kampfberichte") {
-                    await MainPage.onKampfberichteSeite();
+                    await ArchivView.onKampfberichteSeite();
                 } else {
                     await this.onReportSite();
                 }
@@ -117,14 +117,9 @@
 
             const reportData = _WoD.getFullReportBaseData();
             const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
-            if (!reportMeta.group_season) {
-                const heroIds = WoD.getAllHeroIds();
-                const groupId = _WoD.getMyGroupId();
-                const groupName = _WoD.getMyGroupName();
-                reportMeta.group_season = await _WoDGroupDb.getSeasonForGroup(groupId, groupName, heroIds);
-            }
-            if (!reportMeta.schlacht) reportMeta.schlacht = reportData.schlacht; // kommt evtl. nachträglich erst herein
-            if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe;
+            reportMeta.group_season = await _WoD.getMyGroupSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
+            if (reportData.schlacht) reportMeta.schlacht = reportData.schlacht; // kommt evtl. nachträglich erst herein
+            if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe; // Stufe nur setzen, wenn noch nicht vorhanden.
             const reportSource = await MyStorage.getSourceReport(reportData.reportId) || {reportId: reportData.reportId};
             console.log("Current Report ", reportData, reportMeta, reportSource);
 
@@ -136,9 +131,9 @@
                 reportSource.gegenstaende = util.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.gegenstaende = true;
                 const memberList = _WoDParser.parseKampfberichtGegenstaende();
-                const reportExt = await MyStorage.putToExt(reportSource.reportId, memberList);
-                await MyStorage.submitLoot(reportMeta, reportExt);
-                if ((await Settings.get()).lootSummary) await ItemLootSummary.einblenden(memberList);
+                const reportLoot = await MyStorage.putToLoot(reportSource.reportId, memberList);
+                await MyStorage.submitLoot(reportMeta, reportLoot);
+                if ((await Settings.get()).lootSummary) await ItemLootSummary.einblenden(reportLoot, reportMeta);
             } else if (title.textContent.trim().startsWith("Kampfbericht")) {
                 const form = _WoD.getMainForm();
                 const levelNr = _WoD.isSchlacht() ? 1 : form.current_level.value;
@@ -158,9 +153,9 @@
                 reportMeta.levels[levelNr - 1] = true;
 
                 const heldenListe = _WoDParser.getHeldenstufenOnKampfbericht();
-                if (heldenListe) {
-                    const reportExt = await MyStorage.putToExt(reportMeta.reportId, heldenListe);
-                    await MyStorage.submitLoot(reportMeta, reportExt);
+                if (heldenListe) { // da wir hier jetzt auch die Stufe der Helden haben, bringen wir auch von hier den Loot ein.
+                    const reportLoot = await MyStorage.putToLoot(reportMeta.reportId, heldenListe);
+                    await MyStorage.submitLoot(reportMeta, reportLoot);
                 }
 
                 if (_WoD.isSchlacht()) {
@@ -215,7 +210,7 @@
         }
     }
 
-    class MainPage {
+    class ArchivView {
         static wodContent; // Kampfbericht-Inhalt
         static anchor; // hier wird der SeitenInhalt eingebettet
         static title;
@@ -233,7 +228,7 @@
                 await MyStorage.reportArchive.deleteValue(report.reportId);
             }
 
-            for (const report of await MyStorage.reportSourcesMeta.parse()) {
+            for (const report of await MyStorage.reportSourcesMeta.getAll()) {
                 await MyStorage.reportArchive.setValue(report);
             }
             console.log("recreateReporting finished!");
@@ -316,32 +311,47 @@
             }
         }
 
-        static async rewriteExt() {
+        static async rewriteReportArchiveItems() {
             for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
                 if (reportSource.gegenstaende) {
                     const doc = _util.getDocumentFor(reportSource.gegenstaende);
                     const memberList = _WoDParser.parseKampfberichtGegenstaende(doc);
-                    await MyStorage.putToExt(reportSource.reportId, memberList);
+                    await MyStorage.putToLoot(reportSource.reportId, memberList);
                 }
                 if (reportSource.levels && reportSource.levels[0]) {
                     const doc = _util.getDocumentFor(reportSource.levels[0]);
                     const helden = _WoDParser.getHeldenstufenOnKampfbericht(doc);
-                    if (helden) await MyStorage.putToExt(reportSource.reportId, helden);
+                    if (helden) await MyStorage.putToLoot(reportSource.reportId, helden);
                 }
             }
         }
 
         static async syncReportExtToItemLoot() {
-            for (const reportExt of await MyStorage.reportArchiveExt.getAll()) {
+            for (const reportExt of await MyStorage.reportArchiveItems.getAll()) {
                 const report = await MyStorage.reportArchive.getValue(reportExt.reportId);
                 await MyStorage.submitLoot(report, reportExt);
             }
         }
 
+        static async rewriteGroupSeasonIds() {
+            for (const reportItems of await MyStorage.reportArchiveItems.getAll()) {
+                if (!reportItems.loot) continue;
+                const report = await MyStorage.reportArchive.getValue(reportItems.reportId);
+                const heroIds = [];
+                for (const member of Object.values(reportItems.members)) {
+                    heroIds.push(member.id);
+                }
+                await _WoDGroupDb.getGroupSeasonId(report.world, report.gruppe_id, report.gruppe, heroIds);
+            }
+        }
+
         static async onKampfberichteSeite() {
-            //await MyStorage.indexedDb.cloneTo("wodDB_Backup3");
+            //await this.rewriteReportArchiveItems();
+            //await this.syncReportExtToItemLoot();
+            //await this.rewriteGroupSeasonIds();
+            //await MyStorage.indexedDb.cloneTo("wodDB_Backup");
             //await this.rewriteExt();
-            //await MyStorage.indexedDb.deleteObjectStore("items");
+            //await MyStorage.indexedDb.deleteObjectStore("reportArchiveExt");
             // await this.resyncVersions();
             // await AutoFavorit.checkAutoFavoriten();
             // await Maintenance.recalculateSpace();
@@ -351,7 +361,7 @@
             // await this.syncCheck();
             // this.migrate(); return;
             // this.recreateReporting(); return;
-            // MyStorage.reportRealSources.cloneTo(MyStorage.reportArchiveSources); return;
+            //MyStorage.reportArchiveExt.cloneTo(MyStorage.reportArchiveItems);
 
             await this.checkMaintenance();
             this.title = document.getElementsByTagName("h1")[0];
@@ -376,7 +386,7 @@
             buttons.archivButton.title = "Archiv anzeigen";
             buttons.statisticsButton = _UI.createButton(" 📊", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Statistiken";
-                await MainPage.showStatistics();
+                await ArchivView.showStatistics();
                 thisObject.title.appendChild(buttons.wodContentButton);
                 thisObject.title.appendChild(buttons.archivButton);
                 thisObject.title.appendChild(buttons.settingButton);
@@ -384,7 +394,7 @@
             buttons.statisticsButton.title = "Statistik anzeigen";
             buttons.wodContentButton = _UI.createButton(" ↩", async function () {
                 thisObject.title.innerHTML = "Kampfberichte";
-                await MainPage.showWodOverview();
+                await ArchivView.showWodOverview();
                 thisObject.title.appendChild(buttons.archivButton);
                 thisObject.title.appendChild(buttons.statisticsButton);
                 thisObject.title.appendChild(buttons.settingButton);
@@ -392,7 +402,7 @@
             buttons.wodContentButton.title = "Zurück zu den Kampfberichten";
             buttons.settingButton = _UI.createButton(" ⚙", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Archiv-Einstellungen";
-                await MainPage.showSettings();
+                await ArchivView.showSettings();
                 thisObject.title.appendChild(buttons.wodContentButton);
                 thisObject.title.appendChild(buttons.archivButton);
                 thisObject.title.appendChild(buttons.statisticsButton);
@@ -461,9 +471,9 @@
             const dungeonTableModell = [];
             for (const dungeonName of Object.keys(dungeonStats).sort()) {
                 const dungeonStat = dungeonStats[dungeonName];
-                dungeonTableModell.push([dungeonName, dungeonStat.versions, (dungeonStat.fav || 0), (dungeonStat.full || 0) + (dungeonStat.part || 0) + (dungeonStat.wipe || 0), dungeonStat.full || 0, dungeonStat.part || 0, dungeonStat.wipe || 0, _util.fromBytesToMB(dungeonStat.space)]);
+                dungeonTableModell.push([dungeonName, dungeonStat.versions, (dungeonStat.full || 0) + (dungeonStat.part || 0) + (dungeonStat.wipe || 0), dungeonStat.full || 0, dungeonStat.part || 0, dungeonStat.wipe || 0, _util.fromBytesToMB(dungeonStat.space)]);
             }
-            statTable.append(_UI.createContentTable(dungeonTableModell, ["Dungeon", "Versionen", "Favoriten", "Gesamt", "Erfolg", "Teilerfolg", "Misserfolg", "Speicher"]));
+            statTable.append(_UI.createContentTable(dungeonTableModell, ["Dungeon", "Versionen", "Gesamt", "Erfolg", "Teilerfolg", "Misserfolg", "Speicher"]));
             this.anchor.append(statTable);
         }
 
@@ -538,7 +548,7 @@
                     await MyStorage.reportArchive.setValue(reportMeta);
                 }
                 // TODO: Spezial: zerstörte Gegenstände einblenden!?
-                const reportExt = await MyStorage.reportArchiveExt.getValue(reportMeta.reportId);
+                const reportExt = await MyStorage.reportArchiveItems.getValue(reportMeta.reportId);
                 if (reportExt && reportExt.members) {
                     for (const [member, items] of Object.entries(reportExt.members)) {
                         if (items.equip) {
@@ -566,6 +576,7 @@
                     const nameTD = curTR.children[1];
                     const title = await getTitle(reportMeta);
                     if (nameTD.textContent !== title) {
+                        if (title.includes("v?")) nameTD.title = "Version wird erst bestimmt, wenn alle Level eingelesen wurden";
                         nameTD.innerHTML = title;
                     }
                 }
@@ -653,9 +664,9 @@
                 }
 
                 if (!hatDatensaetze) {
-                    archiviertTD.style.backgroundColor = MainPage.COLOR_RED;
-                    archiviertAktionenTD.style.backgroundColor = MainPage.COLOR_RED;
-                    archiviertSpeicherTD.style.backgroundColor = MainPage.COLOR_RED;
+                    archiviertTD.style.backgroundColor = ArchivView.COLOR_RED;
+                    archiviertAktionenTD.style.backgroundColor = ArchivView.COLOR_RED;
+                    archiviertSpeicherTD.style.backgroundColor = ArchivView.COLOR_RED;
                     archiviertTD.innerHTML += "<span style='white-space: nowrap'>Fehlt komplett</span>";
                 } else {
                     if (reportMeta.space) {
@@ -663,9 +674,9 @@
                     }
                     const fehlend = Report.getMissingReportSites(reportMeta);
                     if (fehlend.length === 0) {
-                        archiviertTD.style.backgroundColor = MainPage.COLOR_GREEN;
-                        archiviertSpeicherTD.style.backgroundColor = MainPage.COLOR_GREEN;
-                        archiviertAktionenTD.style.backgroundColor = MainPage.COLOR_GREEN;
+                        archiviertTD.style.backgroundColor = ArchivView.COLOR_GREEN;
+                        archiviertSpeicherTD.style.backgroundColor = ArchivView.COLOR_GREEN;
+                        archiviertAktionenTD.style.backgroundColor = ArchivView.COLOR_GREEN;
                         archiviertTD.innerHTML += "Komplett ";
                         archiviertTD.style.whiteSpace = "nowrap";
                         archiviertTD.style.position = "relative";
@@ -680,9 +691,9 @@
                             }
                         }
                     } else {
-                        archiviertTD.style.backgroundColor = MainPage.COLOR_YELLOW;
-                        archiviertSpeicherTD.style.backgroundColor = MainPage.COLOR_YELLOW;
-                        archiviertAktionenTD.style.backgroundColor = MainPage.COLOR_YELLOW;
+                        archiviertTD.style.backgroundColor = ArchivView.COLOR_YELLOW;
+                        archiviertSpeicherTD.style.backgroundColor = ArchivView.COLOR_YELLOW;
+                        archiviertAktionenTD.style.backgroundColor = ArchivView.COLOR_YELLOW;
                         archiviertTD.innerHTML += "<span style='white-space: nowrap'>" + fehlend.join(" ") + "</span>";
                     }
                 }
@@ -706,19 +717,19 @@
                     const levels = reportMeta.success.levels;
                     if (members) {
                         if (members[0] === members[1]) {
-                            curTR.style.backgroundColor = MainPage.COLOR_GREEN;
+                            curTR.style.backgroundColor = ArchivView.COLOR_GREEN;
                             successWin++;
                         } else if (members[0] > 0) {
-                            curTR.style.backgroundColor = MainPage.COLOR_YELLOW;
+                            curTR.style.backgroundColor = ArchivView.COLOR_YELLOW;
                             successTie++;
                         } else {
-                            curTR.style.backgroundColor = MainPage.COLOR_RED;
+                            curTR.style.backgroundColor = ArchivView.COLOR_RED;
                             successLose++;
                         }
                     } else if (reportMeta.success.levels) {
                         if (levels[0] > -1) {
                             if (levels[0] !== levels[1]) {
-                                curTR.style.backgroundColor = MainPage.COLOR_RED;
+                                curTR.style.backgroundColor = ArchivView.COLOR_RED;
                                 successLose++;
                             } else {
                                 curTR.style.backgroundColor = "lightgreen";
@@ -938,7 +949,9 @@
 
     class ItemLootSummary {
 
-        static async einblenden(memberList) {
+        static async einblenden(reportLoot, reportMeta) {
+            reportMeta = reportMeta || await MyStorage.reportArchive.getValue(reportLoot.reportId);
+            const memberList = reportLoot.members;
             const eingesammeltPre = {};
             const beschaedigtPre = [];
             const verlorenPre = {};
@@ -950,12 +963,12 @@
             for (const [member, items] of Object.entries(memberList)) {
                 gold += items.gold;
                 const lootToList = items.ko ? verlorenPre : eingesammeltPre;
-                if (items.exceed) messages.push([member + " hat seine Lagerkapazität überschritten! (" + items.exceed + ")", MainPage.COLOR_RED]);
-                if (items.full) messages.push([member + " konnte aufgrund eines vollen Rucksacks nicht mehr alles einsammeln!", MainPage.COLOR_YELLOW]);
+                if (items.exceed) messages.push([member + " hat seine Lagerkapazität überschritten! (" + items.exceed + ")", ArchivView.COLOR_RED]);
+                if (items.full) messages.push([member + " konnte aufgrund eines vollen Rucksacks nicht mehr alles einsammeln!", ArchivView.COLOR_YELLOW]);
                 for (const curItem of (items.loot || [])) {
                     const item = lootToList[curItem.name] || (lootToList[curItem.name] = {from: []});
                     item.from.push(member);
-                    if (curItem.vg) item.vg = item.vg || 0 + curItem.vg;
+                    if (curItem.vg) item.vg = (item.vg || 0) + curItem.vg;
                     if (curItem.unique) item.unique = true;
                 }
                 for (const curEquip of items.equip) {
@@ -993,19 +1006,45 @@
                 summaryContainer.append(entry);
             }
 
-            let [eingesammeltData, eingesammeltCount] = this.getItemLootAndDropTable(eingesammeltPre, true);
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(eingesammeltData, ["Anzahl", "eingesammelte Items: " + eingesammeltCount])));
+            let [eingesammeltData, eingesammeltCount, eingesammeltEindeutig] = await this.getItemLootAndDropTable(reportMeta, eingesammeltPre, true);
+            let curColor = eingesammeltEindeutig > 0 ? "background-color:rgb(62, 156, 62, 0.5);" : "";
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(eingesammeltData, [{
+                data: "",
+                style: curColor,
+            }, {data: "#", style: curColor},
+                {
+                    data: "eingesammelte Items: " + (eingesammeltEindeutig === eingesammeltCount ? eingesammeltEindeutig : eingesammeltEindeutig + " / " + eingesammeltCount),
+                    title: eingesammeltEindeutig === eingesammeltCount ? undefined : "Unterschiedliche / Gesamt",
+                    style: eingesammeltEindeutig === eingesammeltCount ? curColor : "cursor:help;" + curColor,
+                }])));
 
-            let [verlorenData, verlorenCount] = this.getItemLootAndDropTable(verlorenPre);
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(verlorenData, ["Anzahl", "verlorene Items: " + verlorenCount])));
+            let [verlorenData, verlorenCount, verlorenCountEindeutig] = await this.getItemLootAndDropTable(reportMeta, verlorenPre, false);
+            curColor = verlorenCount > 0 ? "background-color:rgb(194, 194, 41, 0.5);" : "";
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(verlorenData, [{
+                data: "",
+                style: curColor,
+            }, {data: "#", style: curColor},
+                {
+                    data: "verlorene Items: " + (verlorenCount === verlorenCountEindeutig ? verlorenCount : verlorenCountEindeutig + " / " + verlorenCount),
+                    title: verlorenCount === verlorenCountEindeutig ? undefined : "Unterschiedliche / Gesamt",
+                    style: verlorenCount === verlorenCountEindeutig ? curColor : "cursor:help;" + curColor,
+                }])));
 
             let [data, count] = this.getItemDamageTable(beschaedigtPre);
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, ["Held", "HP", gesamtschaden, "beschädigte Items: " + count])));
+            curColor = count > 0 ? "background-color:rgb(203, 47, 47, 0.5);" : "";
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, [{
+                data: "Held",
+                style: curColor,
+            }, {data: "HP", style: curColor}, {
+                data: gesamtschaden,
+                style: curColor,
+            }, {data: "beschädigte Items: " + count, style: curColor}])));
 
             [data, count] = this.getItemUsedTable(vgsPre);
             summaryContainer.append(this.flowLayout(_UI.createContentTable(data, ["Held", {
                 data: "Anw.",
-                title: "Übrig/Mitgenommen (Verbraucht)"
+                title: "Übrig/Mitgenommen (Verbraucht)",
+                style: "cursor: help;",
             }, "", "verwendete VGs: " + count])));
 
             title.parentElement.insertBefore(summaryContainer, title.nextSibling);
@@ -1034,12 +1073,24 @@
             return newNode;
         }
 
-        static flowLayout(div) {
+        static flowLayout(div, add) {
             div.style.display = "inline-flex";
-            div.style.fontSize = "90%";
+            div.style.fontSize = "85%";
             div.style.padding = "5px";
             div.style.border = 0;
+            if (add) this.copyTo(add, div);
             return div;
+        }
+
+        static copyTo(obj1, obj2) {
+            for (const [key, value] of Object.entries(obj1)) {
+                if (typeof value === "object") {
+                    const value2 = obj2[key];
+                    this.copyTo(value, value2);
+                } else {
+                    obj2[key] = value;
+                }
+            }
         }
 
         static getItemUsedTable(preData) {
@@ -1053,7 +1104,7 @@
                     const used2 = item.vg[2];
                     const itemNode = this.getFullItemNode(item.name, item.id, item.vg[0] === 0);
                     const desc = itemNode.innerHTML;
-                    const color = item.vg[0] === 0 ? MainPage.COLOR_RED : (item.vg[0] < -item.vg[2] ? MainPage.COLOR_YELLOW : "");
+                    const color = item.vg[0] === 0 ? ArchivView.COLOR_RED : (item.vg[0] < -item.vg[2] ? ArchivView.COLOR_YELLOW : "");
                     result.push([namePrinted ? "" : member, {
                         data: used1,
                         style: "text-align:center;background-color:" + color
@@ -1084,7 +1135,7 @@
                 itemNode.children[0].style.height = "15px";
                 let desc = itemNode.innerHTML;
                 let held = lastOwner !== entry.owner ? entry.owner : "";
-                const color = item.hp[0] === 0 ? MainPage.COLOR_RED : (item.hp[0] < 7 ? MainPage.COLOR_YELLOW : "");
+                const color = item.hp[0] === 0 ? ArchivView.COLOR_RED : (item.hp[0] < 7 ? ArchivView.COLOR_YELLOW : "");
                 result.push([held, {data: hp1, style: "text-align:center;background-color:" + color}, {
                     data: hp2,
                     style: "text-align:center;background-color:" + color
@@ -1094,10 +1145,11 @@
             return [result, beschaedigtPre.length];
         }
 
-        static getItemLootAndDropTable(eingesammeltPre, gesammelt) {
+        static async getItemLootAndDropTable(reportMeta, eingesammeltPre, gesammelt) {
             const eingesammelt = [];
             let eingesammeltCount = 0;
             let firstVG = true;
+            let hatteNichtVGs = false;
             for (const [itemName, entry] of Object.entries(eingesammeltPre).sort(([a, a2], [b, b2]) => {
                 let result = ((a2.vg / a2.vg) || 0) - ((b2.vg / b2.vg) || 0); // Nicht Verbrauchsgegenstände zuerst
                 if (result !== 0) return result;
@@ -1106,21 +1158,51 @@
                 return a.localeCompare(b);
             })) {
                 eingesammeltCount += entry.from.length;
-                let anzahl = entry.vg ? entry.vg : (entry.from.length > 1 ? entry.from.length : "");
+                hatteNichtVGs = hatteNichtVGs || !entry.vg;
+                const anzahl = document.createElement("span");
+                const curCount = entry.vg || entry.from.length;
+                anzahl.innerHTML = curCount > 1 ? curCount : "";
+                const [markers, itemsLootedBefore] = await this.createMarkers(itemName, gesammelt, reportMeta);
+                const itemsLootedInSum = itemsLootedBefore + (curCount || 1);
                 const itemLink = this.getFullItemNode(itemName, entry.id);
                 const ownerAnzeige = gesammelt && !entry.vg && !entry.unique;
                 let addStyle = "";
-                if (firstVG && entry.vg) {
+                if (firstVG && entry.vg && hatteNichtVGs) {
                     addStyle = "border-top: 3px solid white;"
                     firstVG = false;
                 }
-                let name = itemLink.innerHTML + (ownerAnzeige ? " (" + entry.from.join(", ") + ")" : "");
-                eingesammelt.push([{data: anzahl, style: "text-align:center;" + addStyle}, {
+                let name = itemLink.innerHTML + (ownerAnzeige ? " (" + entry.from.join(", ") + ")" : (entry.from.length > 1 ? " (" + entry.from.length + "x" + ")" : ""));
+                eingesammelt.push([{data: markers, style: addStyle}, {
+                    data: anzahl,
+                    style: "text-align:center;cursor:help;" + addStyle,
+                    title: "Bisher in der Gruppensaison: " + itemsLootedInSum,
+                }, {
                     data: name,
-                    style: addStyle
+                    style: addStyle,
+                    title: "Bisher in der Gruppensaison: " + itemsLootedInSum,
                 }]);
             }
-            return [eingesammelt, eingesammeltCount];
+            return [eingesammelt, eingesammeltCount, eingesammelt.length];
+        }
+
+        static async createMarkers(itemName, gesammelt, reportMeta) {
+            const elem = document.createElement("span");
+            const dungeonUnique = await _WoDLootDb.isDungeonUnique(itemName);
+            const groupSeasonId = await _WoD.getMyGroupSeasonId();
+            const lootedBefore = await _WoDLootDb.getLootedBefore(itemName, groupSeasonId, reportMeta.ts);
+            if (dungeonUnique) elem.append(this.createMarker("✨", "Wurde bisher nur in diesem Dungeon gedroppt")); // 🌟
+            if (lootedBefore === 0) elem.append(this.createMarker("🥇", "Wurde zuvor in dieser Gruppensaison noch nicht gelootet"));
+            return [elem, lootedBefore];
+        }
+
+        static createMarker(text, title) {
+            const result = document.createElement("span");
+            result.innerHTML = text;
+            if (title) {
+                result.title = title;
+                result.style.cursor = "help";
+            }
+            return result;
         }
     }
 
@@ -1480,8 +1562,8 @@
         }
 
         static async showArchiv() {
-            MainPage.anchor.removeChild(MainPage.anchor.children[0]);
-            MainPage.anchor.append(this.archivView);
+            ArchivView.anchor.removeChild(ArchivView.anchor.children[0]);
+            ArchivView.anchor.append(this.archivView);
         }
 
         static createSearchTable() {
@@ -1595,6 +1677,7 @@
             content.push(["Gruppe", this.groupSelect]);
 
             this.dungeonSelect = document.createElement("select");
+
             this.dungeonSelect.onchange = async function () {
                 thisObject.searchQuery.dungeonSelection = [];
                 var options = thisObject.dungeonSelect.selectedOptions;
@@ -1652,7 +1735,7 @@
             const resultTable = await ArchivSearch.query();
             this.searchResultAnchor.innerHTML = "";
             this.searchResultAnchor.append(resultTable);
-            await MainPage.completeDungeonInformations(true, this.archivView);
+            await ArchivView.completeDungeonInformations(true, this.archivView);
         }
 
         static createDatePicker() {
@@ -1666,17 +1749,19 @@
         }
 
         static async showPage(reportSource, reportSiteHTML, pageType) {
-            MainPage.anchor.removeChild(MainPage.anchor.children[0]);
+            ArchivView.anchor.removeChild(ArchivView.anchor.children[0]);
             const doc = _util.getDocumentFor(reportSiteHTML);
             const mainContent = doc.getElementsByClassName("main_content")[0];
             const temp = document.createElement("div");
             temp.innerHTML = mainContent.outerHTML;
-            MainPage.anchor.append(temp);
-            MainPage.title.scrollIntoView();
+            ArchivView.anchor.append(temp);
+            ArchivView.title.scrollIntoView();
             const statExecuter = this.getErweiterteKampfstatistikExecuter();
             if (statExecuter) {
                 const dbSourceReport = await MyStorage.reportArchiveSources.getValue(reportSource.reportId);
-                await statExecuter(pageType === MainPage.PAGE_TYPE_REPORT, pageType === MainPage.PAGE_TYPE_STAT, dbSourceReport);
+                if (pageType === ArchivView.PAGE_TYPE_REPORT || pageType === ArchivView.PAGE_TYPE_STAT) {
+                    await statExecuter(pageType === ArchivView.PAGE_TYPE_REPORT, pageType === ArchivView.PAGE_TYPE_STAT, dbSourceReport);
+                }
             }
             let inputs = temp.getElementsByTagName("input");
             for (const elem of inputs) {
@@ -1711,30 +1796,29 @@
                             addOnclick(a => ArchivSearch.showArchiv());
                             break;
                         case "Statistik":
-                            addOnclick(reportSource.statistik ? a => ArchivSearch.showPage(reportSource, reportSource.statistik, MainPage.PAGE_TYPE_STAT) : null);
+                            addOnclick(reportSource.statistik ? a => ArchivSearch.showPage(reportSource, reportSource.statistik, ArchivView.PAGE_TYPE_STAT) : null);
                             break;
                         case "Gegenstände":
-                            addOnclick(reportSource.gegenstaende ? a => ArchivSearch.showPage(reportSource, reportSource.gegenstaende, MainPage.PAGE_TYPE_ITEMS) : null);
+                            addOnclick(reportSource.gegenstaende ? a => ArchivSearch.showPage(reportSource, reportSource.gegenstaende, ArchivView.PAGE_TYPE_ITEMS) : null);
                             break;
                         case "Bericht":
                             const level = reportSource.levels && reportSource.levels[0];
-                            addOnclick(level ? a => ArchivSearch.showPage(reportSource, level, MainPage.PAGE_TYPE_REPORT) : null);
+                            addOnclick(level ? a => ArchivSearch.showPage(reportSource, level, ArchivView.PAGE_TYPE_REPORT) : null);
                             break;
                         default:
                             const matches = input.value.match(/Level.*(\d+)/);
                             if (matches) {
                                 const level = reportSource.levels && reportSource.levels[matches[1] - 1];
-                                addOnclick(level ? a => ArchivSearch.showPage(reportSource, level, MainPage.PAGE_TYPE_REPORT) : null);
+                                addOnclick(level ? a => ArchivSearch.showPage(reportSource, level, ArchivView.PAGE_TYPE_REPORT) : null);
                             }
                             break;
                     }
                 }
             }
 
-            if (pageType === MainPage.PAGE_TYPE_ITEMS) {
-                const reportExt = await MyStorage.reportArchiveExt.getValue(reportSource.reportId);
-                const members = reportExt && reportExt.members;
-                if (members) ItemLootSummary.einblenden(members);
+            if (pageType === ArchivView.PAGE_TYPE_ITEMS) {
+                const reportExt = await MyStorage.reportArchiveItems.getValue(reportSource.reportId);
+                if (reportExt) ItemLootSummary.einblenden(reportExt);
             }
         }
 
@@ -1766,7 +1850,7 @@
             statistik.onclick = async function (e) {
                 e.preventDefault();
                 const reportSource = await getReportSource();
-                if (reportSource.statistik) ArchivSearch.showPage(reportSource, reportSource.statistik, MainPage.PAGE_TYPE_STAT);
+                if (reportSource.statistik) ArchivSearch.showPage(reportSource, reportSource.statistik, ArchivView.PAGE_TYPE_STAT);
             }
 
             const gegenstaende = document.createElement("input");
@@ -1777,7 +1861,7 @@
             gegenstaende.onclick = async function (e) {
                 e.preventDefault();
                 const reportSource = await getReportSource();
-                if (reportSource.gegenstaende) ArchivSearch.showPage(reportSource, reportSource.gegenstaende, MainPage.PAGE_TYPE_ITEMS);
+                if (reportSource.gegenstaende) ArchivSearch.showPage(reportSource, reportSource.gegenstaende, ArchivView.PAGE_TYPE_ITEMS);
             }
 
             const bericht = document.createElement("input");
@@ -1788,7 +1872,7 @@
             bericht.onclick = async function (e) {
                 e.preventDefault();
                 const reportSource = await getReportSource();
-                if (reportSource.levels) ArchivSearch.showPage(reportSource, reportSource.levels[0], MainPage.PAGE_TYPE_REPORT);
+                if (reportSource.levels) ArchivSearch.showPage(reportSource, reportSource.levels[0], ArchivView.PAGE_TYPE_REPORT);
             }
 
             return result;
@@ -1885,6 +1969,11 @@
     }
 
     class Report {
+
+        static getGroupSeasonId(report) {
+            if (!report.group_season) throw Error("Report enthält keine Gruppen-Sasion-Nr");
+            return report.world + report.gruppe_id + "#" + report.group_season;
+        }
 
         static getSuccessRoomRate(report) {
             if (!report.success || !report.success.rooms) return 0;
@@ -2316,7 +2405,7 @@
         /**
          * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
          */
-        static reportArchiveExt = this.indexedDb.createObjectStore("reportArchiveExt", "reportId");
+        static reportArchiveItems = this.indexedDb.createObjectStore("reportArchiveItems", "reportId");
         /**
          * Quell-Dateien der Kampfberichte
          */
@@ -2342,32 +2431,36 @@
             await this.reportArchiveSources.setValue(report);
         }
 
-        static async putToExt(reportId, memberList) {
-            const reportExt = await this.reportArchiveExt.getValue(reportId) || {reportId: reportId, members: {}};
+        static async putToLoot(reportId, memberList) {
+            const reportExt = await this.reportArchiveItems.getValue(reportId) || {reportId: reportId, members: {}};
             for (const [name, entry] of Object.entries(memberList)) {
                 const member = reportExt.members[name] || (reportExt.members[name] = {});
                 for (const [entryKey, entryValue] of Object.entries(entry)) {
                     member[entryKey] = entryValue;
                 }
             }
-            await this.reportArchiveExt.setValue(reportExt);
+            await this.reportArchiveItems.setValue(reportExt);
             return reportExt;
         }
 
-        static async submitLoot(report, reportExt) {
-            for (const member of Object.values(reportExt.members)) {
+        static async submitLoot(report, reportLoot) {
+            const groupSeasonId = Report.getGroupSeasonId(report);
+            const loots = {};
+            for (const member of Object.values(reportLoot.members)) {
                 if (member.loot) {
                     for (const item of member.loot) {
-                        if (member.stufe) {
-                            await _WoDLootDb.addLootSafe(item.name, report.title, report.ts, report.world, member.stufe);
-                        } else {
-                            if (report.stufe) {
-                                await _WoDLootDb.addLootUnsafe(item.name, report.title, report.ts, report.world, report.stufe);
-                            } else {
-                                console.error("Keine Stufe gefunden: ", report, reportExt);
-                            }
-                        }
+                        const cur = loots[item.name] || (loots[item.name] = {});
+                        cur.stufe = cur.stufe || member.stufe;
+                        if (!member.ko) cur.count = (cur.count || 0) + (item.vg || 1); // nur Loot zählen
                     }
+                }
+            }
+
+            for (const [itemName, itemDef] of Object.entries(loots)) {
+                if (itemDef.stufe) {
+                    await _WoDLootDb.addLootSafe(itemName, itemDef.count, report.title, report.ts, report.world, groupSeasonId, itemDef.stufe);
+                } else {
+                    await _WoDLootDb.addLootUnsafe(itemName, itemDef.count, report.title, report.ts, report.world, groupSeasonId, report.stufe);
                 }
             }
         }
@@ -2375,19 +2468,6 @@
     }
 
     class WoD {
-
-        static getAllHeroIds() {
-            let result = {};
-            for (const cur of document.querySelectorAll(".content_table a[href*=\"/profile.php\"]")) {
-                const id = new URL(cur.href).searchParams.get("id");
-                if (result[id]) break;
-                result[id] = true;
-                if (Object.keys(result).length >= 12) break;
-            }
-            result = Object.keys(result);
-            console.log("HeorIds: ", result);
-            return result;
-        }
 
     }
 

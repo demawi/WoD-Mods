@@ -31,6 +31,7 @@
     const _WoDParser = demawiRepository.import("WoDParser");
     const _ReportParser = demawiRepository.import("ReportParser");
     const _util = demawiRepository.import("util");
+    const _Libs = demawiRepository.import("Libs");
 
     class Mod {
         static dbname = "wodDB";
@@ -60,7 +61,7 @@
                 return;
             }
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
-                let [levelData, errors] = await _ReportParser.readKampfbericht(document);
+                let [levelData, errors] = await _ReportParser.parseKampfbericht(document, true);
                 if (levelData) {
                     OutputAnchor.init();
                     Mod.thisLevelDatas = [levelData];
@@ -163,7 +164,23 @@
                 }
             }
             console.log("Read Kampfbericht: ", reportId, levelNr);
-            const [levelData, errors] = await _ReportParser.readKampfbericht(container);
+            const [levelData, errors] = await _ReportParser.parseKampfbericht(container, true);
+            if (false) {
+                const [levelData2, errors2] = await _ReportParser.parseKampfbericht(container, false);
+                console.log("AAAAAAAAAAAAAAAAA " + JSON.stringify(levelData).length);
+                console.log("BBBBBBBBBBBBBBBBB " + JSON.stringify(levelData2).length, levelData2);
+                const zip = await _Libs.getJSZip();
+                zip.file("abc", JSON.stringify(levelData2));
+                zip.generateAsync({
+                    type: "blob", compression: "DEFLATE",
+                    compressionOptions: {
+                        level: 9
+                    }
+                }).then(function (content) {
+                    console.log("CCCCCCCCCCCCCCCCCC", content);
+                }).catch(error => console.error("Zip-Erro: ", error));
+            }
+
             report.id = reportId;
             if (!report.levelDatas) {
                 report.levelDatas = [];
@@ -413,7 +430,7 @@
             if (unit.id.isHero) {
                 unit.id.id = unit.id.name;
             } else {
-                unit.id.id = unit.id.name + "_" + (unit.index || 1) + "_" + action.level.nr + "_" + action.area.nr;
+                unit.id.id = unit.id.name + "_" + (unit.idx || 1) + "_" + action.level.nr + "_" + action.area.nr;
             }
         }
 
@@ -521,29 +538,29 @@
             "skillType": {
                 name: "AngriffsTyp",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    return SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.angriffstyp, "sub", "skillType");
+                    return SearchEngine.getStat(curStats, queryFilter, statTarget.skill.angriffstyp, "sub", "skillType");
                 }
             },
             "skill": {
                 name: "Fertigkeit",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    if (!statTarget || !statTarget.fertigkeit) return;
+                    if (!statTarget || !statTarget.skill) return;
                     if (statRoot.wantHeroes !== statTarget.unit.id.isHero) return;
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
-                    subStats.title = statTarget.fertigkeit.typeRef;
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.skill.name, "sub", "skill");
+                    subStats.title = statTarget.skill.typeRef;
                     return subStats;
                 }
             },
             "skill_active": {
                 name: "Fertigkeit(Aktiv)",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    if (!statTarget || !statTarget.fertigkeit) return;
+                    if (!statTarget || !statTarget.skill) return;
                     if (statRoot.wantHeroes !== statTarget.unit.id.isHero) return;
                     console.log("isso", action, curStats.actionClassification(action));
                     if (!curStats.actionClassification(action).fromMe) return;
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.fertigkeit.name, "sub", "skill");
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.skill.name, "sub", "skill");
                     if (!subStats) return;
-                    subStats.title = statTarget.fertigkeit.typeRef;
+                    subStats.title = statTarget.skill.typeRef;
                     return subStats;
                 }
             },
@@ -569,9 +586,9 @@
             "items": {
                 name: "Gegenstände",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, _util.arrayMap(statTarget.fertigkeit.items, a => a.name).join(", "), "sub", "items");
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, _util.arrayMap(statTarget.skill.items, a => a.name).join(", "), "sub", "items");
                     if (!subStats) return false;
-                    subStats.title = _util.arrayMap(statTarget.fertigkeit.items, a => a.srcRef).join(", ");
+                    subStats.title = _util.arrayMap(statTarget.skill.items, a => a.srcRef).join(", ");
                     return subStats;
                 }
             },
@@ -757,7 +774,7 @@
                                     }
 
                                     var damages = target.damage; // nur bei "true" wird die action auch gezählt
-                                    if (damages.length === 0) damages = [true];
+                                    if (!damages || damages.length === 0) damages = [true];
                                     for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
                                         const damage = damages[damageIndex];
                                         doAnalysis(stats, filter, action, target, damage, damageIndex);
@@ -894,16 +911,16 @@
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).fromMe);
 
-                    let heal = util.arrayFilter(actions, action => action.fertigkeit.typ === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.typ === "Verbesserung" || action.fertigkeit.typ === "Ruft Helfer").length;
+                    let heal = util.arrayFilter(actions, action => action.skill.typ === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer").length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
                 this.columns.push(new Column("Aktionsarten", center("Passiva<br>(Parade / Geheilt / Gebufft)"), stat => {
                     let actions = stat.actions;
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).atMe);
-                    let heal = util.arrayFilter(actions, action => action.fertigkeit.typ === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.fertigkeit.typ === "Verbesserung" || action.fertigkeit.typ === "Ruft Helfer").length;
+                    let heal = util.arrayFilter(actions, action => action.skill.typ === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer").length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
             }
@@ -936,7 +953,7 @@
                 this.columns.push(new Column("Gesamtschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
-                        target.damage.forEach(damage => {
+                        (target.damage || []).forEach(damage => {
                             dmgs.push(damage.value + damage.ruestung + damage.resistenz);
                         });
                     })
@@ -955,7 +972,7 @@
                 this.columns.push(new Column("Direkter Schaden", center("Direkter<br>Schaden<br>(Ø)<br>(min-max)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
-                        target.damage.forEach(damage => {
+                        (target.damage || []).forEach(damage => {
                             dmgs.push(damage.value);
                         });
                     })
@@ -983,17 +1000,17 @@
                 const awColumn = new Column("Angriffswürfe", center("AW Ø<br>(min-max)"), dmgStat => {
                     var aw = Array(); // Angriffswerte
                     dmgStat.actions.forEach(action => {
-                        if (!action.fertigkeit || !action.fertigkeit.wurf) {
+                        if (!action.skill || !action.skill.wurf) {
                             console.error("Fertigkeit oder Wurf nicht gefunden: ", action);
                         }
-                        aw.push(Number(action.fertigkeit.wurf.value));
+                        aw.push(Number(action.skill.wurf.value));
                     });
                     return center(util.arrayAvg(aw, null, 2) + "<br>(" + util.arrayMin(aw) + " - " + util.arrayMax(aw) + ")");
                 });
                 const pwColumn = new Column("Paradewürfe", center("PW Ø<br>(min-max)"), dmgStat => {
                     var pw = Array(); // Paradewerte
                     dmgStat.targets.forEach(target => {
-                        pw.push(Number(target.fertigkeit.wurf));
+                        pw.push(Number(target.skill.wurf));
                     });
                     return center(util.arrayAvg(pw, null, 2) + "<br>(" + util.arrayMin(pw) + " - " + util.arrayMax(pw) + ")");
                 });
@@ -1125,7 +1142,6 @@
                                     roundTd.style.color = "lightgray";
                                     roundTd.style.fontStyle = "italic";
                                     actionTR.insertBefore(roundTd, actionTR.children[0]);
-                                    console.log(action)
                                     if (action.type === "vorrunde") {
                                         actionTR.children[1].innerHTML = "Vorrunde";
                                     }
