@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.21
+// @version        0.19
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -35,10 +35,9 @@
 
     class Mod {
         static dbname = "wodDB";
-        static version = "0.21";
-        static stand = "01.02.2025";
+        static version = "0.19";
+        static stand = "01.05.2025";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
-        static currentReportDataVersion = 8;
 
         static thisReport;
         static thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
@@ -105,6 +104,7 @@
                     const reportData = _WoD.getFullReportBaseData();
                     const reportId = reportData.reportId;
                     thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
+                    await thisObject.#invalidateOldCache(thisObject.thisReport);
 
                     // Holen und Speichern der erreichten Level
                     const successStats = _WoDParser.retrieveSuccessInformationOnStatisticPage(document, thisObject.thisReport.success);
@@ -130,6 +130,16 @@
             }
         }
 
+        static async #invalidateOldCache(report) {
+            const levelDatas = (report.levelDatas || []).slice(0);
+            for (let i = 0, l = levelDatas.length; i < l; i++) {
+                const levelData = levelDatas[i];
+                if (levelData && (!levelData.dv || levelData.dv !== _ReportParser.reportDataVersion)) {
+                    delete report.levelDatas[i];
+                }
+            }
+        }
+
         /**
          * Lädt aus den Report-Quellen fehlende Level-Statistiken in die ReportStat-Datenbank.
          */
@@ -151,9 +161,7 @@
 
         static async readKampfberichtAndStoreIntoReport(container, report, reportId) {
             var levelNr;
-            var levelCount;
-            console.log("Reporting", reportId, report);
-            if (reportId.startsWith("schlacht_")) {
+            if (reportId.endsWith("S")) {
                 levelNr = 1;
                 report.levelCount = 1;
             } else { // Dungeon
@@ -383,7 +391,7 @@
                         this.findFirstHeldenLevel(levelDataArray).areas[0].rounds[0].helden.forEach(held => {
                             subDomainEntry[held.id.name] = this.createStat();
                         });
-                    } else if (typeInitialize === "position") {
+                    } else if (typeInitialize === "pos") {
                         subDomainEntry["Vorne"] = this.createStat();
                         subDomainEntry["Linke Seite"] = this.createStat();
                         subDomainEntry["Rechte Seite"] = this.createStat();
@@ -480,13 +488,13 @@
             "position": {
                 name: "Position",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    return SearchEngine.getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
+                    return SearchEngine.getStat(curStats, queryFilter, statTarget.unit.pos, "sub", "pos");
                 }
             },
             "enemy_position": {
                 name: "Gegner-Position",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    return SearchEngine.getStat(curStats, queryFilter, statTarget.unit.position, "sub", "position");
+                    return SearchEngine.getStat(curStats, queryFilter, statTarget.unit.pos, "sub", "pos");
                 }
             },
             "unit": {
@@ -686,6 +694,7 @@
                 const level = levelDataArray[levelNr - 1];
                 if (!level) continue;
                 level.nr = levelNr;
+                level.roundCount = LevelData.getRoundCount(level);
                 if (!level) continue;
                 const areas = level.areas;
                 for (var areaNr = 1, areaCount = areas.length; areaNr <= areaCount; areaNr++) {
@@ -1000,10 +1009,10 @@
                 const awColumn = new Column("Angriffswürfe", center("AW Ø<br>(min-max)"), dmgStat => {
                     var aw = Array(); // Angriffswerte
                     dmgStat.actions.forEach(action => {
-                        if (!action.skill || !action.skill.wurf) {
+                        if (!action.skill || !action.skill.wuerfe) {
                             console.error("Fertigkeit oder Wurf nicht gefunden: ", action);
                         }
-                        aw.push(Number(action.skill.wurf.value));
+                        action.skill.wuerfe.forEach(wurf => aw.push(Number(wurf.value)));
                     });
                     return center(util.arrayAvg(aw, null, 2) + "<br>(" + util.arrayMin(aw) + " - " + util.arrayMax(aw) + ")");
                 });
@@ -1700,6 +1709,12 @@
             return result;
         }
 
+    }
+
+    class LevelData {
+        static getRoundCount(levelData) {
+            return levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
+        }
     }
 
     class StatReport {

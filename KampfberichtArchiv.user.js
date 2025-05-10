@@ -6,6 +6,9 @@
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
+// @include        https://*/wod/spiel/hero/item.php*
+// @include        https://*/wod/spiel/settings/heroes.php*
+// @include        https://*/wod/spiel/dungeon/dungeon.php*
 // @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
 // ==/UserScript==
 // *************************************************************
@@ -21,7 +24,7 @@
 
     const _Storages = demawiRepository.import("Storages");
     const _WoD = demawiRepository.import("WoD");
-    const _WoDGroupDb = demawiRepository.import("WoDGroupDb");
+    const _WoDWorldDb = demawiRepository.import("WoDWorldDb");
     const _WoDParser = demawiRepository.import("WoDParser");
     const _WoDLootDb = demawiRepository.import("WoDLootDb");
     const _util = demawiRepository.import("util");
@@ -36,8 +39,14 @@
         static async startMod() {
             console.log("StartMod: KampfberichtArchiv!");
             const page = _util.getWindowPage();
-            if (page === "move.php") { // Schlachtansicht
+            if (page === "dungeon.php") {
+                await DungeonAuswahl.start();
+            } else if (page === "heroes.php") {
+                await _WoDWorldDb.onMeineHeldenAnsicht();
+            } else if (page === "move.php") { // Schlachtansicht
                 await this.onMovePage();
+            } else if (page === "item.php") {
+                await ItemFunde.start();
             } else {
                 const title = document.getElementsByTagName("h1")[0];
                 if (title.textContent.trim() === "Kampfberichte") {
@@ -67,26 +76,25 @@
                             const searchParams = new URL(aElem.href).searchParams;
                             const reportId = _WoD.getMyWorld() + searchParams.get("report");
                             const battleId = searchParams.get("battle");
-                            let ts = undefined;
+                            let tsMsecs = undefined;
                             for (const h2 of roundX.getElementsByTagName("h2")) {
                                 const text = h2.textContent;
                                 if (text.startsWith("Runde")) {
                                     const timeString = text.substring(text.indexOf("(") + 1, text.indexOf(")"));
-                                    ts = _WoD.getTimestampFromString(timeString);
+                                    tsMsecs = _WoD.getTimestampFromString(timeString);
                                 }
                             }
-                            console.log("Found report: " + reportId + " " + battleId + " '" + schlachtName + "'", new Date(ts));
                             const win = boldElements[2].textContent === "Angreifer";
                             const report = await MyStorage.reportArchive.getValue(reportId) || {
                                 reportId: reportId,
                                 title: title,
-                                ts: ts,
+                                ts: tsMsecs / 60000,
                                 success: {
                                     levels: [win ? 1 : 0, 1],
                                 }
                             };
                             report.schlacht = schlachtName;
-                            report.ts = ts;
+                            report.ts = tsMsecs / 60000;
                             report.world = _WoD.getMyWorld();
                             report.gruppe = groupName;
                             report.gruppe_id = groupId;
@@ -103,32 +111,43 @@
          */
         static async onReportSite() {
             const title = document.getElementsByTagName("h1")[0];
+
+            const reportData = _WoD.getFullReportBaseData();
+            const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
+            reportMeta.world_season = await _WoD.getMyWorldSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
+
+            const seasonElem = document.createElement("sup");
+            seasonElem.classList.add("nowod");
+            seasonElem.style.fontSize = "60%";
+            seasonElem.innerHTML = " #" + reportMeta.world_season;
+            seasonElem.title = "Die aktuelle Welt-Saisonnummer. Falls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison anlegen.";
+            title.append(seasonElem);
+
             const berichtsseiteSpeichernButton = _UI.createButton(" 💾", () => {
                 util.htmlExport();
             });
             berichtsseiteSpeichernButton.title = "Einzelne Seite exportieren";
+            berichtsseiteSpeichernButton.classList.add("nowod");
             title.appendChild(berichtsseiteSpeichernButton);
             if (document.getElementsByClassName("paginator").length > 0) {
                 const warning = document.createElement("span");
                 warning.style.fontSize = "16px";
                 warning.innerHTML = "<br>⚠️ Dieser Level wird nicht vollständig auf einer Seite angezeigt und kann entsprechend nicht vollständig gespeichert werden. Bitte die Anzahl angezeigter Einträge entsprechend hochsetzen, so dass der Level vollständig auf einer Seite angezeigt wird. ⚠️"
+                warning.classList.add("nowod");
                 title.appendChild(warning);
             }
 
-            const reportData = _WoD.getFullReportBaseData();
-            const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
-            reportMeta.group_season = await _WoD.getMyGroupSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
             if (reportData.schlacht) reportMeta.schlacht = reportData.schlacht; // kommt evtl. nachträglich erst herein
             if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe; // Stufe nur setzen, wenn noch nicht vorhanden.
             const reportSource = await MyStorage.getSourceReport(reportData.reportId) || {reportId: reportData.reportId};
             console.log("Current Report ", reportData, reportMeta, reportSource);
 
             if (title.textContent.trim().startsWith("Kampfstatistik")) {
-                reportSource.statistik = util.getPlainMainContent().documentElement.outerHTML;
+                reportSource.statistik = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.statistik = true;
                 reportMeta.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(document, reportMeta.success);
             } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
-                reportSource.gegenstaende = util.getPlainMainContent().documentElement.outerHTML;
+                reportSource.gegenstaende = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.gegenstaende = true;
                 const memberList = _WoDParser.parseKampfberichtGegenstaende();
                 const reportLoot = await MyStorage.putToLoot(reportSource.reportId, memberList);
@@ -149,7 +168,7 @@
                 }
                 if (!reportSource.levels) reportSource.levels = [];
                 if (!reportMeta.levels) reportMeta.levels = [];
-                reportSource.levels[levelNr - 1] = util.getPlainMainContent().documentElement.outerHTML;
+                reportSource.levels[levelNr - 1] = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.levels[levelNr - 1] = true;
 
                 const heldenListe = _WoDParser.getHeldenstufenOnKampfbericht();
@@ -157,26 +176,8 @@
                     const reportLoot = await MyStorage.putToLoot(reportMeta.reportId, heldenListe);
                     await MyStorage.submitLoot(reportMeta, reportLoot);
                 }
-
-                if (_WoD.isSchlacht()) {
-                    const gewonnen = document.getElementsByClassName("rep_room_end")[0].textContent === "Die Angreifer haben gesiegt!";
-                    let success = reportMeta.success || {};
-                    success.rooms = [gewonnen ? 1 : 0, 1];
-                    success.levels = [gewonnen ? 1 : 0, 1];
-                    reportMeta.success = success;
-
-                    const lastActionHeroes = _WoDParser.getLastHeroTableOnKampfbericht();
-                    const heroTags = lastActionHeroes.querySelectorAll(".rep_hero, .rep_myhero, .rep_myotherheros");
-                    let countHeroes = 0;
-                    let countHeroesSuccess = 0;
-                    for (const heroTag of heroTags) {
-                        countHeroes++;
-                        if (heroTag.parentElement.parentElement.parentElement.children[6].textContent !== "bewusstlos") {
-                            countHeroesSuccess++;
-                        }
-                    }
-                    success.members = [countHeroesSuccess, countHeroes];
-                }
+                if (_WoD.isSchlacht()) reportMeta.success = _WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(document, reportMeta.success);
+                ReportView.changeView(reportMeta);
             }
             reportMeta.space = _util.getSpace(reportSource);
             await MyStorage.reportArchive.setValue(reportMeta);
@@ -272,14 +273,6 @@
             console.log("resyncVersions finished!");
         }
 
-        static async recallVersions() {
-            console.log("recallVersions...");
-            for (const report of await MyStorage.reportArchive.getAll()) {
-                const result = await Report.getVersion(report);
-            }
-            console.log("recallVersions finished!");
-        }
-
         static async checkMaintenance() {
             const settings = await Settings.get();
 
@@ -311,6 +304,26 @@
             }
         }
 
+        /**
+         * Löscht reportArchive.success - Information und schreibt sie neu.
+         */
+        static async rewriteSuccessInformation() {
+            for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
+                const report = await MyStorage.reportArchive.getValue(reportSource.reportId);
+                delete report.success;
+                console.log("Bearbeite: ", report.reportId);
+                if (reportSource.statistik) {
+                    const doc = _util.getDocumentFor(reportSource.statistik);
+                    report.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(doc);
+                }
+                if (reportSource.levels && reportSource.levels[0]) {
+                    const doc = _util.getDocumentFor(reportSource.levels[0]);
+                    if (_WoD.isSchlacht(doc)) report.success = _WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(doc, report.success);
+                }
+                await MyStorage.reportArchive.setValue(report);
+            }
+        }
+
         static async rewriteReportArchiveItems() {
             for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
                 if (reportSource.gegenstaende) {
@@ -326,32 +339,54 @@
             }
         }
 
-        static async syncReportExtToItemLoot() {
+        static async syncReportLootToItemLoot() {
             for (const reportExt of await MyStorage.reportArchiveItems.getAll()) {
                 const report = await MyStorage.reportArchive.getValue(reportExt.reportId);
                 await MyStorage.submitLoot(report, reportExt);
             }
         }
 
-        static async rewriteGroupSeasonIds() {
-            for (const reportItems of await MyStorage.reportArchiveItems.getAll()) {
-                if (!reportItems.loot) continue;
-                const report = await MyStorage.reportArchive.getValue(reportItems.reportId);
-                const heroIds = [];
-                for (const member of Object.values(reportItems.members)) {
-                    heroIds.push(member.id);
+        static async rewriteSeasonIds() {
+            for (const report of await MyStorage.reportArchive.getAll()) {
+                delete report.group_season;
+                report.world_season = 1;
+                await MyStorage.reportArchive.setValue(report);
+            }
+        }
+
+        static async fixReportIds() {
+            for (const report of await MyStorage.reportArchive.getAll()) {
+                if (report.schlacht && !report.reportId.endsWith("S")) {
+                    await MyStorage.reportArchive.deleteValue(report.reportId);
+                    const previousId = report.reportId;
+                    report.reportId += "S";
+                    await MyStorage.reportArchive.setValue(report);
+                    console.log("Fixed reportId: " + report.reportId);
+                    const reportSource = await MyStorage.reportArchiveSources.getValue(previousId);
+                    if (reportSource) {
+                        await MyStorage.reportArchiveSources.deleteValue(previousId);
+                        reportSource.reportId = report.reportId;
+                        await MyStorage.reportArchiveSources.setValue(reportSource);
+                    }
+                    const reportItems = await MyStorage.reportArchiveItems.getValue(previousId);
+                    if (reportItems) {
+                        await MyStorage.reportArchiveItems.deleteValue(previousId);
+                        reportItems.reportId = report.reportId;
+                        await MyStorage.reportArchiveItems.setValue(reportItems);
+                    }
                 }
-                await _WoDGroupDb.getGroupSeasonId(report.world, report.gruppe_id, report.gruppe, heroIds);
             }
         }
 
         static async onKampfberichteSeite() {
+            //await MyStorage.indexedDb.cloneTo("wodDB_Backup3");
+            //await this.rewriteSuccessInformation();
+            //await this.rewriteSeasonIds();
+            //await this.syncReportLootToItemLoot();
+            //await MyStorage.indexedDb.deleteObjectStore("group");
+
             //await this.rewriteReportArchiveItems();
-            //await this.syncReportExtToItemLoot();
-            //await this.rewriteGroupSeasonIds();
-            //await MyStorage.indexedDb.cloneTo("wodDB_Backup");
             //await this.rewriteExt();
-            //await MyStorage.indexedDb.deleteObjectStore("reportArchiveExt");
             // await this.resyncVersions();
             // await AutoFavorit.checkAutoFavoriten();
             // await Maintenance.recalculateSpace();
@@ -540,7 +575,7 @@
                     reportMeta = {
                         reportId: reportId,
                         title: curTR.children[1].textContent.trim(),
-                        ts: _WoD.getTimestampFromString(curTR.children[0].textContent.trim()),
+                        ts: _WoD.getTimestampFromString(curTR.children[0].textContent.trim()) / 60000,
                         gruppe: _WoD.getMyGroupName(),
                         gruppe_id: _WoD.getMyGroupId(),
                         world: _WoD.getMyWorld(),
@@ -635,7 +670,7 @@
 
                     if (isArchiv) {
                         const reportToString = async function (report) {
-                            return "- " + await getTitle(report) + "\n        [" + report.gruppe + "; " + _util.formatDateAndTime(new Date(report.ts)) + "]";
+                            return "- " + await getTitle(report) + "\n        [" + report.gruppe + "; " + _util.formatDateAndTime(new Date(report.ts * 60000)) + "]";
                         }
                         const deleteButton = _UI.createButton("🌋", async function () {
                             const confirmation = confirm("Es wird folgender Datensatz gelöscht: \n" + await reportToString(reportMeta));
@@ -711,6 +746,7 @@
                 if (reportMeta && reportMeta.space) {
                     space += reportMeta.space;
                 }
+
                 if (reportMeta && reportMeta.success && reportMeta.success.levels) {
                     const members = reportMeta.success.members;
                     const rooms = reportMeta.success.rooms;
@@ -782,7 +818,8 @@
             const settingTable = document.createElement("div");
             await this.createAutoFavorit(settingTable, settings);
             await this.createLoeschautomatik(settingTable, settings);
-            await this.createLootSummary(settingTable, settings);
+            await this.createSonstiges(settingTable, settings);
+            await this.createExperteneinstellungen(settingTable, settings);
             return settingTable;
         }
 
@@ -852,7 +889,7 @@
             settingTable.append(result);
         }
 
-        static async createLootSummary(settingTable, settings) {
+        static async createSonstiges(settingTable, settings) {
             this.addHeader(settingTable, "Sonstiges", "");
             const tableContent = [];
 
@@ -862,7 +899,34 @@
                     await Settings.save();
                 });
 
-            tableContent.push(["Zusammenfassung Gegenstandsseite: ", lootSummaryCheckbox])
+            tableContent.push(["Zusammenfassung Gegenstandsseite: ", lootSummaryCheckbox]);
+
+            const autoFavoritTable = _UI.createTable(tableContent);
+            settingTable.append(autoFavoritTable);
+        }
+
+        static async createExperteneinstellungen(settingTable, settings) {
+            this.addHeader(settingTable, "Experteneinstellungen", "Die Funktionalitäten hier bitte nur mit Bedacht nutzen.");
+            const tableContent = [];
+
+            const anlegenNeueGruppenSaison = document.createElement("input");
+            anlegenNeueGruppenSaison.type = "button";
+            anlegenNeueGruppenSaison.value = "Neue Weltsaison erzwingen";
+            anlegenNeueGruppenSaison.title = "Nach jedem Weltneustart sollte sich die Weltsaisons-Nummer auf der Helden-Ansicht um eins erhöhen. Sollte die Automatik nicht greifen. Bitte hierüber eine neue SaisonNr vergeben lassen";
+            anlegenNeueGruppenSaison.onclick = async function () {
+                const confirmation = window.confirm("Wollen sie wirklich eine neue WeltSaisonNr vergeben?\n\nDanach bitte die Helden-Ansicht aufrufen, damit alle Helden für die neue Saison registriert werden");
+                if (confirmation) {
+                    await _WoDWorldDb.forceNewSeason();
+                    await ArchivView.showSettings();
+                }
+            }
+
+            let text = "";
+            const worldSeasonNr = await await _WoDWorldDb.getCurrentWorldSeasonNr();
+            if (worldSeasonNr) text = "#" + worldSeasonNr;
+            else text = "Bitte nochmal die Heldenansicht aufrufen!";
+
+            tableContent.push(["Aktuelle Weltsaison: " + text, worldSeasonNr ? anlegenNeueGruppenSaison : ""]);
 
             const autoFavoritTable = _UI.createTable(tableContent);
             settingTable.append(autoFavoritTable);
@@ -961,7 +1025,7 @@
             const messages = [];
 
             for (const [member, items] of Object.entries(memberList)) {
-                gold += items.gold;
+                gold += items.gold || 0;
                 const lootToList = items.ko ? verlorenPre : eingesammeltPre;
                 if (items.exceed) messages.push([member + " hat seine Lagerkapazität überschritten! (" + items.exceed + ")", ArchivView.COLOR_RED]);
                 if (items.full) messages.push([member + " konnte aufgrund eines vollen Rucksacks nicht mehr alles einsammeln!", ArchivView.COLOR_YELLOW]);
@@ -1041,11 +1105,12 @@
             }, {data: "beschädigte Items: " + count, style: curColor}])));
 
             [data, count] = this.getItemUsedTable(vgsPre);
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, ["Held", {
+            curColor = count > 0 ? "background-color:rgb(255, 255, 255, 0.5);" : "";
+            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, [{data: "Held", style: curColor}, {
                 data: "Anw.",
                 title: "Übrig/Mitgenommen (Verbraucht)",
-                style: "cursor: help;",
-            }, "", "verwendete VGs: " + count])));
+                style: "cursor: help;" + curColor,
+            }, {data: "", style: curColor}, {data: "verwendete VGs: " + count, style: curColor}])));
 
             title.parentElement.insertBefore(summaryContainer, title.nextSibling);
         }
@@ -1075,7 +1140,7 @@
 
         static flowLayout(div, add) {
             div.style.display = "inline-flex";
-            div.style.fontSize = "85%";
+            div.style.fontSize = "90%";
             div.style.padding = "5px";
             div.style.border = 0;
             if (add) this.copyTo(add, div);
@@ -1162,8 +1227,8 @@
                 const anzahl = document.createElement("span");
                 const curCount = entry.vg || entry.from.length;
                 anzahl.innerHTML = curCount > 1 ? curCount : "";
-                const [markers, itemsLootedBefore] = await this.createMarkers(itemName, gesammelt, reportMeta);
-                const itemsLootedInSum = itemsLootedBefore + (curCount || 1);
+                const [markers, itemsLootedBefore] = await this.createMarkers(itemName, reportMeta);
+                const itemsLootedInSum = itemsLootedBefore + (gesammelt ? (curCount || 1) : 0);
                 const itemLink = this.getFullItemNode(itemName, entry.id);
                 const ownerAnzeige = gesammelt && !entry.vg && !entry.unique;
                 let addStyle = "";
@@ -1175,24 +1240,23 @@
                 eingesammelt.push([{data: markers, style: addStyle}, {
                     data: anzahl,
                     style: "text-align:center;cursor:help;" + addStyle,
-                    title: "Bisher in der Gruppensaison: " + itemsLootedInSum,
+                    title: "Bisher in der Saison gelootet: " + itemsLootedInSum,
                 }, {
                     data: name,
-                    style: addStyle,
-                    title: "Bisher in der Gruppensaison: " + itemsLootedInSum,
+                    style: "cursor:help;" + addStyle,
+                    title: "Bisher in der Saison gelootet: " + itemsLootedInSum,
                 }]);
             }
             return [eingesammelt, eingesammeltCount, eingesammelt.length];
         }
 
-        static async createMarkers(itemName, gesammelt, reportMeta) {
+        static async createMarkers(itemName, reportMeta) {
             const elem = document.createElement("span");
             const dungeonUnique = await _WoDLootDb.isDungeonUnique(itemName);
-            const groupSeasonId = await _WoD.getMyGroupSeasonId();
-            const lootedBefore = await _WoDLootDb.getLootedBefore(itemName, groupSeasonId, reportMeta.ts);
+            const lootedBeforeInWorldSeason = await _WoDLootDb.getLootedBefore(itemName, reportMeta.ts, reportMeta.world, reportMeta.world_season); // aktuell nicht auf die gruppe beschränkt
             if (dungeonUnique) elem.append(this.createMarker("✨", "Wurde bisher nur in diesem Dungeon gedroppt")); // 🌟
-            if (lootedBefore === 0) elem.append(this.createMarker("🥇", "Wurde zuvor in dieser Gruppensaison noch nicht gelootet"));
-            return [elem, lootedBefore];
+            if (lootedBeforeInWorldSeason === 0) elem.append(this.createMarker("🥇", "Wurde zuvor in dieser Saison auf dieser Welt noch nicht gelootet"));
+            return [elem, lootedBeforeInWorldSeason];
         }
 
         static createMarker(text, title) {
@@ -1203,6 +1267,125 @@
                 result.style.cursor = "help";
             }
             return result;
+        }
+    }
+
+    class DungeonAuswahl {
+        static async start() {
+            console.log("Dungeonauswahl start");
+            const start = new Date().getTime();
+            const dungeonTRs = document.querySelectorAll(".content_table > tbody > tr:not([id*=\"desc\"])");
+            const world = _WoD.getMyWorld();
+            const worldSeasonNr = await _WoD.getMyWorldSeasonNr();
+            const gruppeId = _WoD.getMyGroupId();
+            for (const tr of dungeonTRs) {
+                const dungeonName = tr.children[0].textContent.trim();
+                const [misserfolg, teilerfolg, erfolg] = await this.getSuccessLevelAndRates(dungeonName);
+                tr.style.backgroundColor = erfolg ? ArchivView.COLOR_GREEN : (teilerfolg ? ArchivView.COLOR_YELLOW : (misserfolg ? ArchivView.COLOR_RED : ""));
+                tr.onmouseover = async function () {
+                    if (!tr.title) {
+                        let hoverText = "Erfolge: " + erfolg + " / " + teilerfolg + " / " + misserfolg + "\n";
+                        if (erfolg || teilerfolg) {
+                            let lootedDungeonUniquesText = "";
+                            const lootedDungeonUniques = await _WoDLootDb.getLootedDungeonuniques(dungeonName, world, worldSeasonNr, gruppeId);
+                            for (const [itemName, count] of Object.entries(lootedDungeonUniques)) {
+                                lootedDungeonUniquesText += itemName + ": " + (count > 0 ? "✅ " + count : "❌") + "\n";
+                            }
+                            hoverText += "Bisher gefundener DungeonUniques:\n" + lootedDungeonUniquesText;
+                        } else {
+                            hoverText += "Noch kein (teil)erfolgreicher Besuch";
+                        }
+                        tr.title = hoverText;
+                    }
+                }
+
+            }
+            console.log("Dungeonauswahl Processing: " + (new Date().getTime() - start) / 1000 + "secs");
+        }
+
+        static async getSuccessLevelAndRates(dungeonName) {
+            let result = [0, 0, 0];
+            for (const report of await MyStorage.reportArchive.getAll()) {
+                if (report.title === dungeonName) {
+                    const cur = Report.getSuccessLevel(report);
+                    if (cur !== undefined) {
+                        result[cur + 1] += 1;
+                    }
+                }
+            }
+            return result;
+        }
+
+        static async getSuccessLevelForReport(report) {
+            if (!report.success) return;
+
+        }
+    }
+
+    class ItemFunde {
+
+        /**
+         * Zusatz für die Gegenstandsseite
+         */
+        static async start() {
+            const hints = document.getElementsByClassName("hints")[0];
+            if (!hints) return;
+            const all = document.getElementsByTagName("h1")[0];
+            const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
+            if (!itemName) return;
+            const item = await _.WoDLootDb.getValue(itemName);
+            const loot = (item && item.loot) || [];
+
+            const header = ["Dungeon", "Zeit", "Von", "Stufe", "Welt", "Gelootet"];
+            let content = [];
+            const entries = Object.entries(loot);
+            for (const [key, value] of entries) {
+                const matcher = key.match(/^(\D+)(\d+)[|]?.*$/);
+                const world = matcher[1];
+                const ts = Number(matcher[2]) * 60000; // Timestamp ist in Minuten gespeichert
+                console.log("COunt: ", value.count);
+                content.push([value.loc, ts, value.quelle, value.stufe ? {
+                    data: value.stufe,
+                    style: "text-align:center;",
+                } : {data: "(" + value.stufe_ + ")", style: "text-align:center;"}, {
+                    data: world,
+                    style: "text-align:center"
+                }, {
+                    data: (value.count || "0"),
+                    style: "text-align:center;"
+                }]);
+            }
+            content.sort((a, b) => {
+                return b[1] - a[1];
+            });
+            for (const value of content) {
+                value[1] = _util.formatDateAndTime(new Date(value[1]));
+            }
+            const table = _UI.createContentTable(content, header);
+            table.classList.add("nowod");
+            table.style.marginLeft = "15px";
+            const lootUeberschrift = document.createElement("h3");
+            lootUeberschrift.classList.add("nowod");
+            lootUeberschrift.style.marginLeft = "15px";
+            lootUeberschrift.innerHTML = "Sichtungen <span style='font-size:10px'>(maximal " + _WoDLootDb.MAX_LOOT_ENTRIES + ")</span>";
+            hints.parentElement.insertBefore(lootUeberschrift, hints);
+            hints.parentElement.insertBefore(table, hints);
+            if (entries.length > 1) {
+                const aggregateInfos = [];
+                let stufeMin = Number.MAX_VALUE;
+                let stufeMax = 0;
+                for (const cur of Object.keys(item.stufen)) {
+                    const curNr = Number(cur);
+                    if (curNr < stufeMin) stufeMin = curNr;
+                    if (curNr > stufeMax) stufeMax = curNr;
+                }
+                aggregateInfos.push(["Stufe (min-max):", stufeMin + "-" + stufeMax]);
+                aggregateInfos.push(["Unterschiedliche Dungeons:", Object.entries(item.locs).length]);
+                const aggregateTable = _UI.createContentTable(aggregateInfos);
+                aggregateTable.classList.add("nowod");
+                aggregateTable.style.marginLeft = "15px";
+                hints.parentElement.insertBefore(aggregateTable, table);
+            }
         }
     }
 
@@ -1246,8 +1429,9 @@
             allReports.sort((a, b) => b.ts - a.ts);
             let switcher = false;
             const thisObject = this;
-            const primaryDate = new Date();
+            let primaryDate = new Date();
             primaryDate.setDate(primaryDate.getDate() - ArchivSearch.AUSWAHL_BEVORZUGT);
+            primaryDate = primaryDate.getTime() / 60000;
             const groupsFound = {};
             const groupsFoundPrimary = {};
             const worldsFound = {};
@@ -1278,7 +1462,7 @@
                 tbody.append(tr);
                 const dateTD = document.createElement("td");
                 tr.append(dateTD);
-                dateTD.innerText = _util.formatDateAndTime(reportMeta.ts);
+                dateTD.innerText = _util.formatDateAndTime(reportMeta.ts * 60000);
                 dateTD.style.textAlign = "center";
                 const nameTD = document.createElement("td");
                 tr.append(nameTD);
@@ -1421,14 +1605,14 @@
                 this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const [dungeonName, title] of Object.entries(dungeonsFoundPrimary).sort((a, b) => a[1].localeCompare(b[1]))) {
                     const selected = this.searchQuery.dungeonSelection.includes(dungeonName) ? "selected" : "";
-                    this.dungeonSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + title + "</option>";
+                    this.dungeonSelect.innerHTML += "<option value=\"" + dungeonName + "\" " + selected + ">" + title + "</option>";
                 }
                 this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
             }
             for (const [dungeonName, title] of Object.entries(dungeonsFound).sort((a, b) => a[1].localeCompare(b[1]))) {
                 if (dungeonsFoundPrimary[dungeonName]) continue;
                 const selected = this.searchQuery.dungeonSelection.includes(dungeonName) ? "selected" : "";
-                this.dungeonSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + title + "</option>";
+                this.dungeonSelect.innerHTML += "<option value=\"" + dungeonName.replaceAll("'", "\'") + "\" " + selected + ">" + title + "</option>";
             }
         }
 
@@ -1443,14 +1627,14 @@
                 this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const dungeonName of Object.keys(groupsFoundPrimary).sort()) {
                     const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
-                    this.groupSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
+                    this.groupSelect.innerHTML += "<option value=\"" + dungeonName + "\" " + selected + ">" + dungeonName + "</option>";
                 }
                 this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
             }
             for (const dungeonName of Object.keys(groupsFound).sort()) {
                 if (groupsFoundPrimary[dungeonName]) continue;
                 const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
-                this.groupSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
+                this.groupSelect.innerHTML += "<option value=\"" + dungeonName + "\" " + selected + ">" + dungeonName + "</option>";
             }
         }
 
@@ -1499,8 +1683,8 @@
             const dateMax = this.searchQuery.dateMax;
 
             const reportTime = report.ts;
-            if (dateMax && dateMax.getTime() <= reportTime) return false;
-            if (dateMin && dateMin.getTime() >= reportTime) return false;
+            if (dateMax && dateMax <= reportTime) return false;
+            if (dateMin && dateMin >= reportTime) return false;
             return true;
         }
 
@@ -1564,6 +1748,7 @@
         static async showArchiv() {
             ArchivView.anchor.removeChild(ArchivView.anchor.children[0]);
             ArchivView.anchor.append(this.archivView);
+            if (this.scrollY) window.scroll(0, this.scrollY);
         }
 
         static createSearchTable() {
@@ -1571,9 +1756,9 @@
             searchTable.id = "orders";
             const content = [];
             const dateMinInput = this.createDatePicker();
-            if (this.searchQuery.dateMin) dateMinInput.value = _util.formatDateAndTime(this.searchQuery.dateMin);
+            if (this.searchQuery.dateMin) dateMinInput.value = _util.formatDateAndTime(this.searchQuery.dateMin * 60000);
             const dateMaxInput = this.createDatePicker();
-            if (this.searchQuery.dateMax) dateMaxInput.value = _util.formatDateAndTime(this.searchQuery.dateMax);
+            if (this.searchQuery.dateMax) dateMaxInput.value = _util.formatDateAndTime(this.searchQuery.dateMax * 60000);
             const datumRow = document.createElement("div");
             datumRow.append(dateMinInput);
             datumRow.append(_UI.createButton("❌", function () {
@@ -1594,7 +1779,7 @@
             }));
             dateMinInput.onchange = function () {
                 try {
-                    thisObject.searchQuery.dateMin = new Date(_util.parseStandardDateString(dateMinInput.value));
+                    thisObject.searchQuery.dateMin = new Date(_util.parseStandardDateString(dateMinInput.value)).getTime() / 60000;
                 } catch (e) {
                     thisObject.searchQuery.dateMin = null;
                 }
@@ -1604,6 +1789,7 @@
                 try {
                     thisObject.searchQuery.dateMax = new Date(_util.parseStandardDateString(dateMaxInput.value));
                     thisObject.searchQuery.dateMax.setDate(thisObject.searchQuery.dateMax.getDate() + 1);
+                    thisObject.searchQuery.dateMax = thisObject.searchQuery.dateMax.getTime() / 60000;
                 } catch (e) {
                     thisObject.searchQuery.dateMax = null;
                 }
@@ -1626,8 +1812,8 @@
             }
             this.nurFavoritenSelect.innerHTML += "<option></option>";
             this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_MANUELL + "</option>";
-            this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_AUTO_ALL + "</option>";
-            this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_AUTO_GROUP + "</option>";
+            this.nurFavoritenSelect.innerHTML += "<option style='color:" + AutoFavorit.TAG_COLORS[AutoFavorit.TAG_ALL] + "'>" + FilterQuery.FAVORIT_AUTO_ALL + "</option>";
+            this.nurFavoritenSelect.innerHTML += "<option style='color:" + AutoFavorit.TAG_COLORS[AutoFavorit.TAG_GROUP] + "'>" + FilterQuery.FAVORIT_AUTO_GROUP + "</option>";
             content.push(["Favoriten", this.nurFavoritenSelect]);
 
             this.typeSelect = document.createElement("select");
@@ -1749,6 +1935,9 @@
         }
 
         static async showPage(reportSource, reportSiteHTML, pageType) {
+            if (ArchivView.anchor.children[0] === this.archivView) {
+                this.scrollY = window.scrollY;
+            }
             ArchivView.anchor.removeChild(ArchivView.anchor.children[0]);
             const doc = _util.getDocumentFor(reportSiteHTML);
             const mainContent = doc.getElementsByClassName("main_content")[0];
@@ -1819,6 +2008,9 @@
             if (pageType === ArchivView.PAGE_TYPE_ITEMS) {
                 const reportExt = await MyStorage.reportArchiveItems.getValue(reportSource.reportId);
                 if (reportExt) ItemLootSummary.einblenden(reportExt);
+            } else if (pageType === ArchivView.PAGE_TYPE_REPORT) {
+                _Libs.addCSS("report.css?" + new Date().getTime());
+                ReportView.changeView(await MyStorage.reportArchive.getValue(reportSource.reportId));
             }
         }
 
@@ -1965,14 +2157,32 @@
             console.log("Sync check beendet! Fehler gefunden: " + failures);
         }
 
-
     }
 
     class Report {
 
-        static getGroupSeasonId(report) {
-            if (!report.group_season) throw Error("Report enthält keine Gruppen-Sasion-Nr");
-            return report.world + report.gruppe_id + "#" + report.group_season;
+        static getSuccessLevel(reportMeta) {
+            if (reportMeta && reportMeta.success && reportMeta.success.levels) {
+                const members = reportMeta.success.members;
+                const levels = reportMeta.success.levels;
+                if (members) {
+                    if (members[0] === members[1]) {
+                        return 1;
+                    } else if (members[0] > 0) {
+                        return 0;
+                    } else {
+                        return -1;
+                    }
+                } else if (reportMeta.success.levels) {
+                    if (levels[0] > -1) {
+                        if (levels[0] !== levels[1]) {
+                            return -1;
+                        } else {
+                            return 0;
+                        }
+                    }
+                }
+            }
         }
 
         static getSuccessRoomRate(report) {
@@ -2062,11 +2272,24 @@
                 const level = reportSource.levels[i];
                 const doc = _util.getDocumentFor(level);
                 const navLevels = doc.getElementsByClassName("navigation levels")[0];
-                const ueberschrift = navLevels.parentElement.getElementsByTagName("h3")[0].textContent;
+                let ueberschrift = navLevels.parentElement.getElementsByTagName("h3")[0].textContent;
                 versionId.push(ueberschrift);
             }
             if (report.success.levels[1] > versionId.length) {
                 versionId.push("X_X"); // Markierung, dass es noch keine finale Versionskennzeichnung ist
+            } else if (report.title === "Atreanijsh") {
+                let geloest = 0;
+                let interlude = 0;
+                let nix = 0;
+                for (let i = 0, l = versionId.length; i < l; i++) {
+                    let cur = versionId[i];
+                    if (cur.includes("- gelöst")) geloest++;
+                    else if (cur.includes("- Interlude")) interlude++;
+                    else nix++;
+                    cur = cur.replace(" - gelöst", "");
+                    versionId[i] = cur;
+                }
+                if (nix) versionId.push("X_X"); // kein gelöst, kein Interlude, d.h. man hätte weiter kommen können
             }
             return versionId;
         }
@@ -2088,6 +2311,95 @@
             if (report.favAuto) await AutoFavorit.recheckAutoFavoritenForReport(report);
         }
 
+    }
+
+    class ReportView {
+        static changeView(report) {
+            const navigationLevel1 = document.querySelector(".navigation.levels");
+            if (!navigationLevel1) return; // z.B. bei Schlachten der Fall
+            const firstAnchor = document.createElement("a");
+            firstAnchor.id = "1";
+            navigationLevel1.parentElement.insertBefore(firstAnchor, navigationLevel1);
+            navigationLevel1.style.position = "sticky";
+            navigationLevel1.style.top = 0;
+            const success = report.success;
+            console.log("ReportView.changeView Success: ", success);
+            if (!success) return;
+            const haveFullSuccessInformations = success.levels[0] !== undefined;
+
+            const content = [];
+            const lineBefore = [""];
+            const line = [];
+            const line2 = [""];
+            const line3 = [""];
+            let kosAdded = false;
+            let needSomeLoading = false;
+            const getKos = function (levelNr) {
+                if (!success.ko) return [];
+                const result = [];
+                for (const [name, inLevelNr] of Object.entries(success.ko)) {
+                    if (levelNr === inLevelNr + 1) result.push(name);
+                }
+                return result;
+            }
+            for (let i = 0, l = navigationLevel1.children.length; i < l; i++) {
+                const curButton = navigationLevel1.children[0];
+                line.push(curButton);
+                navigationLevel1.removeChild(curButton);
+                const levelNr = i;
+                if (levelNr >= 1) {
+                    let levelWithContent = undefined;
+                    if (haveFullSuccessInformations) {
+                        levelWithContent = true;
+                        const successMarker = document.createElement("div");
+                        successMarker.style.height = "100%";
+                        let koMarker;
+                        if (success.levels[0] < levelNr) {
+                            if (success.levels[0] === levelNr - 1) {
+                                successMarker.style.backgroundColor = ArchivView.COLOR_RED;
+                            } else {
+                                levelWithContent = false;
+                                curButton.style.opacity = 0.2;
+                            }
+                        } else {
+                            const kos = getKos(levelNr);
+                            if (kos.length === 0) {
+                                successMarker.style.backgroundColor = ArchivView.COLOR_GREEN;
+                            } else {
+                                successMarker.style.backgroundColor = ArchivView.COLOR_YELLOW;
+                                koMarker = document.createElement("div");
+                                for (const ko of kos) {
+                                    if (koMarker.innerHTML.length > 0) koMarker.innerHTML += "<br>";
+                                    koMarker.innerHTML += ko;
+                                }
+                                kosAdded = true;
+                            }
+                        }
+                        line2.push({data: successMarker, style: "height:5px"});
+                        line3.push(koMarker ? {data: koMarker, style: "vertical-align:top"} : "");
+                    }
+                    const loadingText = report.levels[levelNr - 1] ? "" : (levelWithContent === undefined ? "▼?" : (levelWithContent ? "▼" : ""));
+                    const needLoading = loadingText ? {
+                        data: loadingText,
+                        style: "font-size: 12px;cursor:help;",
+                        title: "Dieser Level wurde noch nicht angeschaut" + (levelWithContent ? "" : ". Da die Statistikseite noch nicht aufgerufen wurde, wissen wir aber auch nicht, ob er überhaupt existiert."),
+                    } : "";
+                    if (needLoading !== "") needSomeLoading = true;
+                    lineBefore.push(needLoading);
+                }
+            }
+            navigationLevel1.innerHTML = "";
+            if (needSomeLoading) content.push(lineBefore);
+            content.push(line);
+            content.push(line2);
+            if (kosAdded) content.push(line3);
+            navigationLevel1.style.textAlign = "center";
+            const table = _UI.createTable(content);
+            table.style.borderSpacing = "2px";
+            table.style.margin = "auto";
+            table.style.backgroundColor = "#101010";
+            navigationLevel1.append(table);
+        }
     }
 
     /**
@@ -2404,6 +2716,7 @@
         static reportArchive = this.indexedDb.createObjectStore("reportArchive", "reportId");
         /**
          * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
+         * Resultat aus WoDParser.parseKampfberichtGegenstaende
          */
         static reportArchiveItems = this.indexedDb.createObjectStore("reportArchiveItems", "reportId");
         /**
@@ -2444,7 +2757,6 @@
         }
 
         static async submitLoot(report, reportLoot) {
-            const groupSeasonId = Report.getGroupSeasonId(report);
             const loots = {};
             for (const member of Object.values(reportLoot.members)) {
                 if (member.loot) {
@@ -2458,9 +2770,9 @@
 
             for (const [itemName, itemDef] of Object.entries(loots)) {
                 if (itemDef.stufe) {
-                    await _WoDLootDb.addLootSafe(itemName, itemDef.count, report.title, report.ts, report.world, groupSeasonId, itemDef.stufe);
+                    await _WoDLootDb.addLootSafe(itemName, itemDef.count, report.title, report.locVersion, report.ts, report.world, report.world_season, itemDef.stufe, report.gruppe_id, report.gruppe);
                 } else {
-                    await _WoDLootDb.addLootUnsafe(itemName, itemDef.count, report.title, report.ts, report.world, groupSeasonId, report.stufe);
+                    await _WoDLootDb.addLootUnsafe(itemName, itemDef.count, report.title, report.locVersion, report.ts, report.world, report.world_season, report.stufe, report.gruppe_id, report.gruppe);
                 }
             }
         }
@@ -2468,7 +2780,19 @@
     }
 
     class WoD {
-
+        /**
+         * Holt den Content und formatiert zusätzlich das Datum noch um
+         */
+        static getPlainMainContent() {
+            const titleFormatter = function (doc) {
+                const titleElem = doc.getElementsByTagName("h2")[0];
+                const titleSplit = titleElem.textContent.split(/-(.*)/);
+                const title = titleSplit[1].trim();
+                const absoluteTime = _WoD.getTimeString(titleSplit[0].trim());
+                titleElem.innerHTML = absoluteTime + " - " + title;
+            }
+            return util.getPlainMainContent(titleFormatter);
+        }
     }
 
     class util {
@@ -2494,9 +2818,10 @@
 
         /**
          * Versucht soweit alle Elemente die nicht zum Main-Content gehören rauszufiltern.
+         * Wir greifen nicht alleinig den Main_Content ab, um auch CSS und "the_form" etc. mit zu bekommen
          * Stellt sicher, dass alle URLs relativ zur Domain definiert sind.
          */
-        static getPlainMainContent() {
+        static getPlainMainContent(functionAfterClone) {
             const myDocument = document.cloneNode(true);
 
             const remove = node => {
@@ -2512,6 +2837,7 @@
             }
 
             const removeNoWodNodes = node => {
+                // mit querySelector nur die äußeren Knoten abgreifen: .nowod:not(.nowod .nowod)
                 util.forEachSafe(node.children, cur => {
                     if (cur.classList.contains("nowod")) {
                         remove(cur);
@@ -2527,6 +2853,7 @@
             // Wenn die Datei exportiert wird, wird die Pfadangabe ja ebenfalls "vergessen".
             this.ensureAllUrlsHavePathname(myDocument);
 
+            if (functionAfterClone) functionAfterClone(myDocument);
             return myDocument;
         }
 
@@ -2539,7 +2866,7 @@
             this.rewriteAllUrls(myDocument, url => {
                 if (!url) return url;
                 if (url === "") return "";
-                if (url.startsWith("http") || url.startsWith("/") || url.startsWith("data:")) return url;
+                if (url.startsWith("http") || url.startsWith("/") || url.startsWith("data:") || url.startsWith("#")) return url;
                 // Übrig bleiben alle relativ definierten Pfade. Hier müssen wir den Pfad auch anhängen
                 return path + "/" + url;
             })
@@ -2595,7 +2922,7 @@
         }
 
         static htmlExport() {
-            const myDocument = this.getPlainMainContent();
+            const myDocument = WoD.getPlainMainContent();
 
             var fileName;
             var curElement = myDocument.getElementsByName("current_level")[0];

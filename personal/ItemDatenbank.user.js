@@ -43,60 +43,10 @@
             // Gegenstandsseite. Einlesen der Item-Werte.
             if (page === "item.php") {
                 await ItemReader.start();
-                await ItemFunde.start();
             }
 
             // Einbinden der Such-UI.
             if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
-        }
-    }
-
-    class ItemFunde {
-
-        static async start() {
-            const hints = document.getElementsByClassName("hints")[0];
-            if (!hints) return;
-            const all = document.getElementsByTagName("h1")[0];
-            const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
-            if (!itemName) return;
-            const item = await MyStorage.getItemFunde(itemName);
-            console.log("ItemFunde: ", item);
-            const loot = (item && item.loot) || [];
-
-            const header = ["Dungeon", "Welt", "Zeit", "Stufe"];
-            let content = [];
-            let stufeMin = Number.MAX_VALUE;
-            let stufeMax = Number.MIN_VALUE;
-            const dungeons = {};
-            const entries = Object.entries(loot);
-            for (const [key, value] of entries) {
-                const stufe = Number(value.stufe) || Number(value.stufe_);
-                if (stufe < stufeMin) stufeMin = stufe;
-                if (stufe > stufeMax) stufeMax = stufe;
-                dungeons[value.loc] = true;
-                content.push([value.loc, value.world, _util.formatDateAndTime(new Date(Number(key))), value.stufe || "(" + value.stufe_ + ")"]);
-            }
-            content.sort((a, b) => {
-                console.log(a[0]);
-                return a[0].localeCompare(b[0]);
-            });
-            const table = _UI.createContentTable(content, header);
-            table.style.marginLeft = "15px";
-            table.classList.add("nowod");
-            const lootUeberschrift = document.createElement("h3");
-            lootUeberschrift.style.marginLeft = "15px";
-            lootUeberschrift.innerHTML = "Fundorte";
-            hints.parentElement.insertBefore(lootUeberschrift, hints);
-            hints.parentElement.insertBefore(table, hints);
-            if (entries.length > 0) {
-                const aggregateInfos = [];
-                aggregateInfos.push(["Stufe (min-max):", stufeMin + "-" + stufeMax]);
-                aggregateInfos.push(["Unterschiedliche Dungeons:", Object.entries(dungeons).length]);
-                const aggregateTable = _UI.createContentTable(aggregateInfos);
-                aggregateTable.classList.add("nowod");
-                aggregateTable.style.marginLeft = "15px";
-                hints.parentElement.insertBefore(aggregateTable, table);
-            }
         }
     }
 
@@ -1579,7 +1529,6 @@
         }
         static indexedDb = new _Storages.IndexedDb("ItemDB", Mod.dbname);
         static item = this.adjust(this.indexedDb.createObjectStore("item", "id"));
-        static itemLoot;
         static itemSources = this.adjust(this.indexedDb.createObjectStore("itemSources", "id"));
 
         static getItemSourceDB() {
@@ -1588,18 +1537,6 @@
 
         static getItemDB() {
             return this.item;
-        }
-
-        static async getItemLootDB() {
-            if(this.itemLoot === undefined) {
-                this.itemLoot = this.adjust(this.indexedDb.getObjectStore("itemLoot")) || null;
-            }
-            return this.itemLoot;
-        }
-
-        static async getItemFunde(itemName) {
-            const itemLoot = await this.getItemLootDB();
-            return itemLoot && (await itemLoot.getValue(itemName.toLowerCase()));
         }
 
         static async notExistingItem(itemName) {
