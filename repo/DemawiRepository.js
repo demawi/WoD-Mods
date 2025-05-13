@@ -164,6 +164,13 @@ class demawiRepository {
      */
     static Storages = class {
 
+        static ORDER = {
+            NEXT: "next",
+            NEXTUNIQUE: "nextunique",
+            PREV: "prev",
+            PREVUNIQUE: "prevunique",
+        }
+
         static IndexedDb = class {
             modname;
             dbname;
@@ -557,13 +564,14 @@ class demawiRepository {
             /**
              * Liefert ein Array über alle vorhandenen Objekte.
              */
-            async getAll() {
+            async getAll(query) {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
-                    let connection = await thisObject.indexedDb.getConnection();
-                    let transaction = connection.transaction(this.storageId, "readwrite");
-                    let objectStore = transaction.objectStore(this.storageId);
-                    const request = objectStore.getAll();
+                    const connection = await thisObject.indexedDb.getConnection();
+                    const transaction = connection.transaction(this.storageId, "readwrite");
+                    let target = transaction.objectStore(this.storageId);
+                    if (query && query.index) target = target.index(query.index);
+                    const request = target.getAll();
 
                     request.onsuccess = function (event) {
                         const result = event.target.result;
@@ -665,8 +673,16 @@ class demawiRepository {
             return this.#getCreateObjectStore("skill", "name");
         }
 
+        static getSkillsSourceDb() {
+            return this.#getCreateObjectStore("skillSources", "name");
+        }
+
         static getLootDb() {
             return this.#getCreateObjectStore("itemLoot", "id");
+        }
+
+        static getSettingsDb() {
+            return this.#getCreateObjectStore("settings", "name");
         }
 
         /**
@@ -761,7 +777,7 @@ class demawiRepository {
             return count === 1;
         }
 
-        static async getLootedDungeonuniques(locationName, world, worldSeasonNr, quelleId) {
+        static async getLootedDungeonUniques(locationName, world, worldSeasonNr, quelleId) {
             const result = {};
             for (const item of await _.WoDStorages.getLootDb().getAll()) {
                 const locNames = Object.keys(item.locs);
@@ -796,24 +812,42 @@ class demawiRepository {
             return count;
         }
 
-        static #getQuellSeasonId(world, worldSeasonNr, quelleId) {
-            return world + worldSeasonNr + "|" + quelleId;
+        static async reportLootTombola(itemName, timestampInMinutes) {
+            const world = _.WoD.getMyWorld();
+            const worldSeasonNr = await _.WoD.getMyWorldSeasonNr();
+            const item = await this.#getLootItem(itemName);
+            const tombLoot = item.tomb || (item.tomb = {});
+            tombLoot[world + worldSeasonNr + "|" + timestampInMinutes] = 1;
+            console.log("TombolaLoot: " + itemName, new Date(timestampInMinutes * 60000))
+            await _.WoDStorages.getLootDb().setValue(item);
         }
 
         /**
          * Wenn die Stufe direkt aus dem Kampfbericht-Level kommt.
          * @param quelleId z.B. Gruppe_id od. "Tombola"
          */
-        static async addLootSafe(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, stufe, quelleId, quelleText) {
-            return await this.addLoot(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, stufe, undefined, quelleId, quelleText);
+        static async reportLootSafe(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, stufe, quelleId, quelleText) {
+            return await this.#addLoot(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, stufe, undefined, quelleId, quelleText);
         }
 
         /**
          * Wenn die Stufe nur über den eingeloggten User kommt.
          * @param quelleId z.B. Gruppe_id od. "Tombola"
          */
-        static async addLootUnsafe(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, stufe, quelleId, quelleText) {
-            return await this.addLoot(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, undefined, stufe, quelleId, quelleText);
+        static async reportLootUnsafe(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, stufe, quelleId, quelleText) {
+            return await this.#addLoot(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, undefined, stufe, quelleId, quelleText);
+        }
+
+        static async #getLootItem(itemName) {
+            const itemLootStore = _.WoDStorages.getLootDb();
+            const key = itemName.toLowerCase();
+            return await itemLootStore.getValue(key) || {
+                id: key,
+                name: itemName,
+                quelle: {},
+                locs: {},
+                stufen: {}
+            };
         }
 
         /**
@@ -821,14 +855,14 @@ class demawiRepository {
          * Für die Gruppe interessiert uns auch die Menge.
          * Da wir immer zu einer ID abspeichern, kann ein Loot auch mehrfach reported werden ohne dass er mehrfach gespeichert wird.
          *
-         * @param count hier die genaue Menge wie viel von dem Item gelootet wurde, kann auch 0 sein, nur um den allgemeinen Drop zu verzeichnen. Der count wird nur für den Gruppenloot verwendet.
+         * @param count hier die genaue Menge wie viel von dem Item gelootet wurde, kann auch 0 sein, nur um den allgemeinen Drop zu verzeichnen. Der count wird nur für den Gruppen/Saisonloot verwendet.
          * @param heldenstufeGesichert die Stufe aus den Kampfberichten
          * @param heldenstufeUngesichert die Stufe des eingeloggten Nutzers
          * @param quelleId falls wir mehr brauchen als welt+timestamp. Z.B. gruppen_id, "Tombola"
          * @param quelleText z.B. Name der Gruppe
          */
-        static async addLoot(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, heldenstufeGesichert, heldenstufeUngesichert, quelleId, quelleText) {
-            if (!worldSeasonNr) {
+        static async #addLoot(itemName, count, locationName, locationVersion, timestampInMinutes, world, worldSeasonNr, heldenstufeGesichert, heldenstufeUngesichert, quelleId, quelleText) {
+            if (!worldSeasonNr || typeof worldSeasonNr !== "number") {
                 console.error("WorldSeasonNr wurde beim Loot nicht übermittelt!", itemName);
                 return;
             }
@@ -837,14 +871,7 @@ class demawiRepository {
                 return;
             }
             const itemLootStore = await _.WoDStorages.getLootDb();
-            const key = itemName.toLowerCase();
-            const item = await itemLootStore.getValue(key) || {
-                id: key,
-                name: itemName,
-                quelle: {},
-                locs: {},
-                stufen: {}
-            };
+            const item = await this.#getLootItem(itemName);
 
             // Allgemeiner Loot: Timestamp => World, LocationName, Stufe(Stufe_)... Cut-Off
             const lootTable = item.loot || (item.loot = {});
@@ -898,12 +925,16 @@ class demawiRepository {
             else stufenLoot.unsafe = timestampInMinutes;
 
             // Allgemeine Tage
-            const dayInYearId = _.util.formatDate(new Date(timestampInMinutes)).replaceAll(".", "").substring(0, 4);
+            const dayInYearId = _.util.formatDate(new Date(timestampInMinutes * 60000)).replaceAll(".", "").substring(0, 4);
             const dayInYearLoot = item.days || (item.days = {});
             dayInYearLoot[dayInYearId] = timestampInMinutes;
 
             await itemLootStore.setValue(item);
             return item;
+        }
+
+        static #getQuellSeasonId(world, worldSeasonNr, quelleId) {
+            return world + worldSeasonNr + "|" + quelleId;
         }
 
         static #addToSeasonLoot(item, world, worldSeasonNr, timestamp, locationName, locationVersion, count, quelleId) {
@@ -940,8 +971,14 @@ class demawiRepository {
         }
     }
 
+    /**
+     * Funktionalitäten um die WeltSaison zu tracken und liefern zu können.
+     */
     static WoDWorldDb = class {
 
+        /**
+         * Muss bei Ansicht der "Meine Helden"-Übersicht aufgerufen werden, damit die Welt-Saison getrackt werden kann.
+         */
         static async onMeineHeldenAnsicht() {
             const title = document.querySelector("h1");
             if (title.textContent.trim() === "Meine Helden") {
@@ -949,15 +986,45 @@ class demawiRepository {
                 const meineHelden = _.WoDParser.getMyHerosFromOverview();
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
                 const [season, seasonNr] = await this.getWorldSeason(myWorld, meineHelden, true);
-
-                const seasonElem = document.createElement("sup");
-                seasonElem.classList.add("nowod");
-                seasonElem.style.fontSize = "60%";
-                seasonElem.style.cursor = "help";
-                seasonElem.innerHTML = " #" + seasonNr;
-                seasonElem.title = "Die aktuelle Welt-Saisonnummer. Falls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison anlegen.";
-                title.append(seasonElem);
+                title.append(this.createSeasonElem(seasonNr));
             }
+        }
+
+        static createSeasonElem(seasonNr) {
+            const seasonElem = document.createElement("sup");
+            seasonElem.classList.add("nowod");
+            seasonElem.style.opacity = "0.5";
+            seasonElem.style.position = "relative";
+            seasonElem.style.fontSize = "60%";
+            seasonElem.style.color = "white";
+            seasonElem.style.cursor = "help";
+            seasonElem.innerHTML = "🌐"; // 📅🗓⏰🕗📆🌍
+            seasonElem.title = "Die aktuelle Welt-Saisonnummer: " + seasonNr + "\nFalls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison erzwingen.";
+
+            const innerElem = document.createElement("span");
+            innerElem.style.display = "inline-block";
+            seasonElem.style.opacity = "0.7";
+            innerElem.style.position = "absolute";
+            innerElem.style.height = "100%";
+            innerElem.style.width = "100%";
+            innerElem.style.textAlign = "center";
+            innerElem.style.left = "0px";
+            innerElem.style.top = "0px";
+            innerElem.innerHTML = seasonNr;
+            seasonElem.append(innerElem);
+
+            return seasonElem;
+        }
+
+        static createSeasonElem2(seasonNr) {
+            const seasonElem = document.createElement("sup");
+            seasonElem.style.position = "relative";
+            seasonElem.classList.add("nowod");
+            seasonElem.style.fontSize = "60%";
+            seasonElem.style.cursor = "help";
+            seasonElem.innerHTML = " [" + seasonNr + "]"; // 📅🗓⏰🕗📆
+            seasonElem.title = "Die aktuelle Welt-Saisonnummer. Falls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison anlegen.";
+            return seasonElem;
         }
 
         static async getCurrentWorldSeasonNr(doc) {
@@ -1067,9 +1134,8 @@ class demawiRepository {
             let skill = await skillDb.getValue(skillName);
             if (skill && skill.v === this.#skillDataVersion) return skill;
             // ad-hoc load
-            skill = {name: skillName, v: this.#skillDataVersion, ts: new Date().getTime()};
+            skill = {name: skillName, v: this.#skillDataVersion, world: _.WoD.getMyWorld(), ts: new Date().getTime()};
             const content = await _.util.loadViaXMLRequest(this.getSkillUrlAlsPopup(skillName));
-            skill.src = content;
             const doc = await _.util.getDocumentFor(content);
             this.#parseSkillBeschreibung(doc, skill);
             if (!skill.typ) {
@@ -1077,7 +1143,8 @@ class demawiRepository {
                 return;
             }
             await skillDb.setValue(skill);
-            console.log("Skill-Bestimmung '" + skillName + "'", skill);
+            const skillSource = {name: skillName, src: content};
+            await _.WoDStorages.getSkillsSourceDb().setValue(skillSource);
             return skill;
         }
 
@@ -1115,6 +1182,28 @@ class demawiRepository {
                         break;
                 }
             }
+        }
+
+    }
+
+    static Settings = class {
+        static #cache = {};
+
+        static async get(settingsDef, fresh) {
+            let modCache;
+            const modName = settingsDef.modName;
+            if (fresh || !(modCache = this.#cache[modName])) {
+                modCache = this.#cache[modName] = await _.WoDStorages.getSettingsDb().getValue(modName) || {name: modName};
+                for (const [key, value] of Object.entries(settingsDef.defaultSettings || {})) {
+                    if (!(key in modCache)) modCache[key] = value;
+                }
+                await _.WoDStorages.getSettingsDb().setValue(modCache);
+            }
+            return modCache;
+        }
+
+        static async save(settingsDef) {
+            await _.WoDStorages.getSettingsDb().setValue(this.get(settingsDef));
         }
 
     }
@@ -1234,29 +1323,27 @@ class demawiRepository {
             doc = doc || document;
             const form = this.getMainForm(doc);
             let reportId;
-            let schlacht;
+            let schlachtName;
             let reportIdSuffix = "";
             if (form["report_id[0]"]) {
                 reportId = form["report_id[0]"].value;
             } else if (form["report"]) {
                 reportId = form["report"].value;
-                schlacht = "Unbekannte Schlacht";
+                schlachtName = "Unbekannte Schlacht";
                 reportIdSuffix = "S";
                 const schlachtLink = doc.querySelector("h1 a");
-                if (schlachtLink) schlacht = schlachtLink.textContent.trim();
+                if (schlachtLink) schlachtName = schlachtLink.textContent.trim();
             } else if (form["DuellId"]) {
                 reportId = form["DuellId"].value;
                 reportIdSuffix = "D";
             }
 
             let ts;
-            let title;
-            if (this.getReportType(doc) !== "Duell") {
-                const titleSplit = doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/);
-                title = titleSplit[1].trim();
-                ts = this.getTimestampFromString(titleSplit[0].trim()) / 60000;
-            }
-
+            let locName;
+            if (this.getReportType(doc) === "Duell") throw new Error("Duelle werden hier noch nicht unterstützt!");
+            const titleSplit = doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/);
+            locName = titleSplit[1].trim();
+            ts = this.getTimestampFromString(titleSplit[0].trim()) / 60000;
 
             const myWorld = this.getMyWorld(doc);
             const result = {
@@ -1264,19 +1351,31 @@ class demawiRepository {
                 id: reportId,
                 world: myWorld,
                 ts: ts, // zu welchem Zeitpunkt der Dungeon stattgefunden hat
-                title: title, // Bei einem Dungeon z.B. der Dungeonname
+                loc: { // Bei einem Dungeon z.B. der Dungeonname
+                    name: locName,
+                    schlacht: schlachtName, // Name der Schlacht
+                },
                 gruppe: this.getMyGroupName(doc),
                 gruppe_id: this.getMyGroupId(doc),
-                schlacht: schlacht, // Name der Schlacht
                 stufe: this.getMyStufe(doc),
             }
-            if (ts) result.ts = ts;
-            if (title) result.title = title;
             return result;
         }
     }
 
     static WoDParser = class {
+
+        static getHeroIdFromHref(aElem) {
+            return Number(new URL(aElem.href, document.baseURI).searchParams.get("id"));
+        }
+
+        static getNaechsterDungeonName() {
+            let elem = document.getElementById("gadgetNextdungeonTime");
+            if (!elem) return;
+            elem = elem.parentElement.getElementsByTagName("a")[0];
+            if (!elem) return;
+            return elem.textContent.trim();
+        }
 
         static getMyHerosFromOverview() {
             const helden = {};
@@ -1328,7 +1427,7 @@ class demawiRepository {
                             const stufe = Number(upperTD.nextElementSibling.textContent);
                             if (stufe) { // wenn keine Stufe auch kein Held, evtl. nen Mentor
                                 const held = {};
-                                helden[curA.textContent.trim()] = held;
+                                helden[this.getHeroIdFromHref(curA)] = held;
                                 held.stufe = stufe;
                             }
                         }
@@ -1373,8 +1472,9 @@ class demawiRepository {
             const headers = doc.querySelectorAll(".content_table h2");
             for (const memberHead of headers) {
                 const member = {};
-                result[memberHead.textContent] = member;
-                member.id = Number(new URL(memberHead.querySelector("a").href, document.baseURI).searchParams.get("id")); // aufgrund von "../" am Anfang gibts hier keine Absolute location aus .href zurück.
+                const id = this.getHeroIdFromHref(memberHead.querySelector("a")); // aufgrund von "../" am Anfang gibts hier keine Absolute location aus .href zurück.
+                result[id] = member;
+                member.name = memberHead.textContent;
                 member.equip = [];
                 let memberTable = memberHead.nextElementSibling;
                 if (memberTable.tagName !== "TABLE") memberTable = memberTable.nextElementSibling;
@@ -1485,7 +1585,7 @@ class demawiRepository {
             return success;
         }
 
-        static getLocationTitleFromReport(doc) {
+        static getLocationNameFromReport(doc) {
             doc = doc || document;
             return doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/)[1].trim();
         }
@@ -1495,7 +1595,7 @@ class demawiRepository {
          * Stand unbedingt beibehalten werden. Member-Success wird hier z.B. durch den eigentlichen Kampfbericht gesetzt.
          */
         static retrieveSuccessInformationOnStatisticPage(doc, previousSuccess) {
-            const title = this.getLocationTitleFromReport(doc);
+            const locName = this.getLocationNameFromReport(doc);
             const tables = doc.querySelectorAll(".content_table table"); // hat noch nen inner-table
             const table = tables[tables.length - 1];
             const memberNameElements = table.querySelector("tr:nth-child(1)").children;
@@ -1508,7 +1608,7 @@ class demawiRepository {
                 if (!previousSuccess.members) previousSuccess.members = [undefined, groupSize];
                 return previousSuccess;
             }
-            if (title === "Atreanijsh") { // Erfolg kann nicht anhand der Statistik ermittelt werden, sondern muss aus den Leveln kommen.
+            if (locName === "Atreanijsh") { // Erfolg kann nicht anhand der Statistik ermittelt werden, sondern muss aus den Leveln kommen.
 
             }
 
@@ -1529,7 +1629,7 @@ class demawiRepository {
             let maxLevel;
 
             const getNumbers = function (maxSuccessLevel, finishedRooms) {
-                if (title === "Offene Rechnung") {
+                if (locName === "Offene Rechnung") {
                     if (maxSuccessLevel > 0) {
                         maxSuccessLevel++;
                         finishedRooms++;
@@ -1731,8 +1831,22 @@ class demawiRepository {
             result.rel = "stylesheet";
             result.type = "text/css";
             result.href = url;
-            this.#alreadyLoaded[url] = true;
+            const idx = url.indexOf("?");
+            if (idx) url = url.substring(0, idx);
+            this.#alreadyLoaded[url] = result;
             document.head.append(result);
+        }
+
+        static removeCSS(url) {
+            const idx = url.indexOf("?");
+            if (idx) url = url.substring(0, idx);
+            const loaded = this.#alreadyLoaded[url];
+            if (loaded) {
+                document.head.remove(loaded);
+                delete this.#alreadyLoaded[url];
+                return true;
+            }
+            return false;
         }
 
         static async loadViaInjection(url) {
@@ -1885,6 +1999,22 @@ class demawiRepository {
                 result.push(fn(list[i]));
             }
             return result;
+        }
+
+        static arraysEqual(a, b) {
+            if (a === b) return true;
+            if (a == null || b == null) return false;
+            if (a.length !== b.length) return false;
+
+            // If you don't care about the order of the elements inside
+            // the array, you should sort both arrays here.
+            // Please note that calling sort on an array will modify that array.
+            // you might want to clone your array first.
+
+            for (var i = 0; i < a.length; ++i) {
+                if (a[i] !== b[i]) return false;
+            }
+            return true;
         }
 
         static arrayRemove(list, value) {
@@ -2138,6 +2268,7 @@ class demawiRepository {
                     unit.typeRef = node.outerHTML;
                 }
                 spawnArray.push(unit);
+                return unit;
             }
 
             emptyRound() {
@@ -2496,7 +2627,7 @@ class demawiRepository {
                     if (unitId) {
                         lineNr = 1;
                         if (istRuftHelfer) {
-                            curRound.spawnUnit(actionUnit, unitId, curElement);
+                            curTargetUnit = curRound.spawnUnit(actionUnit, unitId, curElement);
                         } else {
                             curTargetUnit = curRound.unitLookup(unitId);
                         }
@@ -2586,11 +2717,10 @@ class demawiRepository {
                 if (manaCostNode) fertigkeit.mp = manaCostNode.textContent.match(/(\d*) MP/)[1];
 
                 // Fertigkeit .name .typ .angriffsart bestimmen
-                let unknownIdentifier;
-                this.bestimmeFertigkeitFromText(fertigkeit, actionTD);
-                if (!fertigkeit.typ) await this.bestimmeFertigkeitFromSkillA(fertigkeit, actionTD);
-                if (!fertigkeit.typ) unknownIdentifier = await this.bestimmeFertigkeitFromTarget(curRound, fertigkeit, actionTD, actionUnit, targetTD);
+                await this.bestimmeFertigkeitFromSkillA(fertigkeit, actionTD);
 
+                let unknownIdentifier;
+                if (!fertigkeit.typ) unknownIdentifier = await this.bestimmeFertigkeitFromTarget(curRound, fertigkeit, actionTD, actionUnit, targetTD);
                 if (!fertigkeit.typ) {
                     addWarning("Eine Fertigkeit konnte nicht automatisch bestimmt werden.", actionTD, unknownIdentifier);
                 } else {
@@ -2612,9 +2742,12 @@ class demawiRepository {
                     const wirkungen = Wirkung.getWirkungenFromElement(actionSkillA);
                     if (wirkungen) fertigkeit.fx = wirkungen;
                     if (withSources) fertigkeit.typeRef = actionSkillA.outerHTML;
-                    const dbSkill = await _.WoDSkillsDb.getSkill(fertigkeit.name);
-                    if (dbSkill.typ) fertigkeit.typ = dbSkill.typ;
-                    if (dbSkill.angriffstyp) fertigkeit.angriffstyp = dbSkill.angriffstyp;
+                    this.bestimmeFertigkeitFromText(fertigkeit, actionTD);
+                    if (!fertigkeit.typ) {
+                        const dbSkill = await _.WoDSkillsDb.getSkill(fertigkeit.name);
+                        if (dbSkill.typ) fertigkeit.typ = dbSkill.typ;
+                        if (dbSkill.angriffstyp) fertigkeit.angriffstyp = dbSkill.angriffstyp;
+                    }
                 }
             }
 
@@ -2796,8 +2929,9 @@ class demawiRepository {
                 }
 
                 if (roundContentTable) {
-                    var roundTRs = roundContentTable.children[0].children;
-                    for (const roundTR of roundTRs) {
+                    const rcChildren = roundContentTable.children;
+                    const tbody = rcChildren[rcChildren.length - 1];
+                    for (const roundTR of tbody.children) {
                         if (roundTR.getElementsByClassName("rep_round_headline")[0].innerText === "Runde 1") {
                             closeArea(curArea);
                             curArea = {rounds: Array()};
@@ -2887,4 +3021,69 @@ class demawiRepository {
     }();
 }
 
-_ = demawiRepository;
+class OptionImpl {
+
+    static EMPTY_OPTION = new OptionImpl();
+
+    static create(elem) {
+        if (!this.isDefined(elem)) return this.EMPTY_OPTION;
+        return new OptionImpl(elem);
+    }
+
+    static isDefined(value) {
+        return value !== undefined && value !== null;
+    }
+
+    static isIterable(value) {
+        return value.length !== undefined && typeof value !== "string";
+    }
+
+    constructor(value) {
+        this.value = value;
+    }
+
+    get() {
+        return this.value;
+    }
+
+    foreach(fn) {
+        if (!OptionImpl.isDefined(this.value)) return OptionImpl.EMPTY_OPTION;
+        if (OptionImpl.isIterable(this.value)) {
+            for (const cur of this.value) fn(cur);
+        } else {
+            fn(this.value);
+        }
+    }
+
+    map(fn) {
+        if (!OptionImpl.isDefined(this.value)) return OptionImpl.EMPTY_OPTION;
+        if (OptionImpl.isIterable(this.value)) {
+            const result = [];
+            for (const cur of this.value) {
+                result.push(fn(cur));
+            }
+            return OptionImpl.create(result);
+        }
+        return OptionImpl.create(fn(this.value));
+    }
+
+    flatMap(fn) {
+        if (!OptionImpl.isDefined(this.value)) return OptionImpl.EMPTY_OPTION;
+        if (OptionImpl.isIterable(this.value)) {
+            const result = [];
+            for (const cur of this.value) {
+                result.push(fn(cur).elem);
+            }
+            return OptionImpl.create(result);
+        }
+        return fn(this.value);
+    }
+}
+
+// Für alle freigegeben auch im unsafeWindow
+Opt = function (value) {
+    return OptionImpl.create(value);
+}
+
+// nur zur internen Nutzung
+const _ = demawiRepository;

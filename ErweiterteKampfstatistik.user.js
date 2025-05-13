@@ -475,7 +475,8 @@
                         let curSettings = curStats.actionClassification(curAction);
                         return {
                             fromMe: curSettings.fromMe && _ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
-                            atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => _ReportParser.isUnitEqual(target.unit, statTarget.unit)),
+                            atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => _ReportParser.isUnitEqual(statTarget.unit, target.unit)),
+                            cmp: "unit", // nur fürs debugging
                         }
                     }
                     break;
@@ -549,12 +550,12 @@
                     return SearchEngine.getStat(curStats, queryFilter, statTarget.skill.angriffstyp, "sub", "skillType");
                 }
             },
-            "skill": {
+            "skillName": {
                 name: "Fertigkeit",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
                     if (!statTarget || !statTarget.skill) return;
-                    if (statRoot.wantHeroes !== statTarget.unit.id.isHero) return;
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.skill.name, "sub", "skill");
+                    if (statRoot.wantHeroes !== !!statTarget.unit.id.isHero) return;
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.skill.name, "sub", "skillName");
                     subStats.title = statTarget.skill.typeRef;
                     return subStats;
                 }
@@ -563,10 +564,10 @@
                 name: "Fertigkeit(Aktiv)",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
                     if (!statTarget || !statTarget.skill) return;
-                    if (statRoot.wantHeroes !== statTarget.unit.id.isHero) return;
+                    if (statRoot.wantHeroes !== !!statTarget.unit.id.isHero) return;
                     console.log("isso", action, curStats.actionClassification(action));
                     if (!curStats.actionClassification(action).fromMe) return;
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.skill.name, "sub", "skill");
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.skill.name, "sub", "skillName");
                     if (!subStats) return;
                     subStats.title = statTarget.skill.typeRef;
                     return subStats;
@@ -650,7 +651,7 @@
                     const curFilter = queryFilter.spec;
                     var statTarget;
                     var secondStatTarget;
-                    if (curFilter.startsWith("skillType") || curFilter.startsWith("skill")) { // attackType und skill sind immer auf der aktiven Unit
+                    if (curFilter.startsWith("skillType") || curFilter.startsWith("skill") || curFilter.startsWith("skillName")) { // attackType und skill sind immer auf der aktiven Unit
                         statTarget = action;
                     } else if (wantAll) {
                         if (wantHeroes) {
@@ -708,6 +709,15 @@
                         round.nr = roundNr + 1;
                         let actionForStats = Array();
                         if (wantAll) {
+                            stats.actionClassification = function (curAction) {
+                                return {
+                                    fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                    atMe: wantHeroes === !!curAction.unit.id.isHero,
+                                    fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                    atGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                    cmp: "floor", // nur fürs debugging
+                                }
+                            }
                             if (wantHeroes) {
                                 round.helden.forEach(unit => {
                                     var action = {
@@ -721,14 +731,7 @@
                                         type: "init",
                                         src: "<tr><td></td><td>" + unit.id.name + " tritt in die Runde mit " + unit.hp + " HP und " + unit.mp + " MP ein</td></tr>",
                                     };
-                                    stats.actionClassification = function (curAction) {
-                                        return {
-                                            fromMe: wantHeroes && curAction.unit.id.isHero,
-                                            atMe: wantHeroes && curAction.unit.id.isHero,
-                                            fromGroup: wantHeroes && curAction.unit.id.isHero,
-                                            atGroup: wantHeroes && curAction.unit.id.isHero,
-                                        }
-                                    }
+
                                     doAnalysis(stats, filter, action);
                                 });
                             }
@@ -775,10 +778,11 @@
                                     SearchEngine.addUnitId(action, target.unit);
                                     stats.actionClassification = function (curAction) {
                                         return {
-                                            fromMe: wantHeroes === curAction.unit.id.isHero,
-                                            atMe: wantHeroes === !!util.arraySearch(curAction.targets, target => target.unit.id.isHero === wantHeroes),
-                                            fromGroup: wantHeroes === curAction.unit.id.isHero,
+                                            fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                            atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                            fromGroup: wantHeroes === !!curAction.unit.id.isHero,
                                             atGroup: wantHeroes === !!util.arraySearch(action.targets, target => _ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            cmp: "nxt", // nur fürs debugging
                                         }
                                     }
 
@@ -805,7 +809,7 @@
             skillType: "AngriffsTyp",
             position: "Position",
             unit: "Einheit",
-            skill: "Fertigkeit",
+            skillName: "Fertigkeit",
             items: "Gegenstände",
             dmgType: "Schadensart",
 
@@ -820,7 +824,7 @@
                 fight: "Kampf",
                 position: "Position",
                 unit: "Einheit",
-                skill: "Fertigkeit",
+                skillName: "Fertigkeit",
                 skill_active: "Fertigkeit(Aktiv)",
             }
         }
@@ -891,7 +895,10 @@
 
                     let passivaActions = stat.actions;
                     passivaActions = util.arrayFilter(passivaActions, action => action.type !== "init");
-                    passivaActions = util.arrayFilter(passivaActions, action => stat.actionClassification(action).atMe);
+                    passivaActions = util.arrayFilter(passivaActions, action => {
+                        //console.log("Hero ", action, stat.actionClassification(action));
+                        return stat.actionClassification(action).atMe;
+                    });
 
                     return center(aktivaActions.length + ":" + passivaActions.length);
                 }));
