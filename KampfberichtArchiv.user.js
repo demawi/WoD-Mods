@@ -3,7 +3,7 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Lässt einen die Seiten der Kampfberichte direkt downloaden
-// @version        0.10
+// @version        0.11
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
