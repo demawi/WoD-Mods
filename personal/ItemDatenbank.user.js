@@ -4,7 +4,7 @@
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
 // @include        https://*.world-of-dungeons.*/wod/spiel/*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
+// @require        repo/DemawiRepository.js?version=1.0.4
 // ==/UserScript==
 // *************************************************************
 // *** [WoD] Item-Datenbank                                  ***

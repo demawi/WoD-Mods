@@ -1524,11 +1524,11 @@ class demawiRepository {
             elem.onmouseenter = async function () {
                 if (fnOrHtml) tooltip = await fnOrHtml();
                 if (tooltip) {
-                    if (elem.id) delete wodToolTipContent[elem.id];
-                    wodToolTip(elem, tooltip);
+                    if (elem.id) delete unsafeWindow.wodToolTipContent[elem.id];
+                    unsafeWindow.wodToolTip(elem, tooltip);
                     if (updateable && typeof fnOrHtml === "function") {
                         elem.onmouseenter = async function (ev) {
-                            wodToolTipContent[elem.id] = await fnOrHtml();
+                            unsafeWindow.wodToolTipContent[elem.id] = await fnOrHtml();
                         };
                     }
                 }
@@ -2106,46 +2106,40 @@ class demawiRepository {
 
         static #alreadyLoaded = {};
 
-        static async getJSZip() {
-            await this.evalViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js")
-            return new JSZip();
-        }
-
         static async useJQueryUI() {
-            const newLoaded = await this.loadViaInjection("/wod/javascript/jquery/js/jquery-ui-1.8.21.custom.min.js");
+            if (this.#alreadyLoaded["jQueryUI-CSS"]) return;
 
-            if (newLoaded) {
-                const css = document.styleSheets[0];
+            this.#alreadyLoaded["jQueryUI-CSS"] = true;
+            const css = document.styleSheets[0];
 
-                function addRule(rule) {
-                    css.insertRule(rule, css.cssRules.length);
-                }
-
-                addRule(".ui-datepicker {background-color:black;}");
-                addRule(".ui-datepicker .ui-datepicker-header {\n" +
-                    "    background: #339999;\n" +
-                    "    color: #ffffff;\n" +
-                    "    font-family:'Times New Roman';\n" +
-                    "    border-width: 1px 0 0 0;\n" +
-                    "    border-style: solid;\n" +
-                    "    border-color: #111;\n" +
-                    "}");
-                addRule(".ui-datepicker .ui-datepicker-title {\n" +
-                    "    text-align: center;\n" +
-                    "    font-size: 15px;\n" +
-                    "\n" +
-                    "}");
-                addRule(".ui-datepicker .ui-datepicker-prev {\n" +
-                    "    float: left;\n" +
-                    "    cursor: pointer;\n" +
-                    "    background-position: center -30px;\n" +
-                    "}");
-                addRule(".ui-datepicker .ui-datepicker-next {\n" +
-                    "    float: right;\n" +
-                    "    cursor: pointer;\n" +
-                    "    background-position: center 0px;\n" +
-                    "}");
+            function addRule(rule) {
+                css.insertRule(rule, css.cssRules.length);
             }
+
+            addRule(".ui-datepicker {background-color:black;}");
+            addRule(".ui-datepicker .ui-datepicker-header {\n" +
+                "    background: #339999;\n" +
+                "    color: #ffffff;\n" +
+                "    font-family:'Times New Roman';\n" +
+                "    border-width: 1px 0 0 0;\n" +
+                "    border-style: solid;\n" +
+                "    border-color: #111;\n" +
+                "}");
+            addRule(".ui-datepicker .ui-datepicker-title {\n" +
+                "    text-align: center;\n" +
+                "    font-size: 15px;\n" +
+                "\n" +
+                "}");
+            addRule(".ui-datepicker .ui-datepicker-prev {\n" +
+                "    float: left;\n" +
+                "    cursor: pointer;\n" +
+                "    background-position: center -30px;\n" +
+                "}");
+            addRule(".ui-datepicker .ui-datepicker-next {\n" +
+                "    float: right;\n" +
+                "    cursor: pointer;\n" +
+                "    background-position: center 0px;\n" +
+                "}");
         }
 
         static addCSS(url) {

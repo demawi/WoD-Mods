@@ -10,7 +10,7 @@
 // @include        http*://*/wod/spiel/*dungeon/combat_report.php*
 // @include        http*://*/wod/spiel/event/play.php*
 // @include        http*://*/wod/spiel/event/eventlist.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
+// @require        repo/DemawiRepository.js?version=1.0.4
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -175,7 +175,7 @@
                 const [levelData2, errors2] = await _ReportParser.parseKampfbericht(container, false);
                 console.log("AAAAAAAAAAAAAAAAA " + JSON.stringify(levelData).length);
                 console.log("BBBBBBBBBBBBBBBBB " + JSON.stringify(levelData2).length, levelData2);
-                const zip = await _Libs.getJSZip();
+                const zip = new JSZip();
                 zip.file("abc", JSON.stringify(levelData2));
                 zip.generateAsync({
                     type: "blob", compression: "DEFLATE",

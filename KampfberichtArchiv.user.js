@@ -13,7 +13,10 @@
 // @include        https://*/wod/spiel/hero/items.php*
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
+// @require        repo/DemawiRepository.js?version=1.0.4
+// @require        libs/jszip.min.js
+// @require	       https://code.jquery.com/jquery-3.7.1.min.js
+// @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -474,7 +477,7 @@
 
             ArchivSearch.preInit();
             await this.completeDungeonInformations(false, this.wodContent);
-            _Libs.useJQueryUI().then(a => ArchivSearch.loadArchivView()); // preload
+            _Libs.useJQueryUI().then(a => ArchivSearch.loadArchivView());
         }
 
         static async showWodOverview() {
