@@ -5,10 +5,6 @@ class demawiRepository {
 
     static version = "1.0.4";
 
-    static import(type, version) {
-        return this[type];
-    }
-
     /**
      * Speichert zusätzlich Klasseninformationen von Objekten. Dafür wird ein zusätzliches "_class"-Attribut zu den Objekten gespeichert.
      * Beim Laden werden die Objekte entsprechend wieder hergestellt.
@@ -103,9 +99,6 @@ class demawiRepository {
             return object;
         }
 
-        static toObject(object) {
-
-        }
     }
 
     /**
@@ -171,6 +164,19 @@ class demawiRepository {
             PREVUNIQUE: "prevunique",
         }
 
+        static MATCHER = {
+            NUMBER: {
+                ANY: {},
+                MIN: Number.MIN_VALUE,
+                MAX: Number.MAX_VALUE,
+            },
+            STRING: {
+                ANY: {},
+                MIN: "",
+                MAX: "\uffff",
+            },
+        }
+
         static IndexedDb = class {
             modname;
             dbname;
@@ -182,6 +188,217 @@ class demawiRepository {
             constructor(modname, dbname) {
                 this.modname = modname;
                 this.dbname = dbname;
+            }
+
+            /**
+             * Prüft, ob der ObjectStore existiert. Wenn er dies tut, wird dieser zurückgeliefert.
+             */
+            async getObjectStore(storageId) {
+                const dbConnection = await this.getConnection();
+                if (dbConnection.objectStoreNames.contains(storageId)) {
+                    /**
+                     * wird nicht den this.objectStores hinzugefügt, insofern brauchen wir auch keine weiteren Angaben über PrimaryKey und Indizes machen.
+                     */
+                    const result = new _.Storages.ObjectStorage(storageId);
+                    result.indexedDb = this;
+                    return result;
+                }
+            }
+
+            /**
+             * Sofern nicht vorhanden wird der Object-Store erstellt.
+             */
+            createObjectStore(storageId, key, indizes) {
+                let readonly = false;
+                if (indizes === true) {
+                    indizes = null;
+                    readonly = true;
+                }
+                const objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
+                objectStore.indexedDb = this;
+                this.objectStores.push(objectStore);
+                if (this.dbConnection) this.closeConnection(); // kein instant-reconnect, da sich evtl. noch andere Object-Stores registrieren
+                return objectStore;
+            }
+
+            /**
+             * @returns {Promise<DOMStringList>}
+             */
+            async getObjectStoreNames() {
+                const dbConnection = await this.getConnection();
+                return dbConnection.objectStoreNames;
+            }
+
+            deleteObjectStore(storageId) {
+                this.objectStoresToDelete.push(storageId);
+                if (this.dbConnection) this.closeConnection();
+            }
+
+            async doesObjectStoreExist(objectStore) {
+                let dbConnection = await this.getConnection();
+                return dbConnection.objectStoreNames.contains(objectStore.storageId);
+            }
+
+            /**
+             * @return IDBDatabase
+             */
+            async getConnection(forceUpgrade) {
+                if (forceUpgrade) {
+                    let previousVersion = new Date().getTime();
+                    if (this.dbConnection) {
+                        previousVersion = this.dbConnection.version;
+                        this.closeConnection();
+                    }
+                    this.dbConnection = await this.#dbConnect(previousVersion + 1);
+                } else {
+                    if (this.dbConnection) return this.dbConnection;
+                    this.dbConnection = await this.#dbConnect();
+                }
+                let thisObject = this;
+                // wenn sich die Datenbank-Version durch eine andere Seite verändert hat
+                this.dbConnection.onversionchange = function (event) {
+                    // Eine andere Instanz (Seite oder Mod hat einen VersionChange getriggert)
+                    thisObject.closeConnection();
+                };
+                return this.dbConnection;
+            }
+
+            closeConnection() {
+                if (this.dbConnection) {
+                    this.#closeGivenConnection(this.dbConnection);
+                    delete this.dbConnection;
+                }
+            }
+
+            reportDbHasChanged() {
+                this.closeConnection();
+            }
+
+            #closeGivenConnection(dbConnection, requestOpt) {
+                if (requestOpt) {
+                    delete requestOpt.onsuccess;
+                    delete requestOpt.onerror;
+                    delete requestOpt.onblocked;
+                    delete requestOpt.onupgradeneeded;
+                }
+                delete dbConnection.onversionchange;
+                dbConnection.close();
+            }
+
+            /**
+             * @returns IDBDatabase
+             */
+            async #dbConnect(version, tracingId) {
+                const debug = false;
+                if (debug) tracingId = tracingId || [];
+                const thisObject = this;
+                //if(this.pendingRequest) throw new Error("You already have a pending request!");
+                const requestId = demawiRepository.Storages.IndexedDb.requestIdx++;
+                return new Promise((resolve, reject) => {
+                    let request = indexedDB.open(thisObject.dbname, version);
+                    request.idx = requestId;
+                    if (debug) {
+                        tracingId.push(request.idx);
+                        console.log("Request-Open[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version + " ", tracingId);
+                    }
+                    // console.log("request created " + request.idx + "_" + version);
+                    request.onsuccess = function (event) {
+                        if (debug) console.log("Request-success[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId);
+                        let dbConnection = event.target.result; // type: IDBDatabase
+                        let needNewStores = !thisObject.#areAllObjectStoresSynced(dbConnection);
+                        if (needNewStores) {
+                            thisObject.#closeGivenConnection(dbConnection, request);
+                            resolve(thisObject.#dbConnect(new Date().getTime(), tracingId)); // force upgrade
+                        } else {
+                            resolve(event.target.result);
+                        }
+                    }
+                    // z.B. "AbortError: The connection was closed."
+                    request.onerror = function (event) {
+                        if (debug) console.log("Request-error[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId, event);
+                        // console.log("DBconnect error", event);
+                        resolve(thisObject.#dbConnect(undefined, tracingId));
+                    }
+                    request.onblocked = function (event) {
+                        if (debug) console.log("Request-blocked[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId);
+                        // hier heißt es abwarten..
+                    }
+                    request.onupgradeneeded = async function (event) {
+                        if (debug) console.log("Request-upgradeneed[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId);
+                        const dbConnection = event.target.result;
+                        const tx = event.target.transaction;
+                        await thisObject.#syncDatabase(dbConnection, tx);
+                    }
+                });
+            }
+
+            /**
+             * synchronisiert die Datenbank mit den gewünschten ObjectStore-Definitionen
+             * wird innerhalb eines onupgradeneedevents ausgeführt
+             * @param dbConnection @type IDBDatabase
+             * @param dbTransaction @type IDBTransaction
+             */
+            async #syncDatabase(dbConnection, dbTransaction) {
+                try {
+                    this.objectStoresToDelete.slice().forEach((storageId, idx) => {
+                        if (dbConnection.objectStoreNames.contains(storageId)) {
+                            console.log("Lösche Objectstore " + this.dbname + "." + storageId);
+                            dbConnection.deleteObjectStore(storageId);
+                        }
+                        this.objectStoresToDelete.splice(idx, 1);
+                    });
+                    this.objectStores.forEach(objectStoreDef => {
+                        if (objectStoreDef.readonly) return;
+                        const storageId = objectStoreDef.storageId;
+                        let dbStore;
+                        // Ensure dbStore exists
+                        if (dbConnection.objectStoreNames.contains(storageId)) {
+                            dbStore = dbTransaction.objectStore(storageId);
+                        } else {
+                            // create complete new object store (IDBObjectStore)
+                            dbStore = dbConnection.createObjectStore(objectStoreDef.storageId, {
+                                keyPath: objectStoreDef.primaryKey,
+                            });
+                        }
+                        if (objectStoreDef.indizesToDelete) {
+                            for (const indexName of objectStoreDef.indizesToDelete) {
+                                if (dbStore.indexNames.contains(indexName)) {
+                                    console.log("[" + this.dbname + "|" + storageId + "] Entferne Index: " + indexName);
+                                    dbStore.deleteIndex(indexName);
+                                }
+                            }
+                        }
+                        // Ensure indizes exists
+                        if (objectStoreDef.indizesToEnsure) {
+                            for (const [indexName, keyPath] of Object.entries(objectStoreDef.indizesToEnsure)) {
+                                if (!dbStore.indexNames.contains(indexName)) {
+                                    console.log("[" + this.dbname + "|" + storageId + "] Füge neuen Index hinzu: " + indexName + " => ", keyPath);
+                                    dbStore.createIndex(indexName, keyPath);
+                                }
+                            }
+                        }
+                        delete objectStoreDef.indizesToDelete;
+                        delete objectStoreDef.indizesToEnsure;
+                    });
+                } catch (exception) {
+                    console.error("syncObjectStores konnte nicht durchgeführt werden!", exception);
+                    throw exception;
+                }
+                return true;
+            }
+
+            /**
+             * @param dbConnection type: IDBDatabase
+             * @return boolean: ob die Object-Stores entsprechend ihrer Definition installiert/deinstalliert sind.
+             */
+            #areAllObjectStoresSynced(dbConnection) {
+                if (this.objectStoresToDelete.length > 0) return false;
+                const installedNames = dbConnection.objectStoreNames; // Array
+                for (const objectStore of this.objectStores) {
+                    if (objectStore.readonly) continue;
+                    if (!installedNames.contains(objectStore.storageId)) return false;
+                }
+                return true;
             }
 
             /**
@@ -210,11 +427,69 @@ class demawiRepository {
                 for (var i = 0, l = objectStoresRead.length; i < l; i++) {
                     let readFrom = objectStoresRead[i];
                     let writeTo = objectStoresWrite[i];
-                    for (const cur of await readFrom.getAll()) {
+                    for (const cur of await readFrom.getAll(false)) {
                         await writeTo.setValue(cur);
                     }
                 }
                 console.log("Clone " + this.dbname + " to " + dbNameTo + "... finished!");
+            }
+
+            async clearDatabase() {
+                const idbDatabase = await this.getConnection();
+                return new Promise((resolve, reject) => {
+                    const transaction = idbDatabase.transaction(
+                        idbDatabase.objectStoreNames,
+                        'readwrite'
+                    )
+                    transaction.addEventListener('error', reject)
+
+                    let count = 0
+                    for (const storeName of idbDatabase.objectStoreNames) {
+                        transaction
+                            .objectStore(storeName)
+                            .clear()
+                            .addEventListener('success', () => {
+                                count++
+                                if (count === idbDatabase.objectStoreNames.length) {
+                                    // Cleared all object stores
+                                    resolve()
+                                }
+                            })
+                    }
+                })
+            }
+
+            /**
+             * Import ein JSON-Objekt komplett in die Objekt-Stores.
+             */
+            async importFromJson(json) {
+                const idbDatabase = await this.getConnection();
+                return new Promise((resolve, reject) => {
+                    const transaction = idbDatabase.transaction(
+                        idbDatabase.objectStoreNames,
+                        'readwrite'
+                    )
+                    transaction.addEventListener('error', reject)
+
+                    var importObject = JSON.parse(json)
+                    for (const storeName of idbDatabase.objectStoreNames) {
+                        let count = 0
+                        for (const toAdd of importObject[storeName]) {
+                            const request = transaction.objectStore(storeName).add(toAdd)
+                            request.addEventListener('success', () => {
+                                count++;
+                                if (count === importObject[storeName].length) {
+                                    // Added all objects for this store
+                                    delete importObject[storeName]
+                                    if (Object.keys(importObject).length === 0) {
+                                        // Added all object stores
+                                        resolve()
+                                    }
+                                }
+                            })
+                        }
+                    }
+                })
             }
 
             /**
@@ -277,243 +552,59 @@ class demawiRepository {
                     }
                 })
             }
+        }
 
-            /**
-             * Import ein JSON-Objekt komplett in die Objekt-Stores.
-             */
-            async importFromJson(json) {
-                const idbDatabase = await this.getConnection();
-                return new Promise((resolve, reject) => {
-                    const transaction = idbDatabase.transaction(
-                        idbDatabase.objectStoreNames,
-                        'readwrite'
-                    )
-                    transaction.addEventListener('error', reject)
+        static ObjectStorage = class {
+            indexedDb;
+            storageId;
+            primaryKey;
+            readonly;
+            // ChangeManagement...
+            indizesToEnsure; // indexName => keyPath, werden nur einmalig geprüft
+            indizesToDelete; // indexNames
 
-                    var importObject = JSON.parse(json)
-                    for (const storeName of idbDatabase.objectStoreNames) {
-                        let count = 0
-                        for (const toAdd of importObject[storeName]) {
-                            const request = transaction.objectStore(storeName).add(toAdd)
-                            request.addEventListener('success', () => {
-                                count++;
-                                if (count === importObject[storeName].length) {
-                                    // Added all objects for this store
-                                    delete importObject[storeName]
-                                    if (Object.keys(importObject).length === 0) {
-                                        // Added all object stores
-                                        resolve()
-                                    }
-                                }
-                            })
-                        }
-                    }
-                })
-            }
-
-            async clearDatabase() {
-                const idbDatabase = await this.getConnection();
-                return new Promise((resolve, reject) => {
-                    const transaction = idbDatabase.transaction(
-                        idbDatabase.objectStoreNames,
-                        'readwrite'
-                    )
-                    transaction.addEventListener('error', reject)
-
-                    let count = 0
-                    for (const storeName of idbDatabase.objectStoreNames) {
-                        transaction
-                            .objectStore(storeName)
-                            .clear()
-                            .addEventListener('success', () => {
-                                count++
-                                if (count === idbDatabase.objectStoreNames.length) {
-                                    // Cleared all object stores
-                                    resolve()
-                                }
-                            })
-                    }
-                })
+            constructor(storageId, primaryKey, indizes, readonly) {
+                this.storageId = storageId;
+                this.primaryKey = primaryKey;
+                this.indizesToEnsure = indizes;
+                this.readonly = readonly;
             }
 
             /**
-             * Prüft, ob der ObjectStore existiert. Wenn er dies tut, wird dieser zurückgeliefert.
+             * @returns {Promise<IDBObjectStore|*>}
              */
-            async getObjectStore(storageId) {
-                const dbConnection = await this.getConnection();
-                if (dbConnection.objectStoreNames.contains(storageId)) {
-                    /**
-                     * wird nicht den this.objectStores hinzugefügt, insofern brauchen wir auch keine weiteren Angaben über PrimaryKey und Indizes machen.
-                     */
-                    const result = new _.Storages.ObjectStorage(storageId);
-                    result.indexedDb = this;
-                    return result;
-                }
-            }
-
-            /**
-             * Sofern nicht vorhanden wird der Object-Store erstellt.
-             */
-            createObjectStore(storageId, key, indizes) {
-                let readonly = false;
-                if (indizes === true) {
-                    indizes = null;
-                    readonly = true;
-                }
-                const objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
-                objectStore.indexedDb = this;
-                this.objectStores.push(objectStore);
-                if (this.dbConnection) {
-                    this.closeConnection(this.dbConnection);
-                    this.dbConnection = undefined;
+            async connect(withWrite) {
+                let connection = await this.indexedDb.getConnection();
+                let transaction = connection.transaction(this.storageId, withWrite ? "readwrite" : "readonly");
+                let objectStore = transaction.objectStore(this.storageId);
+                if (!this.#areAllIndicesSynced(objectStore)) {
+                    console.log("1Check indices: ", this.indizesToDelete, this.indizesToEnsure);
+                    // Es sind nicht alle Indizes installiert, wir forcieren ein update und machen alles nochmal
+                    await this.indexedDb.getConnection(true);
+                    console.log("2Check indices: ", this.indizesToDelete, this.indizesToEnsure);
+                    return await this.connect(withWrite);
                 }
                 return objectStore;
             }
 
-            deleteObjectStore(storageId) {
-                this.objectStoresToDelete.push(storageId);
-            }
-
-            async getConnection() {
-                if (this.dbConnection) return this.dbConnection;
-                this.dbConnection = await this.dbConnect();
-                let thisObject = this;
-                // wenn sich die Datenbank-Version durch eine andere Seite verändert hat
-                this.dbConnection.onversionchange = function (event) {
-                    if (!thisObject.areAllObjectStoresSynced(thisObject.dbConnection)) {
-                        thisObject.dbConnection.close();
-                        thisObject.dbConnection = null;
-                        alert("Die IndexDB hat sich geändert! (" + thisObject.modname + ") Bitte die Seite einmal neuladen! (versionchange)");
-                    } else { // Das Schema hat sich nicht verändert, wir können also ungehindert weitermachen, wenn wir nur neu verbinden.
-                        thisObject.dbConnection.close();
-                        thisObject.dbConnection = null;
-                        thisObject.getConnection();
-                    }
-                };
-                return this.dbConnection;
-            }
-
-            closeConnection(dbConnection, request) {
-                if (request) {
-                    delete request.onerror;
-                    delete request.onblocked;
-                    delete request.onupgradeneeded;
-                    delete dbConnection.onversionchange;
-                }
-                dbConnection.close();
-            }
-
-            async dbConnect(version) {
-                const thisObject = this;
-                return new Promise((resolve, reject) => {
-                    var request = indexedDB.open(thisObject.dbname, version);
-                    request.idx = demawiRepository.Storages.IndexedDb.requestIdx++;
-                    // console.log("request created " + request.idx + "_" + version);
-                    request.onsuccess = function (event) {
-                        let dbConnection = event.target.result;
-                        let needNewStores = !thisObject.areAllObjectStoresSynced(dbConnection);
-                        // console.log("DBconnect success! (" + thisObject.dbname + ") Need update: " + needNewStores, event);
-                        if (needNewStores) {
-                            thisObject.closeConnection(dbConnection, request);
-                            resolve(thisObject.dbConnect(new Date().getTime())); // force upgrade
-                        } else {
-                            resolve(event.target.result);
-                        }
-                    }
-                    request.onerror = function (event) {
-                        // console.log("DBconnect error", event);
-                        reject();
-                    }
-                    request.onblocked = function () {
-                        console.log("DBconnect blocked", request.idx, event);
-                        alert("Die IndexDB hat sich geändert! (" + thisObject.modname + ") Bitte die Seite einmal neuladen! (blocked)");
-                        reject();
-                    }
-                    request.onupgradeneeded = async function (event) {
-                        console.log("DBconnect upgradeneeded [" + thisObject.dbname + "]", event);
-                        let dbConnection = event.target.result;
-                        await thisObject.syncObjectStores(dbConnection);
-                        thisObject.closeConnection(dbConnection, request);
-                        resolve(thisObject.dbConnect());
-                    }
-                });
-            }
-
-            // synchronisiert die Datenbank mit den gewünschten ObjectStore-Definitionen
-            async syncObjectStores(dbConnection) {
-                try {
-                    this.objectStoresToDelete.slice().forEach((storageId, idx) => {
-                        if (dbConnection.objectStoreNames.contains(storageId)) {
-                            console.log("Lösche Objectstore " + this.dbname + "." + storageId);
-                            dbConnection.deleteObjectStore(storageId);
-                        }
-                        this.objectStoresToDelete.splice(idx, 1);
-                    });
-                    this.objectStores.forEach(objectstore => {
-                        if (objectstore.readonly) return;
-                        const storageId = objectstore.storageId;
-                        if (!dbConnection.objectStoreNames.contains(storageId)) {
-                            // create complete new object store (IDBObjectStore)
-                            let newDbStore = dbConnection.createObjectStore(objectstore.storageId, {
-                                keyPath: objectstore.key,
-                            });
-                            if (objectstore.indizes) {
-                                objectstore.indizes.forEach(index => {
-                                    newDbStore.createIndex(index, index);
-                                })
-                            }
-                        }
-                    });
-                } catch (exception) {
-                    console.warn("objectStoreStatusReportList", exception);
-                }
-                return true;
-            }
-
             /**
-             * @return boolean: ob die Object-Stores entsprechend ihrer Definition installiert/deinstalliert sind.
+             * Aktuell nur Installation ohne Check auf den keyPath
              */
-            areAllObjectStoresSynced(dbConnection) {
-                if (this.objectStoresToDelete.length > 0) return false;
-                const installedNames = dbConnection.objectStoreNames; // Array
-                for (const objectStore of this.objectStores) {
-                    if (objectStore.readonly) continue;
-                    if (!installedNames.contains(objectStore.storageId)) return false;
+            #areAllIndicesSynced(dbObjectStore) {
+                if (this.indizesToDelete) return false;
+                if (!this.indizesToEnsure) return true;
+                for (const [indexName, keyPath] of Object.entries(this.indizesToEnsure)) {
+                    if (!dbObjectStore.indexNames.contains(indexName)) return false;
                 }
+                delete this.indizesToEnsure; // wird nur einmalig geprüft
                 return true;
-            }
-
-            async doesObjectStoreExist(objectStore) {
-                let dbConnection = await this.getConnection();
-                return dbConnection.objectStoreNames.contains(objectStore.storageId);
-            }
-        }
-
-        static ObjectStorage = class {
-            storageId;
-            key;
-            indizes;
-            indexedDb;
-            readonly;
-
-            constructor(storageId, key, indizes, readonly) {
-                this.storageId = storageId;
-                this.key = key;
-                this.indizes = indizes;
-                this.readonly = readonly;
-            }
-
-            async connect(withWrite) {
-                let connection = await this.indexedDb.getConnection();
-                let transaction = connection.transaction(this.storageId, withWrite ? "readwrite" : "readonly");
-                return transaction.objectStore(this.storageId);
             }
 
             async setValue(dbObject) {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
-                    let objectStore = await thisObject.connect(true);
-                    let request = objectStore.put(dbObject);
+                    const objectStore = await thisObject.connect(true);
+                    const request = objectStore.put(dbObject);
                     request.onsuccess = function (event) {
                         resolve();
                     };
@@ -521,6 +612,12 @@ class demawiRepository {
                         reject();
                     }
                 });
+            }
+
+            deleteIndex(indexName) {
+                if (!this.indizesToDelete) this.indizesToDelete = [];
+                this.indizesToDelete.push(indexName);
+                this.indexedDb.reportDbHasChanged();
             }
 
             async deleteValue(dbObjectId) {
@@ -564,25 +661,6 @@ class demawiRepository {
             /**
              * Liefert ein Array über alle vorhandenen Objekte.
              */
-            async getAll(query) {
-                const thisObject = this;
-                return new Promise(async (resolve, reject) => {
-                    const connection = await thisObject.indexedDb.getConnection();
-                    const transaction = connection.transaction(this.storageId, "readwrite");
-                    let target = transaction.objectStore(this.storageId);
-                    if (query && query.index) target = target.index(query.index);
-                    const request = target.getAll();
-
-                    request.onsuccess = function (event) {
-                        const result = event.target.result;
-                        resolve(result);
-                    };
-                });
-            }
-
-            /**
-             * Liefert ein Array über alle vorhandenen Objekte.
-             */
             async getAllKeys() {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
@@ -604,16 +682,221 @@ class demawiRepository {
             async count() {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
-                    let connection = await thisObject.indexedDb.getConnection();
-                    let transaction = connection.transaction(this.storageId, "readwrite");
-                    let objectStore = transaction.objectStore(this.storageId);
+                    const connection = await thisObject.indexedDb.getConnection();
+                    const transaction = connection.transaction(this.storageId, "readonly");
+                    const objectStore = transaction.objectStore(this.storageId);
                     const request = objectStore.count();
-
                     request.onsuccess = function (event) {
                         const result = event.target.result;
                         resolve(result);
                     };
                 });
+            }
+
+            async getPrimaryKey() {
+                if (this.primaryKey) return this.primaryKey;
+                const thisObject = this;
+                this.primaryKey = await new Promise(async (resolve, reject) => {
+                    const connection = await thisObject.indexedDb.getConnection();
+                    const transaction = connection.transaction(this.storageId, "readonly");
+                    const objectStore = transaction.objectStore(this.storageId);
+                    resolve(objectStore.keyPath);
+                });
+                return this.primaryKey;
+            }
+
+            /**
+             * @param queryOpt Sofern angegeben hat queryOpt folgende Struktur. Es lässt sich damit über die Datenbank filtern und auch sortieren.
+             * {
+             *     index: ["ts", "item.loc"], // Angabe der Indizes über die eingeschränkt oder sortiert werden soll, sofern ein solcher Index noch nicht vorhanden ist, wird er adHoc erstellt.
+             *     order: "prev", // ein String Wert aus ORDER, sortiert die Ergebnisse, bzw. kann mit den "unique"-Parametern auch Einträge überspringen. Sortiert wird abhängig von der Reihenfolge im angegebenen Index.
+             *     keyRange: [_Storages.MATCHER.NUMBER.ANY, "Ahnenforschung"], // [IDBKeyRange|Array] der Array definiert Matches mit der gleichen Länge wie der Index-Array. Es können aber auch Wildcards aus _Storages.Matcher genutzt werden.
+             *     keyRangeFrom: [1, "Ahnenforschung"] // [Array] wird als lowerBound verwendet. Sofern die untere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
+             *     keyRangeTo: [1231233, "Balesh"], // [Array] wird als upperBound verwendet. Sofern die obere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
+             *     lowerOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
+             *     upperOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
+             *     limit: 20, // [int] eine Limitierung der Ergebnisse
+             * }
+             * @param iterationOpt @type Function(object, idx): die Objekte werden der Reihe nach in die Methode reingereicht, bei false wird die Schleife abgebrochen oder bei gesetztem query-limit
+             * @return wenn iteration nicht gesetzt wird, wird ein Array der Objekte zurückgeliefert
+             *         wenn iteration gesetzt ist, werden die Objekte einem nach dem anderen in die iteration-Funktion reingereicht iteration(object, idx), der Rückgabewert von getAll ist dann nicht gesetzt.
+             */
+            async getAll(queryOpt, iterationOpt) {
+                if (!queryOpt) {
+                    if (queryOpt !== false) console.warn("getAll ohne query-Parametern kann bei großen Datenbanken zu Problemen führen")
+                    queryOpt = {};
+                }
+                const thisObject = this;
+                const connection = await thisObject.indexedDb.getConnection();
+                const transaction = connection.transaction(this.storageId, "readwrite");
+                let target = transaction.objectStore(this.storageId);
+                if (queryOpt.index) target = await this.#getQueryIndex(target, queryOpt.index);
+                if (queryOpt.keyRange || queryOpt.keyRangeFrom || queryOpt.keyRangeTo) queryOpt.keyRange = this.#getQueryKeyRange(queryOpt.keyRange, queryOpt.keyRangeFrom, queryOpt.keyRangeTo, queryOpt.lowerOpen, queryOpt.upperOpen);
+                if (iterationOpt) return await this.#openCursorIteration(target.openCursor(queryOpt.keyRange, queryOpt.order), iterationOpt, queryOpt.limit);
+                if (queryOpt.order) return await this.#openCursorFetch(target.openCursor(queryOpt.keyRange, queryOpt.order), queryOpt.limit);
+                return this.awaitRequest(target.getAll(queryOpt.keyRange, queryOpt.limit));
+            }
+
+            /**
+             * index: ["world", "gruppe_id", "loc.name", "world_season"]
+             * sortBy "gruppe_id"
+             * @param objectStore die aktuelle Verbindung zum ObjectStore
+             * @param indexDef indexName or keyPath
+             */
+            async #getQueryIndex(objectStore, indexDef) {
+                if (typeof indexDef === "string") {
+                    return objectStore.index(indexDef); // check if it's a already given name
+                } else { // should be an array
+                    return await this.#findIndex(objectStore, indexDef);
+                }
+            }
+
+            async #createAndGetNewIndex(indexName, keyPath) {
+                const indizesToEnsure = this.indizesToEnsure || (this.indizesToEnsure = {});
+                indizesToEnsure[indexName] = keyPath;
+                const idbObjectStore = await this.connect();
+                return idbObjectStore.index(indexName);
+            }
+
+            async #findIndex(objectStore, indexDefArray) {
+                for (const indexName of objectStore.indexNames) {
+                    const curIndex = objectStore.index(indexName);
+                    if (this.#arrayEquals(curIndex.keyPath, indexDefArray)) {
+                        return curIndex;
+                    }
+                }
+                // nichts gefunden wir legen einen neuen index an
+                return await this.#createAdHocIndex(objectStore, indexDefArray);
+            }
+
+            /**
+             * Sucht nach einem noch freien Namen und legt diesen dann mit der Keypath-Definition an
+             */
+            async #createAdHocIndex(objectStore, keyPath) {
+                let i = 1;
+                while (true) {
+                    const curIndexName = "" + i;
+                    if (!objectStore.indexNames.contains(curIndexName)) {
+                        return await this.#createAndGetNewIndex(curIndexName, keyPath);
+                    }
+                    i++;
+                }
+            }
+
+            #arrayEquals(a, b) {
+                if (a === b) return true;
+                if (a == null || b == null) return false;
+                if (a.length !== b.length) return false;
+                for (var i = 0; i < a.length; ++i) {
+                    if (a[i] !== b[i]) return false;
+                }
+                return true;
+            }
+
+            /**
+             * Ersetzt potenzielle Wildcards durch minimals/maximalst mögliche (String-/Number-) Werte und liefert eine {IDBKeyRange}-Definition zurück.
+             * keyRangeSingle muss alleine angegeben werden. Ansonsten können keyRangeFromOpt und keyRangeToOpt zusammen oder nur einer von beiden angegeben werden.
+             * @returns {IDBKeyRange}
+             */
+            #getQueryKeyRange(keyRangeSingle, keyRangeFromOpt, keyRangeToOpt, lowerOpen, upperOpen) {
+                if (keyRangeSingle instanceof IDBKeyRange) return keyRangeSingle;
+                let hasWildcards = false;
+                if (keyRangeSingle) {
+                    hasWildcards = keyRangeSingle.filter(a => typeof a === "object").length > 0;
+                    if (!hasWildcards) return IDBKeyRange.only(keyRangeSingle);
+                    keyRangeFromOpt = keyRangeSingle;
+                    keyRangeToOpt = keyRangeSingle;
+                } else {
+                    if (keyRangeFromOpt) hasWildcards = keyRangeFromOpt.filter(a => typeof a === "object").length > 0;
+                    if (!hasWildcards) hasWildcards = keyRangeToOpt.filter(a => typeof a === "object").length > 0;
+                }
+
+                if (hasWildcards) {
+                    const lowerBound = []; // Wildcards werden mit den minimalst möglichen Werten gefüllt
+                    const upperBound = []; // Wildcards werden mit den maximalst möglichen Werten gefüllt
+                    for (let i = 0, l = (keyRangeFromOpt || keyRangeToOpt).length; i < l; i++) {
+                        const low = keyRangeFromOpt && keyRangeFromOpt[i];
+                        const high = keyRangeToOpt && keyRangeToOpt[i];
+                        if (low) {
+                            if (low === _.Storages.MATCHER.NUMBER.ANY) {
+                                lowerBound.push(_.Storages.MATCHER.NUMBER.MIN);
+                            } else if (low === _.Storages.MATCHER.STRING.ANY) {
+                                lowerBound.push(_.Storages.MATCHER.STRING.MIN);
+                            } else { // exakt match
+                                lowerBound.push(low);
+                            }
+                        }
+                        if (high) {
+                            if (high === _.Storages.MATCHER.NUMBER.ANY) {
+                                upperBound.push(_.Storages.MATCHER.NUMBER.MAX);
+                            } else if (high === _.Storages.MATCHER.STRING.ANY) {
+                                upperBound.push(_.Storages.MATCHER.STRING.MAX);
+                            } else { // exakt match
+                                upperBound.push(high);
+                            }
+                        }
+                    }
+                    if (lowerBound.length > 0) {
+                        if (upperBound.length > 0) {
+                            return IDBKeyRange.bound(lowerBound, upperBound, lowerOpen, upperOpen);
+                        } else {
+                            return IDBKeyRange.lowerBound(lowerBound, upperBound, lowerOpen);
+                        }
+                    } else {
+                        return IDBKeyRange.upperBound(lowerBound, upperBound, upperOpen);
+                    }
+                } else { // no wildcards, die Arrays werden 1:1 übernommen
+                    return IDBKeyRange.bound(keyRangeFromOpt, keyRangeToOpt, lowerOpen, upperOpen);
+                }
+            }
+
+            /**
+             * Ruft die iterations-Methode auf, sollte diese 'false' zurückliefern wird die Schleife abgebrochen.
+             * Ansonsten wird bis zum optionalen limit oder bis zum Ende weitergemacht.
+             */
+            async #openCursorIteration(request, iteration, limit) {
+                limit = limit || Number.MAX_VALUE;
+                return new Promise((result, reject) => {
+                    let i = 0;
+                    request.onsuccess = async function (event) {
+                        const cursor = event.target.result;
+                        if (!cursor || i >= limit || await iteration(cursor.value, i) === false) {
+                            result(); // just finish promise
+                        } else {
+                            i++;
+                            cursor.continue();
+                        }
+                    };
+                });
+            }
+
+            /**
+             * Sammelt das ganze Resultat in einem Array und liefert dieses einmalig aus.
+             */
+            async #openCursorFetch(request, limit) {
+                limit = limit || Number.MAX_VALUE;
+                return new Promise((result, reject) => {
+                    const results = [];
+                    let i = 0;
+                    request.onsuccess = function (event) {
+                        const cursor = event.target.result;
+                        if (cursor && i < limit) {
+                            results.push(cursor.value);
+                            i++;
+                            cursor.continue();
+                        } else {
+                            result(results);
+                        }
+                    };
+                });
+            }
+
+            awaitRequest(idbRequest) {
+                return new Promise((resolve, reject) => {
+                    idbRequest.onsuccess = function (event) {
+                        resolve(event.target.result);
+                    };
+                })
             }
 
             // für readonly objectstores, kann man hierüber abfragen, ob der ObjectStore auch existiert
@@ -665,8 +948,20 @@ class demawiRepository {
             return this.#indexedDb || (this.#indexedDb = new _.Storages.IndexedDb("WoDReportArchiv", "wodDB"));
         }
 
-        static getWorldDb() {
-            return this.#getCreateObjectStore("world", "id");
+        static getItemDb() {
+            return this.#getCreateObjectStore("item", "id");
+        }
+
+        static getItemSourcesDb() {
+            return this.#getCreateObjectStore("itemSources", "id");
+        }
+
+        static getLootDb() {
+            return this.#getCreateObjectStore("itemLoot", "id");
+        }
+
+        static getSettingsDb() {
+            return this.#getCreateObjectStore("settings", "name");
         }
 
         static getSkillsDb() {
@@ -677,12 +972,8 @@ class demawiRepository {
             return this.#getCreateObjectStore("skillSources", "name");
         }
 
-        static getLootDb() {
-            return this.#getCreateObjectStore("itemLoot", "id");
-        }
-
-        static getSettingsDb() {
-            return this.#getCreateObjectStore("settings", "name");
+        static getWorldDb() {
+            return this.#getCreateObjectStore("world", "id");
         }
 
         /**
@@ -779,7 +1070,7 @@ class demawiRepository {
 
         static async getLootedDungeonUniques(locationName, world, worldSeasonNr, quelleId) {
             const result = {};
-            for (const item of await _.WoDStorages.getLootDb().getAll()) {
+            for (const item of await _.WoDStorages.getLootDb().getAll(false)) { // skip warning, sollte in Zukunft aber effizienter gelöst werden
                 const locNames = Object.keys(item.locs);
                 if (locNames.length === 1 && locNames[0] === locationName) { // is DungeonUnique
                     const quellSeasonId = this.#getQuellSeasonId(world, worldSeasonNr, quelleId);
@@ -813,13 +1104,21 @@ class demawiRepository {
         }
 
         static async reportLootTombola(itemName, timestampInMinutes) {
+            itemName = itemName.toLowerCase();
             const world = _.WoD.getMyWorld();
-            const worldSeasonNr = await _.WoD.getMyWorldSeasonNr();
             const item = await this.#getLootItem(itemName);
-            const tombLoot = item.tomb || (item.tomb = {});
-            tombLoot[world + worldSeasonNr + "|" + timestampInMinutes] = 1;
-            console.log("TombolaLoot: " + itemName, new Date(timestampInMinutes * 60000))
-            await _.WoDStorages.getLootDb().setValue(item);
+
+            const locationName = "Tombola";
+            const itemLoot = item.loot || (item.loot = {});
+            itemLoot[world + timestampInMinutes + "|Tombola"] = {
+                count: 1,
+                loc: locationName,
+            }
+            // Allgemeins .locs
+            const locationLoot = item.locs[locationName] || (item.locs[locationName] = {});
+            locationLoot.ts = timestampInMinutes;
+
+            await this.#storeItem(item);
         }
 
         /**
@@ -870,7 +1169,6 @@ class demawiRepository {
                 console.error("Heldestufe wurde beim Loot nicht übermittelt!", itemName);
                 return;
             }
-            const itemLootStore = await _.WoDStorages.getLootDb();
             const item = await this.#getLootItem(itemName);
 
             // Allgemeiner Loot: Timestamp => World, LocationName, Stufe(Stufe_)... Cut-Off
@@ -894,20 +1192,6 @@ class demawiRepository {
             } else {
                 this.#setNumberValue(curLoot, "stufe_", curLoot.stufe_ || heldenstufeUngesichert);
             }
-            const entries = Object.keys(lootTable);
-            if (entries.length > this.MAX_LOOT_ENTRIES) {
-                // da immer nur ein Loot reported wird, brauchen wir auch nur maximal einen löschen.
-                let keyToDelete;
-                let minTimestamp = Number.MAX_VALUE;
-                for (const cur of entries) {
-                    const curTs = Number(cur.match(/^\D+(\d+)[|]?.*$/)[1]);
-                    if (curTs < minTimestamp) {
-                        keyToDelete = cur;
-                        minTimestamp = curTs;
-                    }
-                }
-                delete lootTable[keyToDelete];
-            }
 
             this.#addToSeasonLoot(item, world, worldSeasonNr, timestampInMinutes, locationName, locationVersion, count, quelleId);
 
@@ -929,8 +1213,31 @@ class demawiRepository {
             const dayInYearLoot = item.days || (item.days = {});
             dayInYearLoot[dayInYearId] = timestampInMinutes;
 
-            await itemLootStore.setValue(item);
+            await this.#storeItem(item);
             return item;
+        }
+
+        /**
+         * Inkl. item.loot - Cut-Off
+         */
+        static async #storeItem(item) {
+            const itemLootStore = await _.WoDStorages.getLootDb();
+            const lootTable = item.loot || (item.loot = {});
+            const entries = Object.keys(lootTable);
+            if (entries.length > this.MAX_LOOT_ENTRIES) {
+                // da immer nur ein Loot reported wird, brauchen wir auch nur maximal einen löschen.
+                let keyToDelete;
+                let minTimestamp = Number.MAX_VALUE;
+                for (const cur of entries) {
+                    const curTs = Number(cur.match(/^\D+(\d+)[|]?.*$/)[1]);
+                    if (curTs < minTimestamp) {
+                        keyToDelete = cur;
+                        minTimestamp = curTs;
+                    }
+                }
+                delete lootTable[keyToDelete];
+            }
+            await itemLootStore.setValue(item);
         }
 
         static #getQuellSeasonId(world, worldSeasonNr, quelleId) {
@@ -986,11 +1293,12 @@ class demawiRepository {
                 const meineHelden = _.WoDParser.getMyHerosFromOverview();
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
                 const [season, seasonNr] = await this.getWorldSeason(myWorld, meineHelden, true);
-                title.append(this.createSeasonElem(seasonNr));
+                title.append(await this.createSeasonElem(seasonNr));
             }
         }
 
-        static createSeasonElem(seasonNr) {
+        static async createSeasonElem(seasonNr) {
+            seasonNr = seasonNr || await _WoD.getMyWorldSeasonNr();
             const seasonElem = document.createElement("sup");
             seasonElem.classList.add("nowod");
             seasonElem.style.opacity = "0.5";
@@ -1013,17 +1321,6 @@ class demawiRepository {
             innerElem.innerHTML = seasonNr;
             seasonElem.append(innerElem);
 
-            return seasonElem;
-        }
-
-        static createSeasonElem2(seasonNr) {
-            const seasonElem = document.createElement("sup");
-            seasonElem.style.position = "relative";
-            seasonElem.classList.add("nowod");
-            seasonElem.style.fontSize = "60%";
-            seasonElem.style.cursor = "help";
-            seasonElem.innerHTML = " [" + seasonNr + "]"; // 📅🗓⏰🕗📆
-            seasonElem.title = "Die aktuelle Welt-Saisonnummer. Falls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison anlegen.";
             return seasonElem;
         }
 
@@ -1132,9 +1429,10 @@ class demawiRepository {
         static async getSkill(skillName) {
             const skillDb = _.WoDStorages.getSkillsDb();
             let skill = await skillDb.getValue(skillName);
-            if (skill && skill.v === this.#skillDataVersion) return skill;
+            if (skill && skill.dv === this.#skillDataVersion) return skill;
             // ad-hoc load
-            skill = {name: skillName, v: this.#skillDataVersion, world: _.WoD.getMyWorld(), ts: new Date().getTime()};
+            const now = new Date().getTime();
+            skill = {name: skillName, dv: this.#skillDataVersion, world: _.WoD.getMyWorld(), ts: now};
             const content = await _.util.loadViaXMLRequest(this.getSkillUrlAlsPopup(skillName));
             const doc = await _.util.getDocumentFor(content);
             this.#parseSkillBeschreibung(doc, skill);
@@ -1143,7 +1441,7 @@ class demawiRepository {
                 return;
             }
             await skillDb.setValue(skill);
-            const skillSource = {name: skillName, src: content};
+            const skillSource = {name: skillName, src: content, world: _.WoD.getMyWorld(), ts: now};
             await _.WoDStorages.getSkillsSourceDb().setValue(skillSource);
             return skill;
         }
@@ -1203,7 +1501,7 @@ class demawiRepository {
         }
 
         static async save(settingsDef) {
-            await _.WoDStorages.getSettingsDb().setValue(this.get(settingsDef));
+            await _.WoDStorages.getSettingsDb().setValue(await this.get(settingsDef));
         }
 
     }
@@ -1212,6 +1510,31 @@ class demawiRepository {
      * Hilfemethoden um allgemeine Informationen von WoD zu erhalten (Name, Gruppe etc.)
      */
     static WoD = class {
+
+        /**
+         * Wird am Element die Id setzen. Mouseover, mouseout, mousemove events werden vom wodToolTip überschrieben.
+         */
+        static addTooltip(elem, fnOrHtml, updateable) {
+            let tooltip;
+            if (typeof fnOrHtml === "string") {
+                tooltip = fnOrHtml;
+                fnOrHtml = undefined;
+            }
+
+            elem.onmouseenter = async function () {
+                if (fnOrHtml) tooltip = await fnOrHtml();
+                if (tooltip) {
+                    if (elem.id) delete wodToolTipContent[elem.id];
+                    wodToolTip(elem, tooltip);
+                    if (updateable && typeof fnOrHtml === "function") {
+                        elem.onmouseenter = async function (ev) {
+                            wodToolTipContent[elem.id] = await fnOrHtml();
+                        };
+                    }
+                }
+            }
+        }
+
         /**
          * Nutzt zur Sicherheit die letzte "the_form" des Dokumentes, falls Seiten aus dem Archiv angezeigt werden.
          */
@@ -2081,6 +2404,12 @@ class demawiRepository {
             const doc = document.implementation.createHTMLDocument();
             doc.documentElement.innerHTML = fullHtmlString;
             return doc;
+        }
+
+        static html2Text(html) {
+            const span = document.createElement("span");
+            span.innerHTML = html;
+            return span.textContent.trim();
         }
 
         static JSONstringify(data) {
@@ -3019,6 +3348,378 @@ class demawiRepository {
 
         return ReportParser;
     }();
+
+    static ItemParserDataVersion = 4;
+    static ItemParser = class {
+
+        static createItem(itemName) {
+            return {
+                id: itemName.toLowerCase(),
+                name: itemName,
+                ts: new Date().getTime(),
+                world: _.WoD.getMyWorld(),
+            }
+        }
+
+        static getItemSourceDB() {
+            return _.WoDStorages.getItemSourcesDb();
+        }
+
+        static getItemDB() {
+            return _.WoDStorages.getItemDb();
+        }
+
+        static async reportNonExistingItem(itemName) {
+            let item = this.getItemSourceDB().getValue(itemName.toLowerCase());
+            if (!item) {
+                item = this.createItem(itemName);
+                item.invalid = true;
+            } else {
+                item.ts = new Date().getTime();
+            }
+            await this.getItemSourceDB().setValue(item);
+        }
+
+        static async onItemPage() {
+            var link = document.getElementById("link");
+            if (!link) {
+                if (document.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
+                    const itemName = document.querySelector("form input[name='name']").value;
+                    console.log("Gegenstand existiert nicht '" + itemName + "'");
+                    await this.reportNonExistingItem(itemName.trim());
+                }
+                return;
+            }
+            if (this.hasSetOrGemBonus(link)) {
+                console.log("Set oder gem-boni entdeckt! Item wird nicht für die Datenbank verwendet!");
+                return;
+            }
+            link = link.innerHTML;
+            const details = document.getElementById("details").innerHTML;
+
+            const all = document.getElementsByTagName("h1")[0];
+            var itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
+            const sourceItem = this.createItem(itemName);
+            sourceItem.details = details;
+            sourceItem.link = link;
+            await this.getItemSourceDB().setValue(sourceItem);
+            const item = await this.parseSourceItem(sourceItem);
+            await this.getItemDB().setValue(item);
+            console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
+        }
+
+        static hasSetOrGemBonus(linkElement) {
+            return linkElement.getElementsByClassName("gem_bonus_also_by_gem").length > 0 || linkElement.getElementsByClassName("gem_bonus_only_by_gem").length > 0;
+        }
+
+        static async parseSourceItem(itemSource) {
+            const item = await this.getItemDB().getValue(itemSource.id) || {
+                id: itemSource.id,
+                name: itemSource.name,
+            };
+            item.details = itemSource.details; // nur temporär fürs parsen
+            item.link = itemSource.link; // nur temporär fürs parsen
+            item.ts = itemSource.ts;
+            item.world = itemSource.world;
+            await this.#writeItemData(item);
+            delete item.details;
+            delete item.link;
+            return item;
+        }
+
+        // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
+        static async #writeItemData(item) {
+            try {
+                this.writeItemData(item);
+                this.writeItemDataEffects(item);
+                item.dv = _.ItemParserDataVersion;
+            } catch (error) {
+                console.log(error);
+                //alert(error);
+                throw error;
+            }
+        }
+
+        static writeItemData(item) {
+            const div = document.createElement("div");
+            div.innerHTML = item.details;
+            const data = {};
+            item.data = data;
+            const tableTRs = div.querySelectorAll('tr.row0, tr.row1');
+            for (var i = 0, l = tableTRs.length; i < l; i++) {
+                const tr = tableTRs[i];
+                const kategorie = _.util.html2Text(tr.children[0].innerHTML.split("<br>")[0]);
+                switch (kategorie) {
+                    case "Besonderheiten":
+                        var besonderheiten = tr.children[1].textContent.trim();
+                        if (besonderheiten === "Veredelungen") {
+                            data.veredelung = true;
+                        } else {
+                            var matches = besonderheiten.match(/(.\d*)x veredelbar/);
+                            if (!matches) {
+                                console.error("Unbekannte Besonderheit entdeckt", item.name, besonderheiten);
+                                alert("Unbekannte Besonderheit entdeckt");
+                            }
+                            data.edelslots = matches[1];
+                        }
+                        break;
+                    case "Heldenklassen":
+                        var heldenklassen = tr.children[1].textContent.trim();
+                        var typ;
+                        var def;
+                        if (heldenklassen.startsWith("ausschließlich für")) {
+                            typ = "nur";
+                            def = Array();
+                            for (const klasse of tr.children[1].getElementsByTagName("span")) {
+                                def.push(klasse.textContent.trim());
+                            }
+                        } else if (heldenklassen.startsWith("nicht für")) {
+                            typ = "nicht";
+                            def = Array();
+                            for (const klasse of tr.children[1].getElementsByTagName("span")) {
+                                def.push(klasse.textContent.trim());
+                            }
+                        } else if (heldenklassen.startsWith("für alle")) {
+                            typ = "alle";
+                        }
+                        data.klasse = {
+                            typ: typ,
+                            def: def,
+                        }
+                        break;
+                    case "Voraussetzungen":
+                        let bedingungen = {};
+                        let freieBedingungen = Array();
+                        for (const elem of tr.children[1].children) {
+                            if (elem.tagName === "BR") return;
+                            let line = elem.textContent.trim();
+                            if (line === "") return;
+                            const matches = line.trim().match(/^(.*) (ab|bis) (\d*)$/);
+                            if (matches) {
+                                bedingungen[matches[1]] = {
+                                    comp: matches[2],
+                                    value: matches[3],
+                                };
+                            } else {
+                                freieBedingungen.push(line);
+                            }
+                        }
+                        data.bedingungen = bedingungen;
+                        data.bedingungen2 = freieBedingungen;
+                        break;
+                    case "Gegenstandsklasse": {
+                        const gegenstandsklassen = Array();
+                        for (const a of tr.children[1].getElementsByTagName("a")) {
+                            gegenstandsklassen.push(a.textContent.trim());
+                        }
+                        data.gegenstandsklassen = gegenstandsklassen;
+                        break;
+                    }
+                    case "Wirkung": {
+                        const value = tr.children[1].textContent.trim();
+                        if (value !== "-") {
+                            const matches = value.match(/(Stufe \d*,\d*)?[\n]?(.*)/);
+                            let stufe = matches[1];
+                            if (stufe) stufe = stufe.match(/Stufe (\d*).*/)[1];
+                            let type = matches[2];
+                            if (type) type = type.trim();
+                            if (type === "") type = null;
+                            data.wirkung = {
+                                type: type,
+                                value: stufe,
+                            }
+                        }
+                        break;
+                    }
+                    case "Anwendungen insgesamt": {
+                        data.isVG = tr.children[1].textContent.trim() !== "unbegrenzt";
+                        break;
+                    }
+                    case "Fertigkeiten": {
+                        const fertigkeiten = Array();
+                        for (const a of tr.children[1].getElementsByTagName("a")) {
+                            fertigkeiten.push(a.textContent.trim());
+                        }
+                        data.fertigkeiten = fertigkeiten;
+                        break;
+                    }
+                    case "Wo getragen?":
+                        data.trageort = tr.children[1].textContent.trim();
+                        break;
+                }
+            }
+        }
+
+        static writeItemDataEffects(item) {
+            const div = document.createElement("div");
+            div.innerHTML = item.link;
+            if (this.hasSetOrGemBonus(div)) {
+                item.irregular = true;
+            } else {
+                delete item.irregular;
+            }
+            item.effects = {};
+            var currentOwnerContext;
+            var currentBoniContext;
+            var tableType;
+            var ownerType;
+
+            function getBoniContext(ctxName) {
+                var result = currentOwnerContext[ctxName];
+                if (!result) {
+                    result = [];
+                    currentOwnerContext[ctxName] = result;
+                }
+                return result;
+            }
+
+            for (var i = 0, l = div.children.length; i < l; i++) {
+                const cur = div.children[i];
+                if (cur.tagName === "H2") {
+                    ownerType = this.getOwnerType(cur.textContent.trim());
+                    currentOwnerContext = item.effects[ownerType];
+                    if (!currentOwnerContext) {
+                        currentOwnerContext = {};
+                        item.effects[ownerType] = currentOwnerContext;
+                    }
+                } else if (cur.tagName === "H3") {
+                    tableType = this.getType(cur.textContent.trim());
+                    currentBoniContext = getBoniContext(tableType);
+                } else if (cur.className === "content_table") {
+                    const tableTRs = cur.querySelectorAll('tr.row0, tr.row1');
+                    switch (tableType) {
+                        case "schaden":
+                        case "ruestung":
+                        case "anfaelligkeit": // 3-Spalten Standard
+                            this.addBoni(currentBoniContext, tableTRs, curTR => {
+                                const boni = {
+                                    damageType: curTR.children[0].textContent.trim(),
+                                    attackType: curTR.children[1].textContent.trim(),
+                                    bonus: curTR.children[2].textContent.trim(),
+                                }
+                                if (curTR.children.length > 3) boni.dauer = curTR.children[3].textContent.trim();
+                                if (curTR.children.length > 4) boni.bemerkung = curTR.children[4].textContent.trim();
+                                return boni;
+                            });
+                            break;
+                        case "eigenschaft":
+                        case "angriff":
+                        case "parade":
+                        case "wirkung":
+                        case "beute": // 2-Spalten-Standard
+                            this.addBoni(currentBoniContext, tableTRs, curTR => {
+                                const boni = {
+                                    type: curTR.children[0].textContent.trim(),
+                                    bonus: curTR.children[1].textContent.trim(),
+                                }
+                                if (curTR.children.length > 2) boni.dauer = curTR.children[2].textContent.trim();
+                                if (curTR.children.length > 3) boni.bemerkung = curTR.children[3].textContent.trim();
+                                return boni;
+                            });
+                            break;
+                        case "fertigkeit":
+                            for (const curTR of tableTRs) {
+                                var type = curTR.children[0].textContent.trim();
+                                var targetContext;
+                                if (type.startsWith("alle Fertigkeiten der Klasse")) {
+                                    targetContext = getBoniContext("talentklasse");
+                                    type = type.substring(29);
+                                } else {
+                                    targetContext = currentBoniContext;
+                                }
+                                const skill = {
+                                    type: type,
+                                    bonus: curTR.children[1].textContent.trim(),
+                                }
+                                if (curTR.children.length > 2) skill.dauer = curTR.children[2].textContent.trim();
+                                if (curTR.children.length > 3) skill.bemerkung = curTR.children[3].textContent.trim();
+                                targetContext.push(skill);
+                            }
+                            break;
+                        default:
+                            console.error("Unbekannter Boni-TableType: '" + tableType + "'");
+                            alert("Unbekannter Boni-TableType: '" + tableType + "'");
+                    }
+
+                }
+            }
+        }
+
+        static addBoni(currentBoniContext, tableTRs, fn) {
+            tableTRs.forEach(b => {
+                currentBoniContext.push(fn(b));
+            });
+        }
+
+        static getType(text) {
+            switch (text) {
+                case 'Boni auf Eigenschaften':
+                    return "eigenschaft";
+                case 'Boni auf Paraden':
+                    return "parade";
+                case 'Boni auf Schaden':
+                    return "schaden";
+                case 'Boni auf Rüstung':
+                    return "ruestung";
+                case 'Boni auf den Rang von Fertigkeiten':
+                    return "fertigkeit";
+                case 'Boni auf Angriffe':
+                    return "angriff";
+                case 'Boni auf die Wirkung von Fertigkeiten':
+                    return "wirkung";
+                case 'Boni auf die Anfälligkeit gegen Schäden':
+                    return "anfaelligkeit";
+                case 'Boni auf Beute aus Dungeonkämpfen':
+                    return "beute";
+                default:
+                    console.error("Unbekannte H3-Item Überschrift: '" + text + "'");
+                    alert("Unbekannte H3-Item Überschrift: '" + text + "'");
+            }
+        }
+
+        static getOwnerType(text) {
+            switch (text) {
+                case 'Auswirkungen auf den Betroffenen des Gegenstands':
+                    return 'target';
+                case 'Auswirkungen auf den Besitzer des Gegenstands':
+                    return 'owner';
+                case 'Auswirkungen auf den Betroffenen der Fertigkeit':
+                    return 'target';
+                case 'Auswirkungen auf den Besitzer der Fertigkeit':
+                    return 'owner';
+                case 'Vor- und Nachteile':
+                    return 'owner';
+                case 'Auswirkungen auf den Betroffenen des Sets':
+                    return "target";
+                default:
+                    if (text.includes('Diese Boni wirken zurzeit auf ')) {
+                        return 'owner';
+                    }
+                    console.error("Unbekannte H2-Item Überschrift: '" + text + "'");
+                    alert("Unbekannte H2-Item Überschrift: '" + text + "'");
+            }
+        }
+
+    }
+
+    static import(type) {
+        return this[type];
+    }
+
+    static startMod() {
+        let wantedVersion = (GM.info.scriptMetaStr.match(/DemawiRepository.js\?version=(.*)/) || [])[1];
+        let logFn = console.log;
+        if (wantedVersion !== this.version) {
+            alert("[" + GM.info.script.name + "]: Gewünschte Repo-Version (" + wantedVersion + ") unterscheidet sich zu der vorhandenen (" + this.version + ").\n\nBitte die Mod aktualisieren!");
+            logFn = console.warn;
+        } else wantedVersion = undefined;
+        logFn(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (wantedVersion ? " benötigt: " + wantedVersion : "") + ")");
+    }
+
+    static getModName() {
+        return GM.info.script.name;
+    }
+
 }
 
 class OptionImpl {

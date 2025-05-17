@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Item-Datenbank
+// @author         demawi
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
 // @include        https://*.world-of-dungeons.*/wod/spiel/*
@@ -15,7 +16,6 @@
 
 (function () {
     'use strict';
-    let debug = false;
 
     const _Storages = demawiRepository.import("Storages");
     const _WoDStorages = demawiRepository.import("WoDStorages");
@@ -25,15 +25,14 @@
     const _WoD = demawiRepository.import("WoD");
     const _util = demawiRepository.import("util");
     const _UI = demawiRepository.import("UI");
+    const _ItemParser = demawiRepository.import("ItemParser");
 
     class Mod {
         static dbname = "wodDB";
-        static currentDataVersion = 1;
-        static currentItemDataVersion = 3; // durch eine Veränderung werden die Items neu aus den Sourcen beschrieben
 
         static async startMod() {
+            demawiRepository.startMod();
             const page = _util.getWindowPage();
-            console.log("StartMod: ItemDB '" + page + "'");
 
             // Links zu Items finden und markieren. Nahezu überall.
             if (page !== "item.php") {
@@ -42,50 +41,11 @@
 
             // Gegenstandsseite. Einlesen der Item-Werte.
             if (page === "item.php") {
-                await ItemReader.start();
+                await _ItemParser.onItemPage();
             }
 
             // Einbinden der Such-UI.
             if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
-        }
-    }
-
-    class ItemReader {
-        static createItem(itemName) {
-            return {
-                name: itemName,
-                time: new Date().getTime(),
-                world: _WoD.getMyWorld(),
-            }
-        }
-
-        static async start() {
-            //await MyStorage.indexedDb.cloneTo("wodCopy");
-            var link = document.getElementById("link");
-            if (!link) {
-                if (document.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
-                    let itemName = document.querySelector("form input[name='name']").value;
-                    console.log("Gegenstand existiert nicht '" + itemName + "'");
-                    await MyStorage.notExistingItem(itemName.trim());
-                }
-                return;
-            }
-            if (ItemParser.hasSetOrGemBonus(link)) {
-                console.log("Set oder gem-boni entdeckt! Item wird nicht für die Datenbank verwendet!");
-                return;
-            }
-            link = link.innerHTML;
-            const details = document.getElementById("details").innerHTML;
-
-            const all = document.getElementsByTagName("h1")[0];
-            var itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
-            const sourceItem = this.createItem(itemName);
-            sourceItem.details = details;
-            sourceItem.link = link;
-            await MyStorage.getItemSourceDB().setValue(sourceItem);
-            const item = await ItemParser.getItemDataFromSource(sourceItem);
-            await MyStorage.getItemDB().setValue(item);
-            console.log("Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
         }
     }
 
@@ -102,11 +62,17 @@
         }
 
         static async findNext() {
-            const allItems = await MyStorage.getItemSourceDB().getAll();
-            for (const sourceItem of allItems) {
-                if (sourceItem.invalid) continue;
-                if (!sourceItem.details) return sourceItem;
-            }
+            let result;
+            await MyStorage.getItemSourceDB().getAll({
+                index: "ts",
+                order: "prev",
+            }, function (sourceItem) {
+                if (sourceItem.invalid) return;
+                if (!sourceItem.details) {
+                    result = sourceItem;
+                    return false;
+                }
+            });
         }
     }
 
@@ -122,14 +88,11 @@
             missingSpanOverall.style.right = "0px";
 
             async function checkSiteForItems() {
-                console.log("ItemDB.checkSiteForItems...");
                 const allHrefs = document.getElementsByTagName("a");
                 var missingItemsFound = 0;
-                for (var i = 0, l = allHrefs.length; i < l; i++) {
-                    const itemLinkElement = allHrefs[i];
+                for (const itemLinkElement of allHrefs) {
                     const itemName = util.getItemNameFromElement(itemLinkElement);
                     if (!itemName) continue;
-
                     const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
                     if (sourceItem && sourceItem.invalid) continue;
                     if (!sourceItem || !sourceItem.details) missingItemsFound++;
@@ -145,6 +108,7 @@
                         document.body.append(missingSpanOverall);
                     }
                 }
+                console.log("ItemDB.checkSiteForItems...finished!");
             }
 
             await checkSiteForItems();
@@ -1202,314 +1166,9 @@
 
     }
 
-    class ItemParser {
-        static hasSetOrGemBonus(linkElement) {
-            return linkElement.getElementsByClassName("gem_bonus_also_by_gem").length > 0 || linkElement.getElementsByClassName("gem_bonus_only_by_gem").length > 0;
-        }
-
-        static async rewriteAllItemsFromSource() {
-            console.log("rewriteAllItemsFromSource");
-            let itemSources = await MyStorage.getItemSourceDB().getAll();
-            for (const itemSource of itemSources) {
-                if (itemSource.invalid) {
-                    await MyStorage.getItemDB().deleteValue(itemSource.name);
-                } else {
-                    let item = await this.getItemDataFromSource(itemSource);
-                    await MyStorage.getItemDB().setValue(item);
-                }
-            }
-        }
-
-        static async getItemDataFromSource(itemSource) {
-            let item = await MyStorage.getItemDB().getValue(itemSource.name);
-            if (!item) {
-                item = {
-                    name: itemSource.name,
-                }
-            }
-            item.details = itemSource.details; // nur temporär
-            item.link = itemSource.link; // nur temporär
-            await this.#writeItemData(item);
-            delete item.details;
-            delete item.link;
-            return item;
-        }
-
-        // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
-        static async #writeItemData(item) {
-            try {
-                this.writeItemData(item);
-                this.writeItemDataEffects(item);
-                item.dataVersion = Mod.currentItemDataVersion;
-            } catch (error) {
-                console.log(error);
-                //alert(error);
-                throw error;
-            }
-        }
-
-        static writeItemData(item) {
-            const div = document.createElement("div");
-            div.innerHTML = item.details;
-            const data = {};
-            item.data = data;
-            const tableTRs = div.querySelectorAll('tr.row0, tr.row1');
-            for (var i = 0, l = tableTRs.length; i < l; i++) {
-                const tr = tableTRs[i];
-                const kategorie = util.html2Text(tr.children[0].innerHTML.split("<br>")[0]);
-                switch (kategorie) {
-                    case "Besonderheiten":
-                        var besonderheiten = tr.children[1].textContent.trim();
-                        if (besonderheiten === "Veredelungen") {
-                            data.veredelung = true;
-                        } else {
-                            var matches = besonderheiten.match(/(.\d*)x veredelbar/);
-                            if (!matches) {
-                                console.error("Unbekannte Besonderheit entdeckt", item.name, besonderheiten);
-                                alert("Unbekannte Besonderheit entdeckt");
-                            }
-                            data.edelslots = matches[1];
-                        }
-                        break;
-                    case "Heldenklassen":
-                        var heldenklassen = tr.children[1].textContent.trim();
-                        var typ;
-                        var def;
-                        if (heldenklassen.startsWith("ausschließlich für")) {
-                            typ = "nur";
-                            def = Array();
-                            for (const klasse of tr.children[1].getElementsByTagName("span")) {
-                                def.push(klasse.textContent.trim());
-                            }
-                        } else if (heldenklassen.startsWith("nicht für")) {
-                            typ = "nicht";
-                            def = Array();
-                            for (const klasse of tr.children[1].getElementsByTagName("span")) {
-                                def.push(klasse.textContent.trim());
-                            }
-                        } else if (heldenklassen.startsWith("für alle")) {
-                            typ = "alle";
-                        }
-                        data.klasse = {
-                            typ: typ,
-                            def: def,
-                        }
-                        break;
-                    case "Voraussetzungen":
-                        let bedingungen = {};
-                        let freieBedingungen = Array();
-                        util.forEach(tr.children[1].children, elem => {
-                            if (elem.tagName === "BR") return;
-                            let line = elem.textContent.trim();
-                            if (line === "") return;
-                            const matches = line.trim().match(/^(.*) (ab|bis) (\d*)$/);
-                            if (matches) {
-                                bedingungen[matches[1]] = {
-                                    comp: matches[2],
-                                    value: matches[3],
-                                };
-                            } else {
-                                freieBedingungen.push(line);
-                            }
-                        })
-                        data.bedingungen = bedingungen;
-                        data.bedingungen2 = freieBedingungen;
-                        break;
-                    case "Gegenstandsklasse": {
-                        const gegenstandsklassen = Array();
-                        util.forEach(tr.children[1].getElementsByTagName("a"), a => {
-                            gegenstandsklassen.push(a.textContent.trim());
-                        });
-                        data.gegenstandsklassen = gegenstandsklassen;
-                        break;
-                    }
-                    case "Wirkung": {
-                        const value = tr.children[1].textContent.trim();
-                        if (value !== "-") {
-                            const matches = value.match(/(Stufe \d*,\d*)?[\n]?(.*)/);
-                            let stufe = matches[1];
-                            if (stufe) stufe = stufe.match(/Stufe (\d*).*/)[1];
-                            let type = matches[2];
-                            if (type) type = type.trim();
-                            if (type === "") type = null;
-                            data.wirkung = {
-                                type: type,
-                                value: stufe,
-                            }
-                        }
-                        break;
-                    }
-                    case "Anwendungen insgesamt": {
-                        data.isVG = tr.children[1].textContent.trim() !== "unbegrenzt";
-                        break;
-                    }
-                    case "Fertigkeiten": {
-                        const fertigkeiten = Array();
-                        util.forEach(tr.children[1].getElementsByTagName("a"), a => {
-                            fertigkeiten.push(a.textContent.trim());
-                        });
-                        data.fertigkeiten = fertigkeiten;
-                        break;
-                    }
-                    case "Wo getragen?":
-                        data.trageort = tr.children[1].textContent.trim();
-                        break;
-                }
-            }
-        }
-
-        static writeItemDataEffects(item) {
-            const div = document.createElement("div");
-            div.innerHTML = item.link;
-            if (this.hasSetOrGemBonus(div)) {
-                item.irregular = true;
-            } else {
-                delete item.irregular;
-            }
-            item.effects = {};
-            var currentOwnerContext;
-            var currentBoniContext;
-            var tableType;
-            var ownerType;
-
-            function getBoniContext(ctxName) {
-                var result = currentOwnerContext[ctxName];
-                if (!result) {
-                    result = [];
-                    currentOwnerContext[ctxName] = result;
-                }
-                return result;
-            }
-
-            for (var i = 0, l = div.children.length; i < l; i++) {
-                const cur = div.children[i];
-                if (cur.tagName === "H2") {
-                    ownerType = this.getOwnerType(cur.textContent.trim());
-                    currentOwnerContext = item.effects[ownerType];
-                    if (!currentOwnerContext) {
-                        currentOwnerContext = {};
-                        item.effects[ownerType] = currentOwnerContext;
-                    }
-                } else if (cur.tagName === "H3") {
-                    tableType = this.getType(cur.textContent.trim());
-                    currentBoniContext = getBoniContext(tableType);
-                } else if (cur.className === "content_table") {
-                    const tableTRs = cur.querySelectorAll('tr.row0, tr.row1');
-                    switch (tableType) {
-                        case "schaden":
-                        case "ruestung":
-                        case "anfaelligkeit": // 3-Spalten Standard
-                            this.addBoni(currentBoniContext, tableTRs, b => {
-                                return {
-                                    damageType: b.children[0].textContent.trim(),
-                                    attackType: b.children[1].textContent.trim(),
-                                    bonus: b.children[2].textContent.trim(),
-                                    dauer: b.children.length > 3 ? b.children[3].textContent.trim() : undefined,
-                                    bemerkung: b.children.length > 4 ? b.children[4].textContent.trim() : undefined,
-                                }
-                            });
-                            break;
-                        case "eigenschaft":
-                        case "angriff":
-                        case "parade":
-                        case "wirkung":
-                        case "beute": // 2-Spalten-Standard
-                            this.addBoni(currentBoniContext, tableTRs, b => {
-                                return {
-                                    type: b.children[0].textContent.trim(),
-                                    bonus: b.children[1].textContent.trim(),
-                                    dauer: b.children.length > 2 ? b.children[2].textContent.trim() : undefined,
-                                    bemerkung: b.children.length > 3 ? b.children[3].textContent.trim() : undefined,
-                                }
-                            });
-                            break;
-                        case "fertigkeit":
-                            tableTRs.forEach(b => {
-                                var type = b.children[0].textContent.trim();
-                                var targetContext;
-                                if (type.startsWith("alle Fertigkeiten der Klasse")) {
-                                    targetContext = getBoniContext("talentklasse");
-                                    type = type.substring(29);
-                                } else {
-                                    targetContext = currentBoniContext;
-                                }
-                                targetContext.push({
-                                    type: type,
-                                    bonus: b.children[1].textContent.trim(),
-                                    dauer: b.children.length > 2 ? b.children[2].textContent.trim() : undefined,
-                                    bemerkung: b.children.length > 3 ? b.children[3].textContent.trim() : undefined,
-                                });
-                            });
-                            break;
-                        default:
-                            console.error("Unbekannter Boni-TableType: '" + tableType + "'");
-                            alert("Unbekannter Boni-TableType: '" + tableType + "'");
-                    }
-
-                }
-            }
-        }
-
-        static addBoni(currentBoniContext, tableTRs, fn) {
-            tableTRs.forEach(b => {
-                currentBoniContext.push(fn(b));
-            });
-        }
-
-        static getType(text) {
-            switch (text) {
-                case 'Boni auf Eigenschaften':
-                    return "eigenschaft";
-                case 'Boni auf Paraden':
-                    return "parade";
-                case 'Boni auf Schaden':
-                    return "schaden";
-                case 'Boni auf Rüstung':
-                    return "ruestung";
-                case 'Boni auf den Rang von Fertigkeiten':
-                    return "fertigkeit";
-                case 'Boni auf Angriffe':
-                    return "angriff";
-                case 'Boni auf die Wirkung von Fertigkeiten':
-                    return "wirkung";
-                case 'Boni auf die Anfälligkeit gegen Schäden':
-                    return "anfaelligkeit";
-                case 'Boni auf Beute aus Dungeonkämpfen':
-                    return "beute";
-                default:
-                    console.error("Unbekannte H3-Item Überschrift: '" + text + "'");
-                    alert("Unbekannte H3-Item Überschrift: '" + text + "'");
-            }
-        }
-
-        static getOwnerType(text) {
-            switch (text) {
-                case 'Auswirkungen auf den Betroffenen des Gegenstands':
-                    return 'target';
-                case 'Auswirkungen auf den Besitzer des Gegenstands':
-                    return 'owner';
-                case 'Auswirkungen auf den Betroffenen der Fertigkeit':
-                    return 'target';
-                case 'Auswirkungen auf den Besitzer der Fertigkeit':
-                    return 'owner';
-                case 'Vor- und Nachteile':
-                    return 'owner';
-                case 'Auswirkungen auf den Betroffenen des Sets':
-                    return "target";
-                default:
-                    if (text.includes('Diese Boni wirken zurzeit auf ')) {
-                        return 'owner';
-                    }
-                    console.error("Unbekannte H2-Item Überschrift: '" + text + "'");
-                    alert("Unbekannte H2-Item Überschrift: '" + text + "'");
-            }
-        }
-
-    }
-
     class MyStorage {
         static adjust = function (objStore) {
-            if(!objStore) return;
+            if (!objStore) return;
             let resultGetValue = objStore.getValue;
             objStore.getValue = async function (dbObjectId) {
                 dbObjectId = dbObjectId.toLocaleLowerCase().trim();
@@ -1537,12 +1196,6 @@
 
         static getItemDB() {
             return this.item;
-        }
-
-        static async notExistingItem(itemName) {
-            let item = ItemReader.createItem(itemName);
-            item.invalid = true;
-            await this.getItemSourceDB().setValue(item);
         }
 
         static async getItemFromLink(itemLink) {
@@ -1668,12 +1321,6 @@
             const result = document.createElement("span");
             result.innerHTML = text;
             return result;
-        }
-
-        static html2Text(html) {
-            const span = document.createElement("span");
-            span.innerHTML = html;
-            return span.textContent.trim();
         }
 
         static createCheckboxInTd(parent, id, labelTitle) {

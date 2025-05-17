@@ -1,11 +1,9 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
+// @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
 // @version        0.19
-// @grant          GM.getValue
-// @grant          GM.setValue
-// @grant          GM.deleteValue
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
@@ -49,8 +47,8 @@
          * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
          */
         static async startMod(kampfbericht, kampfstatistik, dbReportSource) {
+            demawiRepository.startMod();
             let thisObject = this;
-            console.log("StartMod: KampfstatistikStatistik", kampfbericht, kampfstatistik);
             unsafeWindow.statExecuter = async function (...args) {
                 await Mod.startMod(...args);
             }
@@ -1339,7 +1337,7 @@
                 //infoHeader.style.position = "absolute";
                 //infoHeader.style.right = "7px";
                 //infoHeader.style.top = "7px";
-                infoHeader.innerHTML += "<a target='_blank' href='" + Mod.forumLink + "' style='font-size:12px;color:darkgrey;' class='bbignoreColor' onmouseover=\"return wodToolTip(this, 'Hier gehts zum Foren-Post der Anwendung')\">" + Mod.version + " </a>";
+                infoHeader.innerHTML += "<a target='_blank' href='" + Mod.forumLink + "' style='font-size:12px;color:darkgrey;' class='bbignoreColor' onmouseenter=\"return wodToolTip(this, 'Hier gehts zum Foren-Post der Anwendung')\">" + Mod.version + " </a>";
 
                 // 🔗📌📍
                 const info = document.createElement("span");
@@ -1353,7 +1351,8 @@
                 infoTipp += "<li>Einige Aufschlüsselungen (z.B. 'Position', leider aber noch nicht alle) erlauben durch einen Klick darauf und der folgenden Auswahl '+Einschränken' diese weiter einzuschränken (z.B. nur 'Vorne' und 'Zentrum')</li>";
                 infoTipp += "<li>Das Eingabe-Element welches sich dort öffnet ist eine übliche Multiple Auswahlliste. Zusammen mit der Strg-Taste lassen sich hier mehrere Werte auswählen.</li>";
                 infoTipp += "</ul>";
-                info.innerHTML = "<span class='bbignore' onmouseover=\"return wodToolTip(this,'" + infoTipp.replaceAll("'", "\\'").replaceAll('"', '\\"') + "');\"><img alt='' height='14px' border='0' src='/wod/css/skins/skin-8/images/icons/inf.gif'></span>";
+                info.innerHTML = "<span class='bbignore'><img alt='' height='14px' border='0' src='/wod/css/skins/skin-8/images/icons/inf.gif'></span>";
+                _WoD.addTooltip(info, infoTipp);
                 infoHeader.append(info);
 
                 const toBBCodeButtonContainer = document.createElement("span");
@@ -1369,9 +1368,7 @@
                 toBBCodeButton.style.marginLeft = "2px";
                 toBBCodeButton.style.color = "darkgrey";
                 toBBCodeButton.classList.add("bbignore");
-                toBBCodeButton.onmouseover = function () {
-                    return unsafeWindow.wodToolTip(this, 'Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren.');
-                }
+                _WoD.addTooltip(toBBCodeButton, 'Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren.');
 
                 //toBBCodeButton.title = "Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren."
 
@@ -1764,7 +1761,7 @@
             let compareDate = new Date();
             compareDate.setDate(compareDate.getDate() - 8); // x-Tage lang vorhalten
             let spaceSum = 0;
-            for (const report of await reportDB.getAll()) {
+            for (const report of await reportDB.getAll(false)) { // werden nie so viele werden
                 if (!report.ts || report.ts < compareDate.getTime()) {
                     await reportDB.deleteValue(report.reportId);
                 } else {

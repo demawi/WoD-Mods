@@ -1,5 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
+// @author         demawi
 // @namespace      demawi
 // @description    Lässt einen die Seiten der Kampfberichte direkt downloaden
 // @version        0.10
@@ -11,6 +12,7 @@
 // @include        https://*/wod/spiel/dungeon/dungeon.php*
 // @include        https://*/wod/spiel/hero/items.php*
 // @include        https://*/wod/spiel/news/news.php*
+// @include        https://*/wod/spiel/rewards/tombola.php*
 // @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepository.js?version=1.0.4
 // ==/UserScript==
 // *************************************************************
@@ -20,12 +22,12 @@
 // *** nicht meinen Namen entfernen.                         ***
 // *** Danke! demawi                                         ***
 // *************************************************************
-
 (function () {
     'use strict';
 
     const _Storages = demawiRepository.import("Storages");
     const _WoD = demawiRepository.import("WoD");
+    const _WoDStorages = demawiRepository.import("WoDStorages");
     const _WoDWorldDb = demawiRepository.import("WoDWorldDb");
     const _WoDParser = demawiRepository.import("WoDParser");
     const _WoDLootDb = demawiRepository.import("WoDLootDb");
@@ -34,16 +36,19 @@
     const _File = demawiRepository.import("File");
     const _Libs = demawiRepository.import("Libs");
     const _Settings = demawiRepository.import("Settings");
+    const _ItemParser = demawiRepository.import("ItemParser");
 
     class Mod {
         static dbname = "wodDB";
         static modname = "KampfberichtArchiv";
 
         static async startMod() {
-            console.log("StartMod: KampfberichtArchiv!");
+            demawiRepository.startMod();
             const page = _util.getWindowPage();
-            if (page === "news.php") {
-                await TombolaLoot.onNewsFeed();
+            if (page === "tombola.php") {
+                await TombolaLoot.onTombolaPage();
+            } else if (page === "news.php") {
+                await TombolaLoot.onNewsPage();
             } else if (page === "items.php") {
                 const view = new URL(window.location.href).searchParams.get("view");
                 if (!view || view === "gear") await Ausruestung.start();
@@ -54,6 +59,7 @@
             } else if (page === "move.php") { // Schlachtansicht
                 await this.onMovePage();
             } else if (page === "item.php") {
+                await _ItemParser.onItemPage();
                 await ItemFunde.start();
             } else {
                 const title = document.getElementsByTagName("h1")[0];
@@ -126,12 +132,7 @@
             const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
             reportMeta.world_season = await _WoD.getMyWorldSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
 
-            const seasonElem = document.createElement("sup");
-            seasonElem.classList.add("nowod");
-            seasonElem.style.fontSize = "60%";
-            seasonElem.innerHTML = " #" + reportMeta.world_season;
-            seasonElem.title = "Die aktuelle Welt-Saisonnummer. Falls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison anlegen.";
-            title.append(seasonElem);
+            title.append(await _WoDWorldDb.createSeasonElem(reportMeta.world_season));
 
             const berichtsseiteSpeichernButton = _UI.createButton(" 💾", () => {
                 util.htmlExport();
@@ -149,16 +150,20 @@
 
             if (reportData.loc.schlacht) reportMeta.loc.schlacht = reportData.loc.schlacht; // kommt evtl. nachträglich erst herein
             if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe; // Stufe nur setzen, wenn noch nicht vorhanden.
-            const reportSource = await MyStorage.getSourceReport(reportData.reportId) || {reportId: reportData.reportId};
+            if (!reportMeta.srcs) reportMeta.srcs = {};
+            const reportSource = await MyStorage.getSourceReport(reportData.reportId) || {
+                reportId: reportData.reportId,
+                srcs: {},
+            };
             console.log("Current Report ", reportData, reportMeta, reportSource);
 
             if (title.textContent.trim().startsWith("Kampfstatistik")) {
-                reportSource.statistik = WoD.getPlainMainContent().documentElement.outerHTML;
-                reportMeta.statistik = true;
+                reportSource.stats = WoD.getPlainMainContent().documentElement.outerHTML;
+                reportMeta.srcs.stats = true;
                 reportMeta.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(document, reportMeta.success);
             } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
-                reportSource.gegenstaende = WoD.getPlainMainContent().documentElement.outerHTML;
-                reportMeta.gegenstaende = true;
+                reportSource.items = WoD.getPlainMainContent().documentElement.outerHTML;
+                reportMeta.srcs.items = true;
                 const memberList = _WoDParser.parseKampfberichtGegenstaende();
                 const reportLoot = await MyStorage.putToLoot(reportSource.reportId, memberList);
                 await MyStorage.submitLoot(reportMeta, reportLoot);
@@ -177,9 +182,9 @@
                     reportMeta.success.levels[1] = navigationLevels.children.length - 1;
                 }
                 if (!reportSource.levels) reportSource.levels = [];
-                if (!reportMeta.levels) reportMeta.levels = [];
+                if (!reportMeta.srcs.levels) reportMeta.srcs.levels = [];
                 reportSource.levels[levelNr - 1] = WoD.getPlainMainContent().documentElement.outerHTML;
-                reportMeta.levels[levelNr - 1] = true;
+                reportMeta.srcs.levels[levelNr - 1] = true;
 
                 const heldenListe = _WoDParser.getHeldenstufenOnKampfbericht();
                 if (heldenListe) { // da wir hier jetzt auch die Stufe der Helden haben, bringen wir auch von hier den Loot ein.
@@ -189,11 +194,12 @@
                 if (_WoD.isSchlacht()) reportMeta.success = _WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(document, reportMeta.success);
                 ReportView.changeView(reportMeta);
             }
-            reportMeta.space = _util.getSpace(reportSource);
-            delete reportMeta.loc.v_; // eine evtl. vorherige vorläufige vId löschen
+            reportMeta.srcs.space = _util.getSpace(reportSource);
+            delete reportMeta.loc.v_; // eine evtl. vorherige vorläufige VersionsId löschen
             await MyStorage.reportArchive.setValue(reportMeta);
-            await MyStorage.setSourceReport(reportSource);
+            await MyStorage.reportArchiveSources.setValue(reportSource);
 
+            await Location.getVersions(reportMeta, reportSource);
             if (Report.isVollstaendig(reportMeta)) await AutoFavorit.recheckAutoFavoritenForReport(reportMeta);
         }
 
@@ -326,8 +332,8 @@
                 const report = await MyStorage.reportArchive.getValue(reportSource.reportId);
                 delete report.success;
                 console.log("Bearbeite: ", report.reportId);
-                if (reportSource.statistik) {
-                    const doc = _util.getDocumentFor(reportSource.statistik);
+                if (reportSource.stats) {
+                    const doc = _util.getDocumentFor(reportSource.stats);
                     report.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(doc);
                 }
                 if (reportSource.levels && reportSource.levels[0]) {
@@ -340,8 +346,8 @@
 
         static async rewriteReportArchiveItems() {
             for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
-                if (reportSource.gegenstaende) {
-                    const doc = _util.getDocumentFor(reportSource.gegenstaende);
+                if (reportSource.items) {
+                    const doc = _util.getDocumentFor(reportSource.items);
                     const memberList = _WoDParser.parseKampfberichtGegenstaende(doc);
                     await MyStorage.putToLoot(reportSource.reportId, memberList);
                 }
@@ -353,7 +359,7 @@
             }
         }
 
-        static async syncReportLootToItemLoot() {
+        static async syncReportArchiveItems2ItemLoot() {
             for (const reportExt of await MyStorage.reportArchiveItems.getAll()) {
                 const report = await MyStorage.reportArchive.getValue(reportExt.reportId);
                 await MyStorage.submitLoot(report, reportExt);
@@ -368,66 +374,50 @@
             }
         }
 
-        static async fixReportIds() {
+        static async resyncSourcesToReports() {
             for (const report of await MyStorage.reportArchive.getAll()) {
-                if (report.loc.schlacht && !report.reportId.endsWith("S")) {
-                    await MyStorage.reportArchive.deleteValue(report.reportId);
-                    const previousId = report.reportId;
-                    report.reportId += "S";
-                    await MyStorage.reportArchive.setValue(report);
-                    console.log("Fixed reportId: " + report.reportId);
-                    const reportSource = await MyStorage.reportArchiveSources.getValue(previousId);
-                    if (reportSource) {
-                        await MyStorage.reportArchiveSources.deleteValue(previousId);
-                        reportSource.reportId = report.reportId;
-                        await MyStorage.reportArchiveSources.setValue(reportSource);
+                delete report.srcs;
+                delete report.space;
+                const reportSource = await MyStorage.reportArchiveSources.getValue(report.reportId);
+                if (reportSource) {
+                    const srcs = {};
+                    if (reportSource.stats) srcs.stats = true;
+                    if (reportSource.items) srcs.items = true;
+                    if (reportSource.levels) {
+                        srcs.levels = [];
+                        for (const cur of reportSource.levels) {
+                            srcs.levels.push(cur ? true : undefined);
+                        }
                     }
-                    const reportItems = await MyStorage.reportArchiveItems.getValue(previousId);
-                    if (reportItems) {
-                        await MyStorage.reportArchiveItems.deleteValue(previousId);
-                        reportItems.reportId = report.reportId;
-                        await MyStorage.reportArchiveItems.setValue(reportItems);
+                    if (Object.entries(srcs).length > 0) {
+                        srcs.space = JSON.stringify(reportSource).length;
+                        report.srcs = srcs;
                     }
                 }
+                await MyStorage.reportArchive.setValue(report);
             }
-        }
-
-        static async rewriteLocations() {
-            for (const report of await MyStorage.reportArchive.getAll()) {
-                if (!report.loc.schlacht) {
-                    delete report.loc.schlacht;
-                    await MyStorage.reportArchive.setValue(report);
-                }
-            }
-
         }
 
         static async onKampfberichteSeite() {
-            //await this.resyncVersions();
+            //await MyStorage.indexedDb.cloneTo("wodDB_Backup3");
+            //await this.resyncSourcesToReports();
 
-            // await this.rewriteLocations();
-            //await MyStorage.indexedDb.cloneTo("wodDB_Backup");
-            //await this.rewriteReportArchiveItems();
-            //await this.rewriteSuccessInformation();
-            //await this.rewriteSeasonIds();
-            // await this.syncReportLootToItemLoot();
-            //await MyStorage.indexedDb.deleteObjectStore("group");
+            if (false) {
+                console.log("AAAAAAAAAAA", (await MyStorage.reportArchive.getAll({
+                    index: "locName",
+                    keyRange: IDBKeyRange.only("Ahnenforschung"),
+                })).length);
+            }
 
-            //await this.rewriteReportArchiveItems();
-            //await this.rewriteExt();
-            // await AutoFavorit.checkAutoFavoriten();
-            // await Maintenance.recalculateSpace();
-            // await Maintenance.rewriteSourceFoundingsToMeta();
-            // await Maintenance.syncCheck();
-            // await this.syncCheck();
-            // this.migrate(); return;
-            // this.recreateReporting(); return;
-            //MyStorage.reportArchiveExt.cloneTo(MyStorage.reportArchiveItems);
+            //await this.syncReportLootToItemLoot();
+
+            //await MyStorage.indexedDb.deleteObjectStore("teest");
+
 
             await this.checkMaintenance();
             this.title = document.getElementsByTagName("h1")[0];
             const seasonNr = await _WoD.getMyWorldSeasonNr();
-            this.title.append(_WoDWorldDb.createSeasonElem(seasonNr));
+            this.title.append(await _WoDWorldDb.createSeasonElem(seasonNr));
 
             const wodContent = document.getElementsByClassName("content_table")[0];
             this.anchor = document.createElement("div");
@@ -459,7 +449,7 @@
             buttons.wodContentButton = _UI.createButton(" ↩", async function () {
                 thisObject.title.innerHTML = "Kampfberichte";
                 const seasonNr = await _WoD.getMyWorldSeasonNr();
-                thisObject.title.append(_WoDWorldDb.createSeasonElem(seasonNr));
+                thisObject.title.append(await _WoDWorldDb.createSeasonElem(seasonNr));
                 await ArchivView.showWodOverview();
                 thisObject.title.appendChild(buttons.archivButton);
                 thisObject.title.appendChild(buttons.statisticsButton);
@@ -501,14 +491,15 @@
                 const locName = report.loc.name;
                 let dungeonStat = dungeonStats[locName];
                 if (!dungeonStat) {
-                    dungeonStat = {};
+                    dungeonStat = {space: 0};
                     dungeonStats[locName] = dungeonStat;
                     const location = await MyStorage.location.getValue(locName);
                     dungeonStat.versions = location && location.versions ? Object.keys(location.versions).length : 0;
                 }
-                if (report.space) {
-                    memorySpace += report.space;
-                    dungeonStat.space = (dungeonStat.space || 0) + report.space;
+                if (report.srcs) {
+                    console.log(report.srcs.space);
+                    memorySpace += report.srcs.space;
+                    dungeonStat.space = (dungeonStat.space || 0) + report.srcs.space;
                 }
                 if (report.fav) dungeonStat.fav = (dungeonStat.fav || 0) + 1;
                 const success = report.success;
@@ -616,7 +607,7 @@
                     }
                     await MyStorage.reportArchive.setValue(reportMeta);
                 }
-                // TODO: Spezial: zerstörte Gegenstände einblenden!?
+                await DungeonAuswahl.addDungeonStats(curTR.children[1], reportMeta.loc.name);
                 const reportExt = await MyStorage.reportArchiveItems.getValue(reportMeta.reportId);
                 if (reportExt && reportExt.members) {
                     for (const [member, items] of Object.entries(reportExt.members)) {
@@ -656,7 +647,7 @@
                 const archiviertSpeicherTD = document.createElement("td");
                 archiviertSpeicherTD.style.textAlign = "center";
                 archiviertSpeicherTD.style.width = "40px";
-                const hatDatensaetze = reportMeta.statistik || reportMeta.gegenstaende || reportMeta.levels;
+                const hatDatensaetze = !!reportMeta.srcs;
                 const archiviertAktionenTD = document.createElement("td");
                 archiviertAktionenTD.style.textAlign = "center";
                 archiviertAktionenTD.style.width = "40px";
@@ -796,7 +787,7 @@
                             curTR.style.backgroundColor = ArchivView.COLOR_RED;
                             successLose++;
                         }
-                    } else if (reportMeta.success.levels) {
+                    } else if (levels) {
                         if (levels[0] > -1) {
                             if (levels[0] !== levels[1]) {
                                 curTR.style.backgroundColor = ArchivView.COLOR_RED;
@@ -1308,22 +1299,24 @@
     class Ausruestung {
         static async start() {
             const naechsterDungeonName = _WoDParser.getNaechsterDungeonName();
-            console.log("Füge Verbrauchsgegenstände hinzu!0", naechsterDungeonName);
             if (!naechsterDungeonName) return;
             // const ausruestungsTabelleKomplett = document.querySelectorAll("table:has(table #ausruestungstabelle_0):not(table:has(table table #ausruestungstabelle_0))")[0];
             const ausruestungsTabelle = document.querySelector("#ausruestungstabelle_2").parentElement.parentElement;
 
             let lastKey;
-            for (const cur of await MyStorage.reportArchive.getAll()) {
-                if (cur.loc.name === naechsterDungeonName) lastKey = cur.reportId;
+            for (const cur of await MyStorage.reportArchive.getAll({
+                index: ["loc.name"],
+                keyRange: [naechsterDungeonName],
+                order: "prev",
+                limit: 1,
+            })) {
+                lastKey = cur.reportId;
             }
             if (!lastKey) return;
             const items = await MyStorage.reportArchiveItems.getValue(lastKey);
-            console.log("Füge Verbrauchsgegenstände hinzu!", lastKey, items);
             if (!items) return;
             const myHeroId = _WoD.getMyHeroId();
             const myItems = items.members[myHeroId];
-            console.log("Füge Verbrauchsgegenstände hinzu!2");
             if (!myItems) return;
             const vgInfos = {};
             for (const item of myItems.equip) {
@@ -1340,7 +1333,7 @@
             for (const [itemName, vgInfo] of Object.entries(vgInfos)) {
                 if (vgInfo.used < 0) {
                     genutzteGegenstaende.push([{
-                        data: vgInfo.used + " / " + (vgInfo.count-vgInfo.used),
+                        data: vgInfo.used + " / " + (vgInfo.count - vgInfo.used),
                         style: "text-align:center;"
                     }, itemName]);
                 }
@@ -1357,61 +1350,83 @@
 
     class DungeonAuswahl {
         static async start() {
-            console.log("Dungeonauswahl start");
             const start = new Date().getTime();
             const dungeonTRs = document.querySelectorAll(".content_table > tbody > tr:not([id*=\"desc\"])");
+            const gruppeId = _WoD.getMyGroupId();
             const world = _WoD.getMyWorld();
             const worldSeasonNr = await _WoD.getMyWorldSeasonNr();
-            const gruppeId = _WoD.getMyGroupId();
             for (const tr of dungeonTRs) {
                 const dungeonName = tr.children[0].textContent.trim();
-                const [misserfolg, teilerfolg, erfolg] = await this.getSuccessLevelAndRatesForGroup(dungeonName, gruppeId);
+                const [misserfolg, teilerfolg, erfolg] = await this.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName, worldSeasonNr);
                 tr.style.backgroundColor = erfolg ? ArchivView.COLOR_GREEN : (teilerfolg ? ArchivView.COLOR_YELLOW : (misserfolg ? ArchivView.COLOR_RED : ""));
-                tr.onmouseover = async function () {
-                    if (!tr.title) {
-                        let hoverText = "Erfolge: " + erfolg + " / " + teilerfolg + " / " + misserfolg + "\n";
-                        let lootedDungeonUniquesText = "";
-                        const lootedDungeonUniques = Object.entries(await _WoDLootDb.getLootedDungeonUniques(dungeonName, world, worldSeasonNr, gruppeId));
-                        for (const [itemName, count] of lootedDungeonUniques) {
-                            lootedDungeonUniquesText += itemName + ": " + (count > 0 ? "✅ " + count : "❌") + "\n";
-                        }
-                        hoverText += "DungeonUniques (" + lootedDungeonUniques.length + "):\n" + lootedDungeonUniquesText;
-                        tr.title = hoverText;
-                    }
-                }
+                await this.addDungeonStats(tr.children[1], dungeonName);
             }
-            console.log("Dungeonauswahl Processing: " + (new Date().getTime() - start) / 1000 + "secs");
         }
 
-        static async getSuccessLevelAndRatesForGroup(dungeonName, gruppeId) {
+        static async addDungeonStats(elem, dungeonName) {
+            const thisObject = this;
+
+            _WoD.addTooltip(elem, async function () {
+                const world = _WoD.getMyWorld();
+                const worldSeasonNr = await _WoD.getMyWorldSeasonNr();
+                const gruppeId = _WoD.getMyGroupId();
+                let title = await thisObject.getErfolgstext("Gruppenerfolge (aktuelle Saison)", thisObject.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName, worldSeasonNr));
+                const gruppenErfolg = await thisObject.getErfolgstext("Gruppenerfolge (Gesamt)", thisObject.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName));
+                title += "<br>" + gruppenErfolg;
+                let lootedDungeonUniquesText = "";
+                const lootedDungeonUniques = Object.entries(await _WoDLootDb.getLootedDungeonUniques(dungeonName, world, worldSeasonNr, gruppeId));
+                for (const [itemName, count] of lootedDungeonUniques) {
+                    lootedDungeonUniquesText += "<br>" + itemName + ": " + (count > 0 ? "✅ " + count : "❌");
+                }
+                title += "<br><br><b>DungeonUniques (" + lootedDungeonUniques.length + "):</b>" + lootedDungeonUniquesText;
+                return title;
+            }, true);
+        }
+
+        static async getErfolgstext(prefix, promise) {
+            const [misserfolg, teilerfolg, erfolg] = await promise;
+            return prefix + ": " + erfolg + " / " + teilerfolg + " / " + misserfolg;
+        }
+
+        static async getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName, worldSeasonNrOpt) {
             let result = [0, 0, 0];
-            for (const report of await MyStorage.reportArchive.getAll()) {
-                if (report.gruppe_id === gruppeId && report.loc.name === dungeonName) {
-                    const cur = Report.getSuccessLevel(report);
-                    if (cur !== undefined) {
-                        result[cur + 1] += 1;
-                    }
+            for (const report of await MyStorage.reportArchive.getAll({
+                index: ["world", "gruppe_id", "loc.name", "world_season"], // index: "wgls",
+                keyRange: [world, gruppeId, dungeonName, worldSeasonNrOpt ? worldSeasonNrOpt : _Storages.MATCHER.NUMBER.ANY],
+            })) {
+                const cur = Report.getSuccessLevel(report);
+                if (cur !== undefined) {
+                    result[cur + 1] += 1;
                 }
             }
             return result;
         }
 
-        static async getSuccessLevelForReport(report) {
-            if (!report.success) return;
-
-        }
     }
 
     class TombolaLoot {
-        static async onNewsFeed() {
+        static async onNewsPage() {
             for (const cur of document.querySelectorAll(".tombola_winner tr")) {
                 const itemA = cur.querySelector("a[href*=\"/item.php?\"]");
-                if (itemA) { // kann auch einfach nur Geld sein
+                if (itemA) {
                     const tsMsecs = _WoD.getTimestampFromString(cur.children[0].textContent);
                     const itemName = itemA.textContent.trim();
+                    await this.putToLoot(itemA, tsMsecs);
                     await _WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
                 }
             }
+        }
+
+        static async onTombolaPage() {
+            const itemA = document.querySelector(".content_block a");
+            if (itemA) {
+                await this.putToLoot(itemA, new Date().getTime(), _WoD.getMyStufe());
+            }
+        }
+
+        static async putToLoot(itemA, tsMsecs, stufe) {
+            const itemName = itemA.textContent.trim();
+            await _WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
         }
     }
 
@@ -1429,18 +1444,23 @@
             const item = await _.WoDLootDb.getValue(itemName);
             const loot = (item && item.loot) || [];
 
-            const header = ["Dungeon", "Zeit", "Von", "Stufe", "Welt", "Gelootet"];
+            const header = ["Ort", "Zeit", "Von", "Stufe", "Welt", "Gelootet"];
             let content = [];
             const entries = Object.entries(loot);
             for (const [key, value] of entries) {
                 const matcher = key.match(/^(\D+)(\d+)[|]?.*$/);
                 const world = matcher[1];
                 const ts = Number(matcher[2]) * 60000; // Timestamp ist in Minuten gespeichert
-                console.log("COunt: ", value.count);
-                content.push([value.loc, ts, value.quelle, value.stufe ? {
+                content.push([value.loc, ts, value.quelle ? value.quelle : {
+                    data: "-",
+                    style: "text-align:center;"
+                }, value.stufe ? {
                     data: value.stufe,
                     style: "text-align:center;",
-                } : {data: "(" + value.stufe_ + ")", style: "text-align:center;"}, {
+                } : (value.stufe_ === undefined ? {
+                    data: "-",
+                    style: "text-align:center;"
+                } : {data: "(" + value.stufe_ + ")", style: "text-align:center;"}), {
                     data: world,
                     style: "text-align:center"
                 }, {
@@ -1520,16 +1540,9 @@
             th.style.maxWidth = "300px";
             trHead.append(th);
             th.innerText = "Berichte";
-            const maxResults = ArchivSearch.searchQuery.maxResults;
-            if (false) {
-                const allReports = await MyStorage.getReportDBMeta().getAll({
-                    index: "ts",
-                    order: "next",
-                    limit: maxResults ? maxResults : undefined,
-                });
-            }
-            const allReports = await MyStorage.getReportDBMeta().getAll("next", maxResults ? maxResults : undefined);
-            allReports.sort((a, b) => b.ts - a.ts);
+
+            //const allReports = await MyStorage.getReportDBMeta().getAll("next", maxResults ? maxResults : undefined);
+            //allReports.sort((a, b) => b.ts - a.ts);
             let switcher = false;
             const thisObject = this;
             let primaryDate = new Date();
@@ -1541,23 +1554,25 @@
             const worldsFoundPrimary = {};
             const dungeonsFound = {};
             const dungeonsFoundPrimary = {};
+            const maxResults = ArchivSearch.searchQuery.maxResults;
             let count = 0;
-            for (let idx = 0, l = allReports.length; idx < l; idx++) {
-                const reportMeta = allReports[idx];
-                if (!thisObject.isValidDate(reportMeta)) continue;
-                if (!thisObject.isValidFavorit(reportMeta)) continue;
-                if (!thisObject.isValidType(reportMeta)) continue;
+            await MyStorage.getReportDBMeta().getAll({
+                index: "ts",
+                order: "prev",
+            }, async function (reportMeta, idx) {
+                if (!thisObject.isValidDate(reportMeta)) return;
+                if (!thisObject.isValidFavorit(reportMeta)) return;
+                if (!thisObject.isValidType(reportMeta)) return;
                 worldsFound[reportMeta.world] = true;
                 if (thisObject.isValidDate(reportMeta, primaryDate)) worldsFoundPrimary[reportMeta.world] = true;
-                if (!thisObject.isValidWorld(reportMeta)) continue;
+                if (!thisObject.isValidWorld(reportMeta)) return;
                 groupsFound[reportMeta.gruppe] = true;
                 if (thisObject.isValidDate(reportMeta, primaryDate)) groupsFoundPrimary[reportMeta.gruppe] = true;
-                if (!thisObject.isValidGroup(reportMeta)) continue;
-                const locNameFull = await this.getFullLocationName(reportMeta);
+                if (!thisObject.isValidGroup(reportMeta)) return;
+                const locNameFull = await thisObject.getFullLocationName(reportMeta);
                 dungeonsFound[reportMeta.loc.name] = locNameFull;
                 if (thisObject.isValidDate(reportMeta, primaryDate)) dungeonsFoundPrimary[reportMeta.loc.name] = locNameFull;
-                if (!thisObject.isValidDungeon(reportMeta)) continue;
-                if (maxResults && count >= maxResults) continue;
+                if (!thisObject.isValidDungeon(reportMeta)) return;
                 count++;
                 switcher = !switcher;
                 const tr = document.createElement("tr");
@@ -1569,12 +1584,13 @@
                 dateTD.style.textAlign = "center";
                 const nameTD = document.createElement("td");
                 tr.append(nameTD);
-                nameTD.innerText = await this.getFullLocationName(reportMeta);
+                nameTD.innerText = await thisObject.getFullLocationName(reportMeta);
                 const actionsTD = document.createElement("td");
                 tr.append(actionsTD);
                 actionsTD.style.textAlign = "center";
                 ArchivSearch.createReportActions(reportMeta, actionsTD, idx);
-            }
+                if (maxResults && count >= maxResults) return false;
+            });
             dungeonTH.innerText = "Dungeon (" + count + ")";
             this.updateDungeonSelector(dungeonsFound, dungeonsFoundPrimary);
             this.updateGroupSelector(groupsFound, groupsFoundPrimary);
@@ -2091,10 +2107,10 @@
                             addOnclick(a => ArchivSearch.showArchiv());
                             break;
                         case "Statistik":
-                            addOnclick(reportSource.statistik ? a => ArchivSearch.showPage(reportSource, reportSource.statistik, ArchivView.PAGE_TYPE_STAT) : null);
+                            addOnclick(reportSource.stats ? a => ArchivSearch.showPage(reportSource, reportSource.stats, ArchivView.PAGE_TYPE_STAT) : null);
                             break;
                         case "Gegenstände":
-                            addOnclick(reportSource.gegenstaende ? a => ArchivSearch.showPage(reportSource, reportSource.gegenstaende, ArchivView.PAGE_TYPE_ITEMS) : null);
+                            addOnclick(reportSource.items ? a => ArchivSearch.showPage(reportSource, reportSource.items, ArchivView.PAGE_TYPE_ITEMS) : null);
                             break;
                         case "Bericht":
                             const level = reportSource.levels && reportSource.levels[0];
@@ -2145,41 +2161,47 @@
             reportIdInput.name = "report_id[" + idx + "]";
 
             const isDirectLoadable = document.querySelector("input[value=\"" + realReportId + "\"]");
-
+            const reportMetaSource = reportMeta.srcs || {};
             const statistik = document.createElement("input");
             result.append(statistik);
-            statistik.value = (!reportMeta.statistik && isDirectLoadable ? this.#loadingSymbol : "") + "Statistik";
+            statistik.value = (!reportMetaSource.stats && isDirectLoadable ? this.#loadingSymbol : "") + "Statistik";
             statistik.type = "submit";
             if (isDirectLoadable) statistik.name = "stats[" + idx + "]";
-            statistik.className = reportMeta.statistik || isDirectLoadable ? "button clickable" : "button_disabled";
+            statistik.className = reportMetaSource.stats || isDirectLoadable ? "button clickable" : "button_disabled";
             statistik.onclick = async function (e) {
-                if (!reportMeta.statistik && !isDirectLoadable) e.preventDefault();
-                const reportSource = await getReportSource();
-                if (reportSource && reportSource.statistik) await ArchivSearch.showPage(reportSource, reportSource.statistik, ArchivView.PAGE_TYPE_STAT);
+                if (reportMetaSource.stats) {
+                    e.preventDefault();
+                    const reportSource = await getReportSource();
+                    if (reportSource && reportSource.stats) await ArchivSearch.showPage(reportSource, reportSource.stats, ArchivView.PAGE_TYPE_STAT);
+                }
             }
 
             const gegenstaende = document.createElement("input");
             result.append(gegenstaende);
-            gegenstaende.value = (!reportMeta.gegenstaende && isDirectLoadable ? this.#loadingSymbol : "") + "Gegenstände";
+            gegenstaende.value = (!reportMetaSource.items && isDirectLoadable ? this.#loadingSymbol : "") + "Gegenstände";
             gegenstaende.type = "submit";
             if (isDirectLoadable) gegenstaende.name = "items[" + idx + "]";
-            gegenstaende.className = reportMeta.gegenstaende || isDirectLoadable ? "button clickable" : "button_disabled";
+            gegenstaende.className = reportMetaSource.items || isDirectLoadable ? "button clickable" : "button_disabled";
             gegenstaende.onclick = async function (e) {
-                if (!reportMeta.gegenstaende && !isDirectLoadable) e.preventDefault();
-                const reportSource = await getReportSource();
-                if (reportSource && reportSource.gegenstaende) await ArchivSearch.showPage(reportSource, reportSource.gegenstaende, ArchivView.PAGE_TYPE_ITEMS);
+                if (reportMetaSource.items) {
+                    e.preventDefault();
+                    const reportSource = await getReportSource();
+                    if (reportSource && reportSource.items) await ArchivSearch.showPage(reportSource, reportSource.items, ArchivView.PAGE_TYPE_ITEMS);
+                }
             }
 
             const bericht = document.createElement("input");
             result.append(bericht);
-            bericht.value = (!reportMeta.levels && isDirectLoadable ? this.#loadingSymbol : "") + "Bericht";
+            bericht.value = (!reportMetaSource.levels && isDirectLoadable ? this.#loadingSymbol : "") + "Bericht";
             bericht.type = "submit";
             if (isDirectLoadable) bericht.name = "details[" + idx + "]";
-            bericht.className = reportMeta.levels || isDirectLoadable ? "button clickable" : "button_disabled";
+            bericht.className = reportMetaSource.levels || isDirectLoadable ? "button clickable" : "button_disabled";
             bericht.onclick = async function (e) {
-                if (!reportMeta.levels && !isDirectLoadable) e.preventDefault();
-                const reportSource = await getReportSource();
-                if (reportSource && reportSource.levels) await ArchivSearch.showPage(reportSource, reportSource.levels[0], ArchivView.PAGE_TYPE_REPORT);
+                if (reportMetaSource.levels) {
+                    e.preventDefault();
+                    const reportSource = await getReportSource();
+                    if (reportSource && reportSource.levels) await ArchivSearch.showPage(reportSource, reportSource.levels[0], ArchivView.PAGE_TYPE_REPORT);
+                }
             }
 
             return result;
@@ -2203,20 +2225,20 @@
         }
 
         /**
-         * Aktualisiert .statistik, .gegenstaende, .levels
+         * Aktualisiert .stats, .items, .levels
          */
         static async rewriteSourceFoundingsToMeta() {
             console.log("rewriteSourceFoundingsToMeta... start");
             for (const report of await MyStorage.reportArchive.getAll()) {
                 const reportSource = await MyStorage.reportArchiveSources.getValue(report.reportId) || {};
-                report.statistik = !!reportSource.statistik;
-                report.gegenstaende = !!reportSource.gegenstaende;
+                report.srcs.stats = !!reportSource.stats;
+                report.srcs.items = !!reportSource.items;
                 if (!reportSource.levels) {
-                    delete report.levels;
+                    delete report.srcs.levels;
                 } else {
-                    report.levels = [];
+                    report.srcs.levels = [];
                     for (let i = 0, l = reportSource.levels.length; i < l; i++) {
-                        report.levels[i] = !!reportSource.levels[i];
+                        report.srcs.levels[i] = !!reportSource.levels[i];
                     }
                 }
                 await MyStorage.reportArchive.setValue(report);
@@ -2243,25 +2265,25 @@
                         failures++;
                     }
                 }
-                if (!!reportMeta.statistik !== !!reportSource.statistik) {
-                    console.error("ReportMeta-Fehler: " + reportId + " Statistik: " + !!reportMeta.statistik + " != " + !!reportSource.statistik);
+                if (!!reportMeta.srcs.stats !== !!reportSource.stats) {
+                    console.error("ReportMeta-Fehler: " + reportId + " Statistik: " + !!reportMeta.srcs.stats + " != " + !!reportSource.stats);
                     failures++;
                 }
-                if (!!reportMeta.gegenstaende !== !!reportSource.gegenstaende) {
-                    console.error("ReportMeta-Fehler: " + reportId + " Gegenstände: " + !!reportMeta.statistik + " != " + !!reportSource.statistik);
+                if (!!reportMeta.srcs.items !== !!reportSource.items) {
+                    console.error("ReportMeta-Fehler: " + reportId + " Gegenstände: " + !!reportMeta.srcs.items + " != " + !!reportSource.items);
                     failures++;
                 }
-                if (!!reportMeta.levels !== !!reportSource.levels) {
-                    console.error("ReportMeta-Fehler: " + reportId + " LevelsExist: " + !!reportMeta.levels.length + " != " + !!reportSource.levels.length);
+                if (!!reportMeta.srcs.levels !== !!reportSource.levels) {
+                    console.error("ReportMeta-Fehler: " + reportId + " LevelsExist: " + !!reportMeta.srcs.levels.length + " != " + !!reportSource.levels.length);
                     failures++;
-                } else if (reportMeta.levels) {
-                    if (reportMeta.levels.length !== reportSource.levels.length) {
-                        console.error("ReportMeta-Fehler: " + reportId + " LevelLength: " + !!reportMeta.levels.length + " != " + !!reportSource.levels.length);
+                } else if (reportMeta.srcs.levels) {
+                    if (reportMeta.srcs.levels.length !== reportSource.levels.length) {
+                        console.error("ReportMeta-Fehler: " + reportId + " LevelLength: " + !!reportMeta.srcs.levels.length + " != " + !!reportSource.levels.length);
                         failures++;
                     }
-                    for (let i = 0, l = reportMeta.levels.length; i < l; i++) {
+                    for (let i = 0, l = reportMeta.srcs.levels.length; i < l; i++) {
                         const levelSource = reportSource.levels[i];
-                        const levelMeta = reportMeta.levels[i];
+                        const levelMeta = reportMeta.srcs.levels[i];
                         if (!!levelSource !== !!levelMeta) {
                             console.error("ReportMeta-Fehler: " + reportId + " Level: " + !!levelMeta + " != " + !!levelSource);
                             failures++;
@@ -2291,7 +2313,7 @@
                     } else {
                         return -1;
                     }
-                } else if (reportMeta.success.levels) {
+                } else if (levels) {
                     if (levels[0] > -1) {
                         if (levels[0] !== levels[1]) {
                             return -1;
@@ -2314,14 +2336,14 @@
          * onlyFullSuccess 'false': es müssen die Level geladen sein, die man auch erreicht hat.
          */
         static isVollstaendig(report, onlyFullSuccess) {
-            if (!report.statistik || !report.gegenstaende || !report.levels || !report.success) return false;
+            if (!report.srcs || !report.srcs.stats || !report.srcs.items || !report.srcs.levels || !report.success) return false;
             return this.getMissingReportSites(report, onlyFullSuccess).length === 0;
         }
 
         static getMissingReportSites(report, onlyFullSuccess) {
             const fehlend = [];
-            if (!report.statistik) fehlend.push("S");
-            if (!report.gegenstaende) fehlend.push("G");
+            if (!report.srcs || !report.srcs.stats) fehlend.push("S");
+            if (!report.srcs || !report.srcs.items) fehlend.push("G");
             for (const lv of this.getMissingReportSitesLevel(report, onlyFullSuccess)) {
                 fehlend.push(lv);
             }
@@ -2329,7 +2351,7 @@
         }
 
         static isVollstaendigLevel(report, onlyFullSuccess) {
-            if (!report.levels || !report.success) return false;
+            if (!report.srcs || !report.srcs.levels || !report.success) return false;
             return this.getMissingReportSitesLevel(report, onlyFullSuccess).length === 0;
         }
 
@@ -2339,14 +2361,14 @@
                 delete report.success[1];
                 MyStorage.reportArchive.setValue(report);
             }
-            if (!report || !report.success || !report.levels || !report.success.levels) {
+            if (!report || !report.success || !report.srcs || !report.srcs.levels || !report.success.levels) {
                 fehlend.push("Lx");
             } else {
                 let maxLevel = report.success.levels[1];
                 const successLevels = report.success.levels[0];
                 if (!onlyFullSuccess && successLevels !== undefined) maxLevel = Math.min(successLevels + 1, maxLevel); // evtl. nicht erfolgreich, dann müssen auch nicht alle angefordert sein
                 for (var i = 0, l = maxLevel; i < l; i++) {
-                    if (!report.levels[i]) fehlend.push("L" + (i + 1));
+                    if (!report.srcs.levels[i]) fehlend.push("L" + (i + 1));
                 }
             }
             return fehlend;
@@ -2359,10 +2381,7 @@
         static async deleteSources(reportId) {
             await MyStorage.reportArchiveSources.deleteValue(reportId);
             const report = await MyStorage.reportArchive.getValue(reportId);
-            delete report.statistik;
-            delete report.gegenstaende;
-            delete report.levels;
-            delete report.space;
+            delete report.srcs;
             await MyStorage.reportArchive.setValue(report);
             if (report.favAuto) await AutoFavorit.recheckAutoFavoritenForReport(report);
         }
@@ -2432,7 +2451,7 @@
                         line2.push({data: successMarker, style: "height:5px"});
                         line3.push(koMarker ? {data: koMarker, style: "vertical-align:top"} : "");
                     }
-                    const loadingText = report.levels[levelNr - 1] ? "" : (levelWithContent === undefined ? "▼?" : (levelWithContent ? "▼" : ""));
+                    const loadingText = report.srcs.levels[levelNr - 1] ? "" : (levelWithContent === undefined ? "▼?" : (levelWithContent ? "▼" : ""));
                     const needLoading = loadingText ? {
                         data: loadingText,
                         style: "font-size: 12px;cursor:help;",
@@ -2515,7 +2534,10 @@
          */
         static async recheckAutoFavoritenForReport(report) {
             const locName = report.loc.name;
-            const reports = (await MyStorage.reportArchive.getAll()).filter(current => current.loc.name === locName);
+            const reports = (await MyStorage.reportArchive.getAll({
+                index: ["loc.name"],
+                keyRange: [locName],
+            }));
             await this.#checkAllAutoFavoritenOn(reports);
         }
 
@@ -2706,11 +2728,12 @@
             const loc = report.loc;
             if (loc.v) return [loc.v];
             if (loc.schlacht) return [1];
-            if (!report || !report.success || !report.levels || !report.success.levels) return [];
+            if (!report || !report.success || !report.srcs.levels || !report.success.levels) return [];
 
             let versionId;
             let isComplete;
-            if (false && loc.v_) { // Vorläufige Versionszweisung prüfen ob sie noch aktuell sein kann. Ist sie sofern keine weitere Version hinzugefügt wurde
+
+            if (loc.v_) { // Vorläufige Versionszweisung prüfen ob sie noch aktuell sein kann. Ist sie sofern keine weitere Version hinzugefügt wurde
                 const versionCount = await Location.getVersionCount(loc.name);
                 if (loc.v_.cnt === versionCount) return loc.v_.vs; // es ist keine weitere Version hinzugekommen
                 versionId = loc.v_.vId;
@@ -2863,10 +2886,25 @@
         }
 
         static indexedDb = new _Storages.IndexedDb("WoDReportArchiv", Mod.dbname);
+
         /**
          * Meta-Daten für einen Kammpfbericht
          */
-        static reportArchive = this.checkValidReportId(this.indexedDb.createObjectStore("reportArchive", "reportId"));
+        static reportArchive = this.checkValidReportId(this.indexedDb.createObjectStore("reportArchive", "reportId", {
+            ts: "ts",
+            locName: "loc.name",
+            //wgls: ["world", "gruppe_id", "loc.name", "world_season"],
+        }));
+        static {
+            if (false) {
+                this.reportArchive.deleteIndex("wgls");
+                this.reportArchive.deleteIndex("1");
+                this.reportArchive.deleteIndex("2");
+                this.reportArchive.deleteIndex("3");
+                this.reportArchive.deleteIndex("4");
+                this.reportArchive.deleteIndex("5");
+            }
+        }
         /**
          * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
          * Resultat aus WoDParser.parseKampfberichtGegenstaende
@@ -2919,9 +2957,9 @@
 
             for (const [itemName, itemDef] of Object.entries(loots)) {
                 if (itemDef.stufe) {
-                    await _WoDLootDb.reportLootSafe(itemName, itemDef.count, report.loc.name, report.locVersion, report.ts, report.world, report.world_season, itemDef.stufe, report.gruppe_id, report.gruppe);
+                    await _WoDLootDb.reportLootSafe(itemName, itemDef.count, report.loc.name, report.loc.v, report.ts, report.world, report.world_season, itemDef.stufe, report.gruppe_id, report.gruppe);
                 } else {
-                    await _WoDLootDb.reportLootUnsafe(itemName, itemDef.count, report.loc.name, report.locVersion, report.ts, report.world, report.world_season, report.stufe, report.gruppe_id, report.gruppe);
+                    await _WoDLootDb.reportLootUnsafe(itemName, itemDef.count, report.loc.name, report.loc.v, report.ts, report.world, report.world_season, report.stufe, report.gruppe_id, report.gruppe);
                 }
             }
         }
@@ -3172,8 +3210,8 @@
                 zip.file(filename, exportData);
             }
 
-            if (reportSources.statistik) addHTML("Statistik.html", reportSources.statistik);
-            if (reportSources.gegenstaende) addHTML("Gegenstaende.html", reportSources.gegenstaende);
+            if (reportSources.statistik) addHTML("Statistik.html", reportSources.stats);
+            if (reportSources.items) addHTML("Gegenstaende.html", reportSources.items);
             if (reportSources.levels) {
                 for (let i = 0, l = reportSources.levels.length; i < l; i++) {
                     const level = reportSources.levels[i];
