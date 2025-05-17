@@ -15,7 +15,7 @@
 // @include        https://*/wod/spiel/rewards/tombola.php*
 // @require        repo/DemawiRepository.js?version=1.0.4
 // @require        libs/jszip.min.js
-// @require	       https://code.jquery.com/jquery-3.7.1.min.js
+// @require        https://code.jquery.com/jquery-3.7.1.min.js
 // @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
 // ==/UserScript==
 // *************************************************************
