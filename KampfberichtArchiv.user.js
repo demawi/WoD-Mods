@@ -13,6 +13,7 @@
 // @include        https://*/wod/spiel/hero/items.php*
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
+// @include        http*://*.world-of-dungeons.de*
 // @require        repo/DemawiRepository.js?version=1.0.4
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js
@@ -45,32 +46,48 @@
         static dbname = "wodDB";
         static modname = "KampfberichtArchiv";
 
+        static testIt() {
+            return "abc";
+        }
+
         static async startMod() {
             demawiRepository.startMod();
+            _WoDWorldDb.placeSeasonElem();
             const page = _util.getWindowPage();
-            if (page === "tombola.php") {
-                await TombolaLoot.onTombolaPage();
-            } else if (page === "news.php") {
-                await TombolaLoot.onNewsPage();
-            } else if (page === "items.php") {
-                const view = new URL(window.location.href).searchParams.get("view");
-                if (!view || view === "gear") await Ausruestung.start();
-            } else if (page === "dungeon.php") {
-                await DungeonAuswahl.start();
-            } else if (page === "heroes.php") {
-                await _WoDWorldDb.onMeineHeldenAnsicht();
-            } else if (page === "move.php") { // Schlachtansicht
-                await this.onMovePage();
-            } else if (page === "item.php") {
-                await _ItemParser.onItemPage();
-                await ItemFunde.start();
-            } else {
-                const title = document.getElementsByTagName("h1")[0];
-                if (title.textContent.trim() === "Kampfberichte") {
-                    await ArchivView.onKampfberichteSeite();
-                } else {
-                    await this.onReportSite();
-                }
+            console.log("Page: '" + page + "'")
+            switch (page) {
+                case "tombola.php":
+                    await TombolaLoot.onTombolaPage();
+                    break;
+                case "": // Login-/News-Page
+                case "news.php":
+                    await TombolaLoot.onNewsPage();
+                    break;
+                case "items.php":
+                    const view = new URL(window.location.href).searchParams.get("view");
+                    if (!view || view === "gear") await Ausruestung.start();
+                    break;
+                case "dungeon.php":
+                    await DungeonAuswahl.start();
+                    break;
+                case "heroes.php":
+                    await _WoDWorldDb.onMeineHeldenAnsicht();
+                    break;
+                case "move.php":
+                    await this.onMovePage();
+                    break;
+                case "item.php":
+                    await _ItemParser.onItemPage();
+                    await ItemFunde.start();
+                    break;
+                case "report.php":
+                    const title = document.getElementsByTagName("h1")[0];
+                    if (title.textContent.trim() === "Kampfberichte") {
+                        await ArchivView.onKampfberichteSeite();
+                    } else {
+                        await this.onReportSite();
+                    }
+                    break;
             }
         }
 
@@ -402,7 +419,7 @@
         }
 
         static async onKampfberichteSeite() {
-            //await MyStorage.indexedDb.cloneTo("wodDB_Backup3");
+            //await MyStorage.indexedDb.cloneTo("wodDB_Backup4");
             //await this.resyncSourcesToReports();
 
             if (false) {
@@ -420,7 +437,6 @@
             await this.checkMaintenance();
             this.title = document.getElementsByTagName("h1")[0];
             const seasonNr = await _WoD.getMyWorldSeasonNr();
-            this.title.append(await _WoDWorldDb.createSeasonElem(seasonNr));
 
             const wodContent = document.getElementsByClassName("content_table")[0];
             this.anchor = document.createElement("div");
@@ -452,7 +468,6 @@
             buttons.wodContentButton = _UI.createButton(" ↩", async function () {
                 thisObject.title.innerHTML = "Kampfberichte";
                 const seasonNr = await _WoD.getMyWorldSeasonNr();
-                thisObject.title.append(await _WoDWorldDb.createSeasonElem(seasonNr));
                 await ArchivView.showWodOverview();
                 thisObject.title.appendChild(buttons.archivButton);
                 thisObject.title.appendChild(buttons.statisticsButton);
@@ -2993,15 +3008,6 @@
             }
         }
 
-        // Sicher für concurrent modification
-        static forEachSafe(array, fn) {
-            const newArray = Array();
-            for (var i = 0, l = array.length; i < l; i++) {
-                newArray.push(array[i]);
-            }
-            newArray.forEach(a => fn(a));
-        }
-
         static hatClassName(node, className) {
             return node.classList && node.classList.contains(className);
         }
@@ -3017,24 +3023,28 @@
             const remove = node => {
                 if (node) node.parentElement.removeChild(node);
             }
-            remove(myDocument.getElementById("gadgettable-left-td")); // existiert in nem Popup nicht
-            remove(myDocument.getElementById("gadgettable-right-td")); // existiert in nem Popup nicht
-            let mainContent = myDocument.getElementsByClassName("gadget main_content")[0];
-            if (mainContent) {
-                util.forEachSafe(mainContent.parentElement.children, cur => {
-                    if (cur !== mainContent) remove(cur);
+
+            const gadgetTable = myDocument.querySelector("#gadgettable tbody");
+            if (gadgetTable) { // existiert in nem Popup nicht
+                _util.forEachSafe(gadgetTable.children, curTR => {
+                    if (!curTR.querySelector("div#main_content")) {
+                        remove(curTR);
+                    } else { //
+                        _util.forEachSafe(curTR.children, curTD => {
+                            if (!curTD.querySelector("div#main_content")) remove(curTD);
+                        });
+                    }
                 });
             }
 
-            const removeNoWodNodes = node => {
-                // mit querySelector nur die äußeren Knoten abgreifen: .nowod:not(.nowod .nowod)
-                util.forEachSafe(node.children, cur => {
-                    if (cur.classList.contains("nowod")) {
-                        remove(cur);
-                    } else removeNoWodNodes(cur);
-                });
+            const removeClassNodes = function (node, className) {
+                for (const cur of node.querySelectorAll("." + className + ":not(." + className + " ." + className + ")")) {
+                    remove(cur);
+                }
             }
-            removeNoWodNodes(myDocument.documentElement);
+            removeClassNodes(myDocument.documentElement, "nowod");
+            removeClassNodes(myDocument.documentElement, "tutorial");
+            removeClassNodes(myDocument.documentElement, "intro_open");
 
             const tooltip = myDocument.getElementsByClassName("tooltip")[0];
             if (tooltip) remove(tooltip);
@@ -3164,7 +3174,7 @@
             }
 
             function buttonReplace(buttonName, text, href) {
-                util.forEachSafe(myDocument.getElementsByName(buttonName), a => buttonReplaceWithElement(a, text, href));
+                _util.forEachSafe(myDocument.getElementsByName(buttonName), a => buttonReplaceWithElement(a, text, href));
             }
 
             var mainNavigationButton = myDocument.getElementsByName("stats[0]")[0];
@@ -3203,7 +3213,7 @@
         }
 
         static async htmlExportFullReportAsZip(reportId) {
-            const zip = await _Libs.getJSZip();
+            const zip = new JSZip();
             const reportSources = await MyStorage.getSourceReport(reportId);
             const reportMeta = await MyStorage.reportArchive.getValue(reportId);
 
@@ -3213,7 +3223,7 @@
                 zip.file(filename, exportData);
             }
 
-            if (reportSources.statistik) addHTML("Statistik.html", reportSources.stats);
+            if (reportSources.stats) addHTML("Statistik.html", reportSources.stats);
             if (reportSources.items) addHTML("Gegenstaende.html", reportSources.items);
             if (reportSources.levels) {
                 for (let i = 0, l = reportSources.levels.length; i < l; i++) {
@@ -3230,6 +3240,11 @@
 
     }
 
-    Mod.startMod();
+    try {
+        Mod.startMod();
+    } catch (e) {
+        console.error(e);
+        throw e;
+    }
 
 })();

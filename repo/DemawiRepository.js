@@ -427,9 +427,9 @@ class demawiRepository {
                 for (var i = 0, l = objectStoresRead.length; i < l; i++) {
                     let readFrom = objectStoresRead[i];
                     let writeTo = objectStoresWrite[i];
-                    for (const cur of await readFrom.getAll(false)) {
+                    await readFrom.getAll(false, async cur => {
                         await writeTo.setValue(cur);
-                    }
+                    })
                 }
                 console.log("Clone " + this.dbname + " to " + dbNameTo + "... finished!");
             }
@@ -637,11 +637,13 @@ class demawiRepository {
             async getValue(dbObjectId) {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
-                    let objectStore = await thisObject.connect(false);
+                    const objectStore = await thisObject.connect(false);
                     const request = objectStore.get(dbObjectId);
                     request.onsuccess = function (event) {
                         const result = event.target.result;
-                        resolve(result);
+                        // cloneInto wird für FF benötigt, damit wir das Objekt in die same-origin bekommen
+                        // ansonsten ist es wohl auf die Domain der indexdb geeicht und wir können es mit dem userScript nicht wirklich nutzen
+                        resolve(cloneInto(result, {}));
                     };
                 });
             }
@@ -662,18 +664,7 @@ class demawiRepository {
              * Liefert ein Array über alle vorhandenen Objekte.
              */
             async getAllKeys() {
-                const thisObject = this;
-                return new Promise(async (resolve, reject) => {
-                    let connection = await thisObject.indexedDb.getConnection();
-                    let transaction = connection.transaction(this.storageId, "readwrite");
-                    let objectStore = transaction.objectStore(this.storageId);
-                    const request = objectStore.getAllKeys();
-
-                    request.onsuccess = function (event) {
-                        const result = event.target.result;
-                        resolve(result);
-                    };
-                });
+                return await this.#doSearch(queryOpt, iterationOpt, "getAllKeys");
             }
 
             /**
@@ -713,8 +704,8 @@ class demawiRepository {
              *     keyRange: [_Storages.MATCHER.NUMBER.ANY, "Ahnenforschung"], // [IDBKeyRange|Array] der Array definiert Matches mit der gleichen Länge wie der Index-Array. Es können aber auch Wildcards aus _Storages.Matcher genutzt werden.
              *     keyRangeFrom: [1, "Ahnenforschung"] // [Array] wird als lowerBound verwendet. Sofern die untere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
              *     keyRangeTo: [1231233, "Balesh"], // [Array] wird als upperBound verwendet. Sofern die obere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
-             *     lowerOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
-             *     upperOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
+             *     keyRangeFromOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
+             *     keyRangeToOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
              *     limit: 20, // [int] eine Limitierung der Ergebnisse
              * }
              * @param iterationOpt @type Function(object, idx): die Objekte werden der Reihe nach in die Methode reingereicht, bei false wird die Schleife abgebrochen oder bei gesetztem query-limit
@@ -722,6 +713,10 @@ class demawiRepository {
              *         wenn iteration gesetzt ist, werden die Objekte einem nach dem anderen in die iteration-Funktion reingereicht iteration(object, idx), der Rückgabewert von getAll ist dann nicht gesetzt.
              */
             async getAll(queryOpt, iterationOpt) {
+                return await this.#doSearch(queryOpt, iterationOpt, "getAll");
+            }
+
+            async #doSearch(queryOpt, iterationOpt, retrieveFnName) {
                 if (!queryOpt) {
                     if (queryOpt !== false) console.warn("getAll ohne query-Parametern kann bei großen Datenbanken zu Problemen führen")
                     queryOpt = {};
@@ -731,10 +726,10 @@ class demawiRepository {
                 const transaction = connection.transaction(this.storageId, "readwrite");
                 let target = transaction.objectStore(this.storageId);
                 if (queryOpt.index) target = await this.#getQueryIndex(target, queryOpt.index);
-                if (queryOpt.keyRange || queryOpt.keyRangeFrom || queryOpt.keyRangeTo) queryOpt.keyRange = this.#getQueryKeyRange(queryOpt.keyRange, queryOpt.keyRangeFrom, queryOpt.keyRangeTo, queryOpt.lowerOpen, queryOpt.upperOpen);
+                if (queryOpt.keyRange || queryOpt.keyRangeFrom || queryOpt.keyRangeTo) queryOpt.keyRange = this.#getQueryKeyRange(queryOpt.keyRange, queryOpt.keyRangeFrom, queryOpt.keyRangeTo, queryOpt.keyRangeFromOpen, queryOpt.keyRangeToOpen);
                 if (iterationOpt) return await this.#openCursorIteration(target.openCursor(queryOpt.keyRange, queryOpt.order), iterationOpt, queryOpt.limit);
                 if (queryOpt.order) return await this.#openCursorFetch(target.openCursor(queryOpt.keyRange, queryOpt.order), queryOpt.limit);
-                return this.awaitRequest(target.getAll(queryOpt.keyRange, queryOpt.limit));
+                return this.awaitRequest(target[retrieveFnName](queryOpt.keyRange, queryOpt.limit));
             }
 
             /**
@@ -808,7 +803,7 @@ class demawiRepository {
                     keyRangeToOpt = keyRangeSingle;
                 } else {
                     if (keyRangeFromOpt) hasWildcards = keyRangeFromOpt.filter(a => typeof a === "object").length > 0;
-                    if (!hasWildcards) hasWildcards = keyRangeToOpt.filter(a => typeof a === "object").length > 0;
+                    if (!hasWildcards && keyRangeToOpt) hasWildcards = keyRangeToOpt.filter(a => typeof a === "object").length > 0;
                 }
 
                 if (hasWildcards) {
@@ -840,13 +835,21 @@ class demawiRepository {
                         if (upperBound.length > 0) {
                             return IDBKeyRange.bound(lowerBound, upperBound, lowerOpen, upperOpen);
                         } else {
-                            return IDBKeyRange.lowerBound(lowerBound, upperBound, lowerOpen);
+                            return IDBKeyRange.lowerBound(lowerBound, lowerOpen);
                         }
                     } else {
-                        return IDBKeyRange.upperBound(lowerBound, upperBound, upperOpen);
+                        return IDBKeyRange.upperBound(upperBound, upperOpen);
                     }
                 } else { // no wildcards, die Arrays werden 1:1 übernommen
-                    return IDBKeyRange.bound(keyRangeFromOpt, keyRangeToOpt, lowerOpen, upperOpen);
+                    if (keyRangeFromOpt) {
+                        if (keyRangeToOpt) {
+                            return IDBKeyRange.bound(keyRangeFromOpt, keyRangeToOpt, lowerOpen, upperOpen);
+                        } else {
+                            return IDBKeyRange.lowerBound(keyRangeFromOpt, lowerOpen);
+                        }
+                    } else {
+                        return IDBKeyRange.upperBound(keyRangeToOpt, upperOpen);
+                    }
                 }
             }
 
@@ -856,11 +859,13 @@ class demawiRepository {
              */
             async #openCursorIteration(request, iteration, limit) {
                 limit = limit || Number.MAX_VALUE;
+                const _this = this;
                 return new Promise((result, reject) => {
                     let i = 0;
                     request.onsuccess = async function (event) {
                         const cursor = event.target.result;
-                        if (!cursor || i >= limit || await iteration(cursor.value, i) === false) {
+                        // können kein await auf die Iteration setzen, da ansonsten die Transaktion des Cursors beendet wird.
+                        if (!cursor || i >= limit || _this.#checkIteration(iteration, cursor.value, i) === false) {
                             result(); // just finish promise
                         } else {
                             i++;
@@ -868,6 +873,13 @@ class demawiRepository {
                         }
                     };
                 });
+            }
+
+            #checkIteration(fn, value, index) {
+                const result = fn(value, index);
+                // TODO: wieder scharf schalten, wenn es an allen Stellen gefixt ist
+                // if (result instanceof Promise) throw new Error("Eine Iterations-Funktion darf kein Promise liefern!");
+                return result;
             }
 
             /**
@@ -905,10 +917,9 @@ class demawiRepository {
             }
 
             async copyTo(toObjectStore) {
-                for (const curKey of await this.getAllKeys()) {
-                    const object = await this.getValue(curKey);
+                await this.getAll(false, async object => {
                     await toObjectStore.setValue(object);
-                }
+                })
             }
 
             async cloneTo(toObjectStore, overwrite) {
@@ -1292,33 +1303,48 @@ class demawiRepository {
                 const myWorld = _.WoD.getMyWorld();
                 const meineHelden = _.WoDParser.getMyHerosFromOverview();
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
-                const [season, seasonNr] = await this.getWorldSeason(myWorld, meineHelden, true);
-                title.append(await this.createSeasonElem(seasonNr));
+                const [season, seasonNr] = await this.getWorldSeason(myWorld, meineHelden, true); // report World-Season
+            }
+        }
+
+        static async placeSeasonElem() {
+            const nameElem = document.querySelector(".hero_full");
+            if (nameElem) {
+                nameElem.style.position = "relative";
+                const seasonElem = await this.createSeasonElem();
+                seasonElem.style.fontSize = "120%";
+                seasonElem.style.position = "absolute";
+                seasonElem.style.top = "0px";
+                seasonElem.style.right = "0px";
+                seasonElem.style.zIndex = "100";
+                nameElem.parentElement.append(seasonElem);
             }
         }
 
         static async createSeasonElem(seasonNr) {
-            seasonNr = seasonNr || await _WoD.getMyWorldSeasonNr();
+            seasonNr = seasonNr || await _.WoD.getMyWorldSeasonNr();
             const seasonElem = document.createElement("sup");
             seasonElem.classList.add("nowod");
-            seasonElem.style.opacity = "0.5";
             seasonElem.style.position = "relative";
+            seasonElem.style.opacity = "0.7";
             seasonElem.style.fontSize = "60%";
+            seasonElem.style.display = "inline-block";
             seasonElem.style.color = "white";
+            seasonElem.style.verticalAlign = "middle";
             seasonElem.style.cursor = "help";
-            seasonElem.innerHTML = "🌐"; // 📅🗓⏰🕗📆🌍
+            seasonElem.innerHTML = "<span style='position:relative; opacity: 0.7; top:-0.2em;'>🌐</span>"; // 📅🗓⏰🕗📆🌍
             seasonElem.title = "Die aktuelle Welt-Saisonnummer: " + seasonNr + "\nFalls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison erzwingen.";
 
             const innerElem = document.createElement("span");
             innerElem.style.display = "inline-block";
-            seasonElem.style.opacity = "0.7";
             innerElem.style.position = "absolute";
             innerElem.style.height = "100%";
             innerElem.style.width = "100%";
             innerElem.style.textAlign = "center";
             innerElem.style.left = "0px";
-            innerElem.style.top = "0px";
             innerElem.innerHTML = seasonNr;
+            innerElem.style.marginTop = "auto";
+            innerElem.style.marginBottom = "auto";
             seasonElem.append(innerElem);
 
             return seasonElem;
@@ -2272,6 +2298,15 @@ class demawiRepository {
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
     static util = class {
+
+        // Sicher für concurrent modification
+        static forEachSafe(array, fn) {
+            const newArray = Array();
+            for (var i = 0, l = array.length; i < l; i++) {
+                newArray.push(array[i]);
+            }
+            newArray.forEach(a => fn(a));
+        }
 
         static async loadViaXMLRequest(url) {
             var xmlHttp = new XMLHttpRequest();
@@ -3343,7 +3378,7 @@ class demawiRepository {
         return ReportParser;
     }();
 
-    static ItemParserDataVersion = 4;
+    static ItemParserDataVersion = 5;
     static ItemParser = class {
 
         static createItem(itemName) {
@@ -3400,6 +3435,25 @@ class demawiRepository {
             const item = await this.parseSourceItem(sourceItem);
             await this.getItemDB().setValue(item);
             console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
+
+            // Auf alte dataversions prüfen
+            const needRewrite = await _.WoDStorages.getItemDb().getAll({
+                index: ["dv"],
+                keyRangeTo: [_.ItemParserDataVersion],
+                keyRangeToOpen: true,
+            });
+            if (needRewrite.length > 0) {
+                console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...");
+                for (const curItem of needRewrite) {
+                    const sourceItem = await _.WoDStorages.getItemSourcesDb().getValue(curItem.id, true);
+                    if (sourceItem) {
+                        const item = await this.parseSourceItem(sourceItem);
+                        await this.getItemDB().setValue(item);
+                        //console.log("Rewrite Item from source " + curItem.dv);
+                    }
+                }
+                console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries... Finished!");
+            }
         }
 
         static hasSetOrGemBonus(linkElement) {
@@ -3418,6 +3472,7 @@ class demawiRepository {
             await this.#writeItemData(item);
             delete item.details;
             delete item.link;
+
             return item;
         }
 
@@ -3439,9 +3494,8 @@ class demawiRepository {
             div.innerHTML = item.details;
             const data = {};
             item.data = data;
-            const tableTRs = div.querySelectorAll('tr.row0, tr.row1');
-            for (var i = 0, l = tableTRs.length; i < l; i++) {
-                const tr = tableTRs[i];
+            const tableTRs = div.querySelectorAll('tr');
+            for (const tr of tableTRs) {
                 const kategorie = _.util.html2Text(tr.children[0].innerHTML.split("<br>")[0]);
                 switch (kategorie) {
                     case "Besonderheiten":
@@ -3485,9 +3539,9 @@ class demawiRepository {
                         let bedingungen = {};
                         let freieBedingungen = Array();
                         for (const elem of tr.children[1].children) {
-                            if (elem.tagName === "BR") return;
+                            if (elem.tagName === "BR") continue;
                             let line = elem.textContent.trim();
-                            if (line === "") return;
+                            if (line === "") continue;
                             const matches = line.trim().match(/^(.*) (ab|bis) (\d*)$/);
                             if (matches) {
                                 bedingungen[matches[1]] = {
