@@ -3,7 +3,7 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Lässt einen die Seiten der Kampfberichte direkt downloaden
-// @version        0.11
+// @version        0.11.2
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
@@ -45,10 +45,6 @@
     class Mod {
         static dbname = "wodDB";
         static modname = "KampfberichtArchiv";
-
-        static testIt() {
-            return "abc";
-        }
 
         static async startMod() {
             demawiRepository.startMod();
