@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.18.6
+// @version        0.20
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
