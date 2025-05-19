@@ -415,7 +415,7 @@
         }
 
         static async onKampfberichteSeite() {
-            //await MyStorage.indexedDb.cloneTo("wodDB_Backup4");
+            //await MyStorage.indexedDb.cloneTo("wodDB_Backup5");
             //await this.resyncSourcesToReports();
 
             if (false) {
@@ -426,13 +426,10 @@
             }
 
             //await this.syncReportLootToItemLoot();
-
             //await MyStorage.indexedDb.deleteObjectStore("teest");
-
 
             await this.checkMaintenance();
             this.title = document.getElementsByTagName("h1")[0];
-            const seasonNr = await _WoD.getMyWorldSeasonNr();
 
             const wodContent = document.getElementsByClassName("content_table")[0];
             this.anchor = document.createElement("div");
@@ -2915,6 +2912,7 @@
                 this.reportArchive.deleteIndex("3");
                 this.reportArchive.deleteIndex("4");
                 this.reportArchive.deleteIndex("5");
+                this.reportArchive.getValue("");
             }
         }
         /**

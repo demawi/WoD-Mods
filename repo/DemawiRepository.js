@@ -289,7 +289,7 @@ class demawiRepository {
              * @returns IDBDatabase
              */
             async #dbConnect(version, tracingId) {
-                const debug = false;
+                const debug = true;
                 if (debug) tracingId = tracingId || [];
                 const thisObject = this;
                 //if(this.pendingRequest) throw new Error("You already have a pending request!");
@@ -339,6 +339,7 @@ class demawiRepository {
              * @param dbTransaction @type IDBTransaction
              */
             async #syncDatabase(dbConnection, dbTransaction) {
+                console.log("[" + this.dbname + "]: syncDatabase...");
                 try {
                     this.objectStoresToDelete.slice().forEach((storageId, idx) => {
                         if (dbConnection.objectStoreNames.contains(storageId)) {
@@ -424,7 +425,7 @@ class demawiRepository {
                     objectStoresRead.push(readFrom);
                     objectStoresWrite.push(writeTo);
                 }
-                for (var i = 0, l = objectStoresRead.length; i < l; i++) {
+                for (let i = 0, l = objectStoresRead.length; i < l; i++) {
                     let readFrom = objectStoresRead[i];
                     let writeTo = objectStoresWrite[i];
                     await readFrom.getAll(false, async cur => {
@@ -612,15 +613,16 @@ class demawiRepository {
                 });
             }
 
+            ensureIndex(indexName, keyPath) {
+                const indizesToEnsure = this.indizesToEnsure || (this.indizesToEnsure = {});
+                console.log("Need to ensure Index: " + indexName, keyPath);
+                indizesToEnsure[indexName] = keyPath;
+            }
+
             deleteIndex(indexName) {
                 if (!this.indizesToDelete) this.indizesToDelete = [];
                 this.indizesToDelete.push(indexName);
                 this.indexedDb.reportDbHasChanged();
-            }
-
-            ensureIndex(indexName, keyPath) {
-                const indizesToEnsure = this.indizesToEnsure || (this.indizesToEnsure = {});
-                indizesToEnsure[indexName] = keyPath;
             }
 
             async deleteValue(dbObjectId) {
@@ -757,10 +759,8 @@ class demawiRepository {
                         queryOpt = {};
                     }
                     const connection = await objectStorage.indexedDb.getConnection();
-                    const transaction = connection.transaction(objectStorage.storageId, "readonly");
+                    const transaction = connection.transaction(objectStorage.storageId, "readwrite");
                     let target = transaction.objectStore(objectStorage.storageId);
-                    return this.#awaitRequest(target[retrieveFnName]());
-
                     /**
                      * In bestimmten Fällen müssen wir eine Suchanfrage an einer bestimmten Stelle wiederaufnehmen, weil wir es nicht in einer einzigen Transaktion abhandeln können.
                      * - Gesetzte .batchSize: hier rufen wir öfter hintereinander die Suchanfrage auf, um nur eine bestimmte maximale Anzahl an Objekten gleichzeitig aus dem Store in der Hand zu haben
@@ -768,7 +768,7 @@ class demawiRepository {
                      * Für die Wiederaufnahme muss auf jeden Fall auch der primäre Schlüssel im Index mit enthalten sein.
                      */
                     const needReconnectable = !!(queryOpt.batchSize || (iterationOpt && _.util.isAsyncFunction(iterationOpt)));
-                    if (queryOpt.index || needReconnectable) target = await objectStorage.constructor.IndexOps.getQueryIndex(objectStorage, target, queryOpt.index, needReconnectable);
+                    if (queryOpt.index) target = await objectStorage.constructor.IndexOps.getQueryIndex(objectStorage, target, queryOpt.index, needReconnectable);
                     if (queryOpt.keyMatch || queryOpt.keyMatchFrom || queryOpt.keyMatchTo) queryOpt.keyMatch = this.#getQueryKeyRange(queryOpt.keyMatch, queryOpt.keyMatchFrom, queryOpt.keyMatchTo, queryOpt.keyMatchFromOpen, queryOpt.keyMatchToOpen);
                     if (iterationOpt) return await this.#openCursorIteration(target.openCursor(queryOpt.keyMatch, queryOpt.order), iterationOpt, queryOpt.limit);
                     if (queryOpt.order) return await this.#openCursorFetch(target.openCursor(queryOpt.keyMatch, queryOpt.order), queryOpt.limit);
