@@ -4,7 +4,7 @@
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
 // @include        https://*.world-of-dungeons.*/wod/spiel/*
-// @require        repo/DemawiRepository.js?version=1.0.4
+// @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
 // *** [WoD] Item-Datenbank                                  ***
@@ -1186,7 +1186,7 @@
             }
             return objStore;
         }
-        static indexedDb = new _Storages.IndexedDb("ItemDB", Mod.dbname);
+        static indexedDb = _WoDStorages.getDb("ItemDB", Mod.dbname);
         static item = this.adjust(this.indexedDb.createObjectStore("item", "id"));
         static itemSources = this.adjust(this.indexedDb.createObjectStore("itemSources", "id"));
 

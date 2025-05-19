@@ -3,7 +3,7 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Lässt einen die Seiten der Kampfberichte direkt downloaden
-// @version        0.11.2
+// @version        0.11.0.1
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
@@ -14,7 +14,7 @@
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
 // @include        http*://*.world-of-dungeons.de*
-// @require        repo/DemawiRepository.js?version=1.0.4
+// @require        repo/DemawiRepository.js
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js
 // @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
@@ -30,8 +30,8 @@
     'use strict';
 
     const _Storages = demawiRepository.import("Storages");
-    const _WoD = demawiRepository.import("WoD");
     const _WoDStorages = demawiRepository.import("WoDStorages");
+    const _WoD = demawiRepository.import("WoD");
     const _WoDWorldDb = demawiRepository.import("WoDWorldDb");
     const _WoDParser = demawiRepository.import("WoDParser");
     const _WoDLootDb = demawiRepository.import("WoDLootDb");
@@ -48,7 +48,8 @@
 
         static async startMod() {
             demawiRepository.startMod();
-            _WoDWorldDb.placeSeasonElem();
+            await _WoDWorldDb.placeSeasonElem();
+
             const page = _util.getWindowPage();
             console.log("Page: '" + page + "'")
             switch (page) {
@@ -427,7 +428,6 @@
 
             //await this.syncReportLootToItemLoot();
             //await MyStorage.indexedDb.deleteObjectStore("teest");
-
             await this.checkMaintenance();
             this.title = document.getElementsByTagName("h1")[0];
 
@@ -2864,7 +2864,7 @@
         }
 
         static async get(fresh) {
-            return _Settings.get(this.#settingsDef, fresh);
+            return await _Settings.get(this.#settingsDef, fresh);
         }
 
         static async save() {
@@ -2894,7 +2894,7 @@
             return objStore;
         }
 
-        static indexedDb = new _Storages.IndexedDb("WoDReportArchiv", Mod.dbname);
+        static indexedDb = _WoDStorages.getDb("WoDReportArchiv", Mod.dbname);
 
         /**
          * Meta-Daten für einen Kammpfbericht
@@ -2902,17 +2902,23 @@
         static reportArchive = this.checkValidReportId(this.indexedDb.createObjectStore("reportArchive", "reportId", {
             ts: "ts",
             locName: "loc.name",
+            locName2: ["loc.name"],
             //wgls: ["world", "gruppe_id", "loc.name", "world_season"],
         }));
         static {
             if (true) {
-                this.reportArchive.deleteIndex("wgls");
-                this.reportArchive.deleteIndex("1");
-                this.reportArchive.deleteIndex("2");
-                this.reportArchive.deleteIndex("3");
-                this.reportArchive.deleteIndex("4");
-                this.reportArchive.deleteIndex("5");
-                this.reportArchive.getValue("");
+                const _this = this;
+                (async function () {
+                    await _this.reportArchive.connect();
+                    //await _this.reportArchive.deleteIndex("wgls");
+                    await _this.reportArchive.deleteIndex("1");
+                    await _this.reportArchive.deleteIndex("2");
+                    await _this.reportArchive.deleteIndex("3");
+                    await _this.reportArchive.deleteIndex("4");
+                    await _this.reportArchive.deleteIndex("5");
+                    await _this.reportArchive.ensureIndex("1", ["ts"]);
+                    await _this.reportArchive.connect();
+                })();
             }
         }
         /**

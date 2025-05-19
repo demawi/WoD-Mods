@@ -4,7 +4,7 @@
 // @namespace      demawi
 // @description    Lässt einen die Index des Browsers ansehen und bearbeiten
 // @include        https://*.world-of-dungeons.*/wod/spiel/settings/settings.php*
-// @require        repo/DemawiRepository.js?version=1.0.4
+// @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
 // *** [WoD] Item-Datenbank                                  ***

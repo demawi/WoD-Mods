@@ -183,11 +183,15 @@ class demawiRepository {
             objectStores = [];
             objectStoresToDelete = [];
             dbConnection;
-            static requestIdx = 0; // only for debugging
+            static staticInstanceId = 1;
+            instanceId;
+            requestIdx = 1; // only for debugging
+            debug = true;
 
             constructor(modname, dbname) {
                 this.modname = modname;
                 this.dbname = dbname;
+                this.instanceId = this.constructor.staticInstanceId++;
             }
 
             /**
@@ -217,7 +221,9 @@ class demawiRepository {
                 const objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
                 objectStore.indexedDb = this;
                 this.objectStores.push(objectStore);
-                if (this.dbConnection) this.closeConnection(); // kein instant-reconnect, da sich evtl. noch andere Object-Stores registrieren
+                if (this.dbConnection && !this.#areAllObjectStoresSynced(this.dbConnection)) {
+                    this.forceReconnect("create object store " + storageId);
+                } // kein instant-reconnect, da sich evtl. noch andere Object-Stores registrieren
                 return objectStore;
             }
 
@@ -231,7 +237,7 @@ class demawiRepository {
 
             deleteObjectStore(storageId) {
                 this.objectStoresToDelete.push(storageId);
-                if (this.dbConnection) this.closeConnection();
+                if (this.dbConnection) this.forceReconnect("delete object " + storageId);
             }
 
             async doesObjectStoreExist(objectStore) {
@@ -239,39 +245,21 @@ class demawiRepository {
                 return dbConnection.objectStoreNames.contains(objectStore.storageId);
             }
 
-            /**
-             * @return IDBDatabase
-             */
-            async getConnection(forceUpgrade) {
-                if (forceUpgrade) {
-                    let previousVersion = new Date().getTime();
-                    if (this.dbConnection) {
-                        previousVersion = this.dbConnection.version;
-                        this.closeConnection();
-                    }
-                    this.dbConnection = await this.#dbConnect(previousVersion + 1);
-                } else {
-                    if (this.dbConnection) return this.dbConnection;
-                    this.dbConnection = await this.#dbConnect();
-                }
-                let thisObject = this;
-                // wenn sich die Datenbank-Version durch eine andere Seite verändert hat
-                this.dbConnection.onversionchange = function (event) {
-                    // Eine andere Instanz (Seite oder Mod hat einen VersionChange getriggert)
-                    thisObject.closeConnection();
-                };
-                return this.dbConnection;
-            }
-
-            closeConnection() {
+            closeConnection(grund) {
+                if (this.debug) console.log("Close connection", grund);
                 if (this.dbConnection) {
                     this.#closeGivenConnection(this.dbConnection);
                     delete this.dbConnection;
                 }
             }
 
-            reportDbHasChanged() {
-                this.closeConnection();
+            /**
+             * Die Datenbank-Definition hat sich irgendwo geändert (ObjectStores, Indizes), wir wollen bei
+             * der nächsten Nutzung eine sync durchführen.
+             */
+            forceReconnect(grund) {
+                // Die Definition hat sich geändert, es müssen nochmal die Definitionen überprüft werden
+                this.closeConnection("reportDbHasChanged " + grund);
             }
 
             #closeGivenConnection(dbConnection, requestOpt) {
@@ -286,48 +274,85 @@ class demawiRepository {
             }
 
             /**
+             * @return IDBDatabase
+             */
+            async getConnection(forceUpgrade) {
+                if (forceUpgrade) {
+                    console.log("ForceUpgradeGrund: ", forceUpgrade);
+                    return await this.#dbConnect(true);
+                }
+                if (this.dbConnection) return this.dbConnection;
+                return await this.#dbConnect(false);
+            }
+
+            /**
+             * Wrapped {this.#dbConnectIntern}. Es können damit nur maximal gleichzeitige ConnectionProzesse aktiv sein einmal für forceUpgrade=false und einmal für forceUpgrade=true
+             * @returns {Promise<*>}
+             */
+            async #dbConnect(forceUpgrade) {
+                const _this = this;
+                const connectProcesses = this.connectProcesses || (this.connectProcesses = {});
+                // Wenn ein forcierter Prozess aussteht, wollen wir uns auch als forceUpgrade=false primär an diesen anhängen, da wir eh das Update abwarten müssen
+                const connectProcess = connectProcesses[true] || connectProcesses[forceUpgrade] || (connectProcesses[forceUpgrade] = this.#dbConnectIntern(forceUpgrade).then(con => {
+                    if (_this.dbConnection) _this.closeConnection("Neue Connection erstellt");
+                    _this.dbConnection = con;
+                    // Wir oder eine andere Instanz (Seite oder Mod) hat einen VersionChange getriggert, insofern invalidieren wir vorsichtshalber unsere Verbindung.
+                    _this.dbConnection.onversionchange = function (event) {
+                        _this.closeConnection("onversion change");
+                    };
+                    delete connectProcesses[forceUpgrade];
+                    return con;
+                }));
+                return await connectProcess;
+            }
+
+            /**
              * @returns IDBDatabase
              */
-            async #dbConnect(version, tracingId) {
-                const debug = true;
-                if (debug) tracingId = tracingId || [];
-                const thisObject = this;
-                //if(this.pendingRequest) throw new Error("You already have a pending request!");
-                const requestId = demawiRepository.Storages.IndexedDb.requestIdx++;
+            async #dbConnectIntern(forceUpgrade, tracingId) {
+                let version;
+                if (forceUpgrade) {
+                    if (this.dbConnection) version = this.dbConnection.version + 1;
+                    else version = new Date().getTime();
+                }
+
+                if (this.debug) tracingId = tracingId || [];
+                const _this = this;
+                const requestId = this.requestIdx++;
                 return new Promise((resolve, reject) => {
-                    let request = indexedDB.open(thisObject.dbname, version);
+                    let request = indexedDB.open(_this.dbname, version);
                     request.idx = requestId;
-                    if (debug) {
+                    if (_this.debug) {
                         tracingId.push(request.idx);
-                        console.log("Request-Open[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version + " ", tracingId);
+                        console.log("Request-Open[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version + " ", tracingId, _this.dbConnection);
                     }
                     // console.log("request created " + request.idx + "_" + version);
                     request.onsuccess = function (event) {
-                        if (debug) console.log("Request-success[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId);
+                        if (_this.debug) console.log("Request-success[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version, tracingId);
                         let dbConnection = event.target.result; // type: IDBDatabase
-                        let needNewStores = !thisObject.#areAllObjectStoresSynced(dbConnection);
+                        let needNewStores = !_this.#areAllObjectStoresSynced(dbConnection);
                         if (needNewStores) {
-                            thisObject.#closeGivenConnection(dbConnection, request);
-                            resolve(thisObject.#dbConnect(new Date().getTime(), tracingId)); // force upgrade
+                            _this.#closeGivenConnection(dbConnection, request);
+                            resolve(_this.#dbConnectIntern(true, tracingId)); // force upgrade
                         } else {
                             resolve(event.target.result);
                         }
                     }
                     // z.B. "AbortError: The connection was closed."
                     request.onerror = function (event) {
-                        if (debug) console.log("Request-error[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId, event);
+                        if (_this.debug) console.log("Request-error[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version, tracingId, event);
                         // console.log("DBconnect error", event);
-                        resolve(thisObject.#dbConnect(undefined, tracingId));
+                        resolve(_this.#dbConnectIntern(undefined, tracingId));
                     }
                     request.onblocked = function (event) {
-                        if (debug) console.log("Request-blocked[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId);
+                        if (_this.debug) console.log("Request-blocked[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version, tracingId);
                         // hier heißt es abwarten..
                     }
                     request.onupgradeneeded = async function (event) {
-                        if (debug) console.log("Request-upgradeneed[" + request.idx + "]: " + thisObject.modname + " " + thisObject.dbname + ":" + version, tracingId);
+                        if (_this.debug) console.log("Request-upgradeneed[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version, tracingId);
                         const dbConnection = event.target.result;
                         const tx = event.target.transaction;
-                        await thisObject.#syncDatabase(dbConnection, tx);
+                        await _this.#syncDatabase(dbConnection, tx);
                     }
                 });
             }
@@ -580,7 +605,7 @@ class demawiRepository {
                 let objectStore = transaction.objectStore(this.storageId);
                 if (!this.#areAllIndicesSynced(objectStore)) {
                     // Es sind nicht alle Indizes installiert, wir forcieren ein update und machen alles nochmal
-                    await this.indexedDb.getConnection(true);
+                    await this.indexedDb.getConnection("Indizes müssen gesynced werden");
                     return await this.connect(withWrite);
                 }
                 return objectStore;
@@ -613,16 +638,16 @@ class demawiRepository {
                 });
             }
 
-            ensureIndex(indexName, keyPath) {
+            ensureIndex(indexName, keyPath, myDebug) {
                 const indizesToEnsure = this.indizesToEnsure || (this.indizesToEnsure = {});
-                console.log("Need to ensure Index: " + indexName, keyPath);
                 indizesToEnsure[indexName] = keyPath;
+                if (myDebug) this.indexedDb.forceReconnect("Ensure Index " + indexName, keyPath);
             }
 
-            deleteIndex(indexName) {
+            deleteIndex(indexName, myDebug) {
                 if (!this.indizesToDelete) this.indizesToDelete = [];
                 this.indizesToDelete.push(indexName);
-                this.indexedDb.reportDbHasChanged();
+                if (myDebug) this.indexedDb.forceReconnect("Delete Index " + indexName);
             }
 
             async deleteValue(dbObjectId) {
@@ -641,6 +666,7 @@ class demawiRepository {
 
             async getValue(dbObjectId) {
                 const thisObject = this;
+
                 return new Promise(async (resolve, reject) => {
                     const objectStore = await thisObject.connect(false);
                     const request = objectStore.get(dbObjectId);
@@ -650,6 +676,15 @@ class demawiRepository {
                         // ansonsten ist es wohl auf die Domain der indexdb geeicht und wir können es mit dem userScript nicht wirklich nutzen
                         resolve(cloneInto(result, {}));
                     };
+                    request.onerror = function (event) {
+                        console.log("getValue-error");
+                    }
+                    request.onblocked = function () {
+                        console.log("getValue-blocked")
+                    }
+                    request.onupgradeneeded = function () {
+                        console.log("getValue-onupgradeneeded")
+                    }
                 });
             }
 
@@ -955,7 +990,8 @@ class demawiRepository {
                 }
 
                 static async #createAndGetNewIndex(objectStorage, objectStore, indexName, keyPath) {
-                    console.log("Benötige Index: " + indexName, keyPath);
+                    if (objectStorage.indexedDb.debug) console.log(objectStorage.storageId + " Folgender Index wird AdHoc erstellt: ", keyPath);
+                    //throw new Error("Indizes können gerade nicht adHoc angelegt werden!");
                     objectStorage.ensureIndex(indexName, keyPath);
                     const idbObjectStore = await objectStorage.connect(); // den Objectstorage das Upgrade ausführen lassen
                     return idbObjectStore.index(indexName);
@@ -984,8 +1020,10 @@ class demawiRepository {
         static #indexedDb;
         static #objectStores = {};
 
-        static #getDb() {
-            return this.#indexedDb || (this.#indexedDb = new _.Storages.IndexedDb("WoDReportArchiv", "wodDB"));
+        static getDb(modname, dbname) {
+            if (modname) this.#indexedDb = new _.Storages.IndexedDb(modname, dbname);
+            if (!this.#indexedDb) throw new Error("Datenbank muss initial von der Mod definiert werden!")
+            return this.#indexedDb;
         }
 
         static getItemDb() {
@@ -1030,7 +1068,7 @@ class demawiRepository {
         static #getCreateObjectStore(name, key, indizes) {
             let result = this.#objectStores[name];
             if (result) return result;
-            result = this.#getDb().createObjectStore(name, key, indizes);
+            result = this.getDb().createObjectStore(name, key, indizes);
             this.#objectStores[name] = result;
             return result;
         }
@@ -1041,7 +1079,7 @@ class demawiRepository {
         static async #getObjectStoreIfExists(storageId) {
             let objectStore = this.#objectStores[storageId];
             if (objectStore === undefined) {
-                objectStore = await this.#getDb().getObjectStore(storageId) || false;
+                objectStore = await this.getDb().getObjectStore(storageId) || false;
                 this.#objectStores[storageId] = objectStore;
             }
             return objectStore;
@@ -1332,7 +1370,7 @@ class demawiRepository {
                 const myWorld = _.WoD.getMyWorld();
                 const meineHelden = _.WoDParser.getMyHerosFromOverview();
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
-                const [season, seasonNr] = await this.getWorldSeason(myWorld, meineHelden, true); // report World-Season
+                await this.getWorldSeason(myWorld, meineHelden, true); // report World-Season
             }
         }
 
@@ -3788,13 +3826,7 @@ class demawiRepository {
     }
 
     static startMod() {
-        let wantedVersion = (GM.info.scriptMetaStr.match(/DemawiRepository.js\?version=(.*)/) || [])[1];
-        let logFn = console.log;
-        if (wantedVersion !== this.version) {
-            alert("[" + GM.info.script.name + "]: Gewünschte Repo-Version (" + wantedVersion + ") unterscheidet sich zu der vorhandenen (" + this.version + ").\n\nBitte die Mod aktualisieren!");
-            logFn = console.warn;
-        } else wantedVersion = undefined;
-        logFn(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (wantedVersion ? " benötigt: " + wantedVersion : "") + ")");
+        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")");
     }
 
     static getModName() {

@@ -10,7 +10,7 @@
 // @include        http*://*/wod/spiel/*dungeon/combat_report.php*
 // @include        http*://*/wod/spiel/event/play.php*
 // @include        http*://*/wod/spiel/event/eventlist.php*
-// @require        repo/DemawiRepository.js?version=1.0.4
+// @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -24,6 +24,7 @@
     'use strict';
 
     const _Storages = demawiRepository.import("Storages");
+    const _WoDStorages = demawiRepository.import("WoDStorages");
     const _BBCodeExporter = demawiRepository.import("BBCodeExporter");
     const _WoD = demawiRepository.import("WoD");
     const _WoDParser = demawiRepository.import("WoDParser");
@@ -1746,7 +1747,7 @@
             }
             return objStore;
         }
-        static indexedDb = new _Storages.IndexedDb("WoDStats+", Mod.dbname);
+        static indexedDb = _WoDStorages.getDb("WoDStats+", Mod.dbname);
         static reportStats = this.adjust(this.indexedDb.createObjectStore("reportStats", "reportId"));
 
         /**
