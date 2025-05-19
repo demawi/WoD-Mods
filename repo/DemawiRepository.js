@@ -186,7 +186,7 @@ class demawiRepository {
             static staticInstanceId = 1;
             instanceId;
             requestIdx = 1; // only for debugging
-            debug = true;
+            debug = false;
 
             constructor(modname, dbname) {
                 this.modname = modname;
@@ -1962,13 +1962,14 @@ class demawiRepository {
                             for (let i = 1, l = trs.length; i < l; i++) {
                                 const tr = trs[i];
                                 if (tr.children[0].textContent !== "") {
-                                    item = {};
+                                    item = { keeped: 1 }; // keeped
                                     if (!member.loot) member.loot = [];
                                     member.loot.push(item);
                                     item.name = tr.children[1].textContent.trim();
                                     let splitter = tr.children[4].textContent.split("/");
                                     if (splitter.length > 1) item.vg = Number(splitter[0]);
-                                    if (tr.querySelector("a").classList.contains("item_unique")) item.unique = true;
+                                } else if(tr.children[1].textContent.startsWith("wurde von")) {
+                                    delete item.keeped;
                                 }
                             }
                             break;
@@ -3508,19 +3509,19 @@ class demawiRepository {
             console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
 
             // Auf alte dataversions prüfen
-            const needRewrite = await _.WoDStorages.getItemDb().getAll({
+            const needRewrite = await _.WoDStorages.getItemDb().getAllKeys({
                 index: ["dv"],
                 keyMatchTo: [_.ItemParserDataVersion],
-                keyRangeToOpen: true,
+                keyMatchToOpen: true,
             });
             if (needRewrite.length > 0) {
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...");
-                for (const curItem of needRewrite) {
-                    const sourceItem = await _.WoDStorages.getItemSourcesDb().getValue(curItem.id, true);
+                for (const curItemId of needRewrite) {
+                    const sourceItem = await _.WoDStorages.getItemSourcesDb().getValue(curItemId);
                     if (sourceItem) {
+                        const curItem = await this.getItemDB().getValue(curItemId);
                         const item = await this.parseSourceItem(sourceItem);
                         await this.getItemDB().setValue(item);
-                        //console.log("Rewrite Item from source " + curItem.dv);
                     }
                 }
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries... Finished!");

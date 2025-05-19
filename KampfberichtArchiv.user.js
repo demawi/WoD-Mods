@@ -2,7 +2,7 @@
 // @name           [WoD] Kampfbericht Archiv
 // @author         demawi
 // @namespace      demawi
-// @description    Lässt einen die Seiten der Kampfberichte direkt downloaden
+// @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
 // @version        0.12.0.1
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
@@ -418,6 +418,7 @@
         static async onKampfberichteSeite() {
             //await MyStorage.indexedDb.cloneTo("wodDB_Backup5");
             //await this.resyncSourcesToReports();
+            //await this.rewriteReportArchiveItems();
 
             if (false) {
                 console.log("AAAAAAAAAAA", (await MyStorage.reportArchive.getAll({
@@ -1068,7 +1069,7 @@
                     const item = lootToList[curItem.name] || (lootToList[curItem.name] = {from: []});
                     item.from.push(memberName);
                     if (curItem.vg) item.vg = (item.vg || 0) + curItem.vg;
-                    if (curItem.unique) item.unique = true;
+                    if (curItem.keeped) item.keeped = true;
                 }
                 for (const curEquip of items.equip) {
                     if (curEquip.hp && curEquip.hp[2]) {
@@ -1253,7 +1254,7 @@
             for (const [itemName, entry] of Object.entries(eingesammeltPre).sort(([a, a2], [b, b2]) => {
                 let result = ((a2.vg / a2.vg) || 0) - ((b2.vg / b2.vg) || 0); // Nicht Verbrauchsgegenstände zuerst
                 if (result !== 0) return result;
-                result = (a2.unique && 1 || 0) - (b2.unique && 1 || 0);
+                result = (a2.keeped || 0) - (b2.keeped || 0);
                 if (result !== 0) return result;
                 return a.localeCompare(b);
             })) {
@@ -1265,7 +1266,7 @@
                 const [markers, itemsLootedBefore] = await this.createMarkers(itemName, reportMeta);
                 const itemsLootedInSum = itemsLootedBefore + (gesammelt ? (curCount || 1) : 0);
                 const itemLink = this.getFullItemNode(itemName, entry.id);
-                const ownerAnzeige = gesammelt && !entry.vg && !entry.unique;
+                const ownerAnzeige = gesammelt && !entry.vg && entry.keeped;
                 let addStyle = "";
                 if (firstVG && entry.vg && hatteNichtVGs) {
                     addStyle = "border-top: 3px solid white;"
@@ -1494,7 +1495,7 @@
             hints.parentElement.insertBefore(table, hints);
             if (entries.length > 1) {
                 const aggregateInfos = [];
-                let stufeMin = Number.MAX_VALUE;
+                let stufeMin = 0;
                 let stufeMax = 0;
                 for (const cur of Object.keys(item.stufen)) {
                     const curNr = Number(cur);
