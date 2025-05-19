@@ -421,7 +421,7 @@
             if (false) {
                 console.log("AAAAAAAAAAA", (await MyStorage.reportArchive.getAll({
                     index: "locName",
-                    keyRange: IDBKeyRange.only("Ahnenforschung"),
+                    keyMatch: IDBKeyRange.only("Ahnenforschung"),
                 })).length);
             }
 
@@ -743,8 +743,8 @@
                     archiviertSpeicherTD.style.backgroundColor = ArchivView.COLOR_RED;
                     archiviertTD.innerHTML += "<span style='white-space: nowrap'>Fehlt komplett</span>";
                 } else {
-                    if (reportMeta.space) {
-                        archiviertSpeicherTD.innerHTML = _util.fromBytesToMB(reportMeta.space);
+                    if (reportMeta.srcs && reportMeta.srcs.space) {
+                        archiviertSpeicherTD.innerHTML = _util.fromBytesToMB(reportMeta.srcs.space);
                     }
                     const fehlend = Report.getMissingReportSites(reportMeta);
                     if (fehlend.length === 0) {
@@ -782,9 +782,7 @@
                 fortschrittTD.style.textAlign = "center";
                 fortschrittTD.style.width = "40px";
 
-                if (reportMeta && reportMeta.space) {
-                    space += reportMeta.space;
-                }
+                space += (reportMeta && reportMeta.srcs && reportMeta.srcs.space) || 0;
 
                 if (reportMeta && reportMeta.success && reportMeta.success.levels) {
                     const members = reportMeta.success.members;
@@ -1320,7 +1318,7 @@
             let lastKey;
             for (const cur of await MyStorage.reportArchive.getAll({
                 index: ["loc.name"],
-                keyRange: [naechsterDungeonName],
+                keyMatch: [naechsterDungeonName],
                 order: "prev",
                 limit: 1,
             })) {
@@ -1406,7 +1404,7 @@
             let result = [0, 0, 0];
             for (const report of await MyStorage.reportArchive.getAll({
                 index: ["world", "gruppe_id", "loc.name", "world_season"], // index: "wgls",
-                keyRange: [world, gruppeId, dungeonName, worldSeasonNrOpt ? worldSeasonNrOpt : _Storages.MATCHER.NUMBER.ANY],
+                keyMatch: [world, gruppeId, dungeonName, worldSeasonNrOpt ? worldSeasonNrOpt : _Storages.MATCHER.NUMBER.ANY],
             })) {
                 const cur = Report.getSuccessLevel(report);
                 if (cur !== undefined) {
@@ -2550,7 +2548,7 @@
             const locName = report.loc.name;
             const reports = (await MyStorage.reportArchive.getAll({
                 index: ["loc.name"],
-                keyRange: [locName],
+                keyMatch: [locName],
             }));
             await this.#checkAllAutoFavoritenOn(reports);
         }
@@ -2910,7 +2908,7 @@
             //wgls: ["world", "gruppe_id", "loc.name", "world_season"],
         }));
         static {
-            if (false) {
+            if (true) {
                 this.reportArchive.deleteIndex("wgls");
                 this.reportArchive.deleteIndex("1");
                 this.reportArchive.deleteIndex("2");

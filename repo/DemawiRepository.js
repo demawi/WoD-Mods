@@ -381,7 +381,7 @@ class demawiRepository {
                         delete objectStoreDef.indizesToEnsure;
                     });
                 } catch (exception) {
-                    console.error("syncObjectStores konnte nicht durchgeführt werden!", exception);
+                    console.error("syncDatabase konnte nicht durchgeführt werden!", exception);
                     throw exception;
                 }
                 return true;
@@ -578,10 +578,8 @@ class demawiRepository {
                 let transaction = connection.transaction(this.storageId, withWrite ? "readwrite" : "readonly");
                 let objectStore = transaction.objectStore(this.storageId);
                 if (!this.#areAllIndicesSynced(objectStore)) {
-                    console.log("1Check indices: ", this.indizesToDelete, this.indizesToEnsure);
                     // Es sind nicht alle Indizes installiert, wir forcieren ein update und machen alles nochmal
                     await this.indexedDb.getConnection(true);
-                    console.log("2Check indices: ", this.indizesToDelete, this.indizesToEnsure);
                     return await this.connect(withWrite);
                 }
                 return objectStore;
@@ -618,6 +616,11 @@ class demawiRepository {
                 if (!this.indizesToDelete) this.indizesToDelete = [];
                 this.indizesToDelete.push(indexName);
                 this.indexedDb.reportDbHasChanged();
+            }
+
+            ensureIndex(indexName, keyPath) {
+                const indizesToEnsure = this.indizesToEnsure || (this.indizesToEnsure = {});
+                indizesToEnsure[indexName] = keyPath;
             }
 
             async deleteValue(dbObjectId) {
@@ -663,13 +666,6 @@ class demawiRepository {
             /**
              * Liefert ein Array über alle vorhandenen Objekte.
              */
-            async getAllKeys() {
-                return await this.#doSearch(queryOpt, iterationOpt, "getAllKeys");
-            }
-
-            /**
-             * Liefert ein Array über alle vorhandenen Objekte.
-             */
             async count() {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
@@ -701,214 +697,31 @@ class demawiRepository {
              * {
              *     index: ["ts", "item.loc"], // Angabe der Indizes über die eingeschränkt oder sortiert werden soll, sofern ein solcher Index noch nicht vorhanden ist, wird er adHoc erstellt.
              *     order: "prev", // ein String Wert aus ORDER, sortiert die Ergebnisse, bzw. kann mit den "unique"-Parametern auch Einträge überspringen. Sortiert wird abhängig von der Reihenfolge im angegebenen Index.
-             *     keyRange: [_Storages.MATCHER.NUMBER.ANY, "Ahnenforschung"], // [IDBKeyRange|Array] der Array definiert Matches mit der gleichen Länge wie der Index-Array. Es können aber auch Wildcards aus _Storages.Matcher genutzt werden.
-             *     keyRangeFrom: [1, "Ahnenforschung"] // [Array] wird als lowerBound verwendet. Sofern die untere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
-             *     keyRangeTo: [1231233, "Balesh"], // [Array] wird als upperBound verwendet. Sofern die obere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
-             *     keyRangeFromOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
-             *     keyRangeToOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
+             *     keyMatch: [_Storages.MATCHER.NUMBER.ANY, "Ahnenforschung"], // [IDBKeyRange|Array] der Array definiert Matches mit der gleichen Länge wie der Index-Array. Es können aber auch Wildcards aus _Storages.Matcher genutzt werden.
+             *     keyMatchFrom: [1, "Ahnenforschung"] // [Array] wird als lowerBound verwendet. Sofern die untere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
+             *     keyMatcheTo: [1231233, "Balesh"], // [Array] wird als upperBound verwendet. Sofern die obere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
+             *     keyMatchFromOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
+             *     keyMatchToOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
              *     limit: 20, // [int] eine Limitierung der Ergebnisse
+             *     skip: 20, // [int] die erste Funde ignorieren und erst danach zurückgeben
+             *     start: ["WA12312323"], // primary key Wert (kann auch mehrere Werte enthalten, falls der PrimaryKey sich aus mehreren Spalten zusammensetzt) von dem die Suche aus startet
+             *                            // der Wert selber ist dabei nicht in der Ergebnismenge enthalten
+             *                            // sofern die Primary-Key Spalten nicht im 'index' enthalten sind, werden diese dort angehängt. Abhängig von der Sortierung wird 'keyRangeFrom' oder 'keyRangeTo' gesetzt.
+             *     batchSize: 1,          // [int] in welcher Menge die Datenobjekte aus der Datenbank geholt werden
              * }
              * @param iterationOpt @type Function(object, idx): die Objekte werden der Reihe nach in die Methode reingereicht, bei false wird die Schleife abgebrochen oder bei gesetztem query-limit
              * @return wenn iteration nicht gesetzt wird, wird ein Array der Objekte zurückgeliefert
              *         wenn iteration gesetzt ist, werden die Objekte einem nach dem anderen in die iteration-Funktion reingereicht iteration(object, idx), der Rückgabewert von getAll ist dann nicht gesetzt.
              */
             async getAll(queryOpt, iterationOpt) {
-                return await this.#doSearch(queryOpt, iterationOpt, "getAll");
-            }
-
-            async #doSearch(queryOpt, iterationOpt, retrieveFnName) {
-                if (!queryOpt) {
-                    if (queryOpt !== false) console.warn("getAll ohne query-Parametern kann bei großen Datenbanken zu Problemen führen")
-                    queryOpt = {};
-                }
-                const thisObject = this;
-                const connection = await thisObject.indexedDb.getConnection();
-                const transaction = connection.transaction(this.storageId, "readwrite");
-                let target = transaction.objectStore(this.storageId);
-                if (queryOpt.index) target = await this.#getQueryIndex(target, queryOpt.index);
-                if (queryOpt.keyRange || queryOpt.keyRangeFrom || queryOpt.keyRangeTo) queryOpt.keyRange = this.#getQueryKeyRange(queryOpt.keyRange, queryOpt.keyRangeFrom, queryOpt.keyRangeTo, queryOpt.keyRangeFromOpen, queryOpt.keyRangeToOpen);
-                if (iterationOpt) return await this.#openCursorIteration(target.openCursor(queryOpt.keyRange, queryOpt.order), iterationOpt, queryOpt.limit);
-                if (queryOpt.order) return await this.#openCursorFetch(target.openCursor(queryOpt.keyRange, queryOpt.order), queryOpt.limit);
-                return this.awaitRequest(target[retrieveFnName](queryOpt.keyRange, queryOpt.limit));
+                return await this.constructor.QueryOps.doSearch(this, queryOpt, iterationOpt, "getAll");
             }
 
             /**
-             * index: ["world", "gruppe_id", "loc.name", "world_season"]
-             * sortBy "gruppe_id"
-             * @param objectStore die aktuelle Verbindung zum ObjectStore
-             * @param indexDef indexName or keyPath
+             * Liefert ein Array über alle vorhandenen Objekte.
              */
-            async #getQueryIndex(objectStore, indexDef) {
-                if (typeof indexDef === "string") {
-                    return objectStore.index(indexDef); // check if it's a already given name
-                } else { // should be an array
-                    return await this.#findIndex(objectStore, indexDef);
-                }
-            }
-
-            async #createAndGetNewIndex(indexName, keyPath) {
-                const indizesToEnsure = this.indizesToEnsure || (this.indizesToEnsure = {});
-                indizesToEnsure[indexName] = keyPath;
-                const idbObjectStore = await this.connect();
-                return idbObjectStore.index(indexName);
-            }
-
-            async #findIndex(objectStore, indexDefArray) {
-                for (const indexName of objectStore.indexNames) {
-                    const curIndex = objectStore.index(indexName);
-                    if (this.#arrayEquals(curIndex.keyPath, indexDefArray)) {
-                        return curIndex;
-                    }
-                }
-                // nichts gefunden wir legen einen neuen index an
-                return await this.#createAdHocIndex(objectStore, indexDefArray);
-            }
-
-            /**
-             * Sucht nach einem noch freien Namen und legt diesen dann mit der Keypath-Definition an
-             */
-            async #createAdHocIndex(objectStore, keyPath) {
-                let i = 1;
-                while (true) {
-                    const curIndexName = "" + i;
-                    if (!objectStore.indexNames.contains(curIndexName)) {
-                        return await this.#createAndGetNewIndex(curIndexName, keyPath);
-                    }
-                    i++;
-                }
-            }
-
-            #arrayEquals(a, b) {
-                if (a === b) return true;
-                if (a == null || b == null) return false;
-                if (a.length !== b.length) return false;
-                for (var i = 0; i < a.length; ++i) {
-                    if (a[i] !== b[i]) return false;
-                }
-                return true;
-            }
-
-            /**
-             * Ersetzt potenzielle Wildcards durch minimals/maximalst mögliche (String-/Number-) Werte und liefert eine {IDBKeyRange}-Definition zurück.
-             * keyRangeSingle muss alleine angegeben werden. Ansonsten können keyRangeFromOpt und keyRangeToOpt zusammen oder nur einer von beiden angegeben werden.
-             * @returns {IDBKeyRange}
-             */
-            #getQueryKeyRange(keyRangeSingle, keyRangeFromOpt, keyRangeToOpt, lowerOpen, upperOpen) {
-                if (keyRangeSingle instanceof IDBKeyRange) return keyRangeSingle;
-                let hasWildcards = false;
-                if (keyRangeSingle) {
-                    hasWildcards = keyRangeSingle.filter(a => typeof a === "object").length > 0;
-                    if (!hasWildcards) return IDBKeyRange.only(keyRangeSingle);
-                    keyRangeFromOpt = keyRangeSingle;
-                    keyRangeToOpt = keyRangeSingle;
-                } else {
-                    if (keyRangeFromOpt) hasWildcards = keyRangeFromOpt.filter(a => typeof a === "object").length > 0;
-                    if (!hasWildcards && keyRangeToOpt) hasWildcards = keyRangeToOpt.filter(a => typeof a === "object").length > 0;
-                }
-
-                if (hasWildcards) {
-                    const lowerBound = []; // Wildcards werden mit den minimalst möglichen Werten gefüllt
-                    const upperBound = []; // Wildcards werden mit den maximalst möglichen Werten gefüllt
-                    for (let i = 0, l = (keyRangeFromOpt || keyRangeToOpt).length; i < l; i++) {
-                        const low = keyRangeFromOpt && keyRangeFromOpt[i];
-                        const high = keyRangeToOpt && keyRangeToOpt[i];
-                        if (low) {
-                            if (low === _.Storages.MATCHER.NUMBER.ANY) {
-                                lowerBound.push(_.Storages.MATCHER.NUMBER.MIN);
-                            } else if (low === _.Storages.MATCHER.STRING.ANY) {
-                                lowerBound.push(_.Storages.MATCHER.STRING.MIN);
-                            } else { // exakt match
-                                lowerBound.push(low);
-                            }
-                        }
-                        if (high) {
-                            if (high === _.Storages.MATCHER.NUMBER.ANY) {
-                                upperBound.push(_.Storages.MATCHER.NUMBER.MAX);
-                            } else if (high === _.Storages.MATCHER.STRING.ANY) {
-                                upperBound.push(_.Storages.MATCHER.STRING.MAX);
-                            } else { // exakt match
-                                upperBound.push(high);
-                            }
-                        }
-                    }
-                    if (lowerBound.length > 0) {
-                        if (upperBound.length > 0) {
-                            return IDBKeyRange.bound(lowerBound, upperBound, lowerOpen, upperOpen);
-                        } else {
-                            return IDBKeyRange.lowerBound(lowerBound, lowerOpen);
-                        }
-                    } else {
-                        return IDBKeyRange.upperBound(upperBound, upperOpen);
-                    }
-                } else { // no wildcards, die Arrays werden 1:1 übernommen
-                    if (keyRangeFromOpt) {
-                        if (keyRangeToOpt) {
-                            return IDBKeyRange.bound(keyRangeFromOpt, keyRangeToOpt, lowerOpen, upperOpen);
-                        } else {
-                            return IDBKeyRange.lowerBound(keyRangeFromOpt, lowerOpen);
-                        }
-                    } else {
-                        return IDBKeyRange.upperBound(keyRangeToOpt, upperOpen);
-                    }
-                }
-            }
-
-            /**
-             * Ruft die iterations-Methode auf, sollte diese 'false' zurückliefern wird die Schleife abgebrochen.
-             * Ansonsten wird bis zum optionalen limit oder bis zum Ende weitergemacht.
-             */
-            async #openCursorIteration(request, iteration, limit) {
-                limit = limit || Number.MAX_VALUE;
-                const _this = this;
-                return new Promise((result, reject) => {
-                    let i = 0;
-                    request.onsuccess = async function (event) {
-                        const cursor = event.target.result;
-                        // können kein await auf die Iteration setzen, da ansonsten die Transaktion des Cursors beendet wird.
-                        if (!cursor || i >= limit || _this.#checkIteration(iteration, cursor.value, i) === false) {
-                            result(); // just finish promise
-                        } else {
-                            i++;
-                            cursor.continue();
-                        }
-                    };
-                });
-            }
-
-            #checkIteration(fn, value, index) {
-                const result = fn(value, index);
-                // TODO: wieder scharf schalten, wenn es an allen Stellen gefixt ist
-                // if (result instanceof Promise) throw new Error("Eine Iterations-Funktion darf kein Promise liefern!");
-                return result;
-            }
-
-            /**
-             * Sammelt das ganze Resultat in einem Array und liefert dieses einmalig aus.
-             */
-            async #openCursorFetch(request, limit) {
-                limit = limit || Number.MAX_VALUE;
-                return new Promise((result, reject) => {
-                    const results = [];
-                    let i = 0;
-                    request.onsuccess = function (event) {
-                        const cursor = event.target.result;
-                        if (cursor && i < limit) {
-                            results.push(cursor.value);
-                            i++;
-                            cursor.continue();
-                        } else {
-                            result(results);
-                        }
-                    };
-                });
-            }
-
-            awaitRequest(idbRequest) {
-                return new Promise((resolve, reject) => {
-                    idbRequest.onsuccess = function (event) {
-                        resolve(event.target.result);
-                    };
-                })
+            async getAllKeys(queryOpt, iterationOpt) {
+                return await this.constructor.QueryOps.doSearch(this, queryOpt, iterationOpt, "getAllKeys");
             }
 
             // für readonly objectstores, kann man hierüber abfragen, ob der ObjectStore auch existiert
@@ -931,6 +744,222 @@ class demawiRepository {
                 console.log("Clone objectstore '" + this.storageId + "' to '" + toObjectStore.storageId + "'... starte...");
                 await this.copyTo(toObjectStore);
                 console.log("Clone objectstore '" + this.storageId + "' to '" + toObjectStore.storageId + "'... finished!");
+            }
+
+            static QueryOps = class QueryOps {
+
+                /**
+                 * @param retrieveFnName was wird als Resultat erwartet nur die Primärschlüssel oder die Objekte selbst.
+                 */
+                static async doSearch(objectStorage, queryOpt, iterationOpt, retrieveFnName) {
+                    if (!queryOpt) {
+                        if (queryOpt !== false) console.warn("getAll ohne query-Parametern kann bei großen Datenbanken zu Problemen führen")
+                        queryOpt = {};
+                    }
+                    const connection = await objectStorage.indexedDb.getConnection();
+                    const transaction = connection.transaction(objectStorage.storageId, "readonly");
+                    let target = transaction.objectStore(objectStorage.storageId);
+                    return this.#awaitRequest(target[retrieveFnName]());
+
+                    /**
+                     * In bestimmten Fällen müssen wir eine Suchanfrage an einer bestimmten Stelle wiederaufnehmen, weil wir es nicht in einer einzigen Transaktion abhandeln können.
+                     * - Gesetzte .batchSize: hier rufen wir öfter hintereinander die Suchanfrage auf, um nur eine bestimmte maximale Anzahl an Objekten gleichzeitig aus dem Store in der Hand zu haben
+                     * - Asynchrone 'iterationOpt': eine asynchrone Verarbeitung führt automatisch dazu, dass eine Such-Transaktion endet.
+                     * Für die Wiederaufnahme muss auf jeden Fall auch der primäre Schlüssel im Index mit enthalten sein.
+                     */
+                    const needReconnectable = !!(queryOpt.batchSize || (iterationOpt && _.util.isAsyncFunction(iterationOpt)));
+                    if (queryOpt.index || needReconnectable) target = await objectStorage.constructor.IndexOps.getQueryIndex(objectStorage, target, queryOpt.index, needReconnectable);
+                    if (queryOpt.keyMatch || queryOpt.keyMatchFrom || queryOpt.keyMatchTo) queryOpt.keyMatch = this.#getQueryKeyRange(queryOpt.keyMatch, queryOpt.keyMatchFrom, queryOpt.keyMatchTo, queryOpt.keyMatchFromOpen, queryOpt.keyMatchToOpen);
+                    if (iterationOpt) return await this.#openCursorIteration(target.openCursor(queryOpt.keyMatch, queryOpt.order), iterationOpt, queryOpt.limit);
+                    if (queryOpt.order) return await this.#openCursorFetch(target.openCursor(queryOpt.keyMatch, queryOpt.order), queryOpt.limit);
+                    return this.#awaitRequest(target[retrieveFnName](queryOpt.keyMatch, queryOpt.limit));
+                }
+
+                /**
+                 * Ersetzt potenzielle Wildcards durch minimals/maximalst mögliche (String-/Number-) Werte und liefert eine {IDBKeyRange}-Definition zurück.
+                 * keyRangeSingle muss alleine angegeben werden. Ansonsten können keyRangeFromOpt und keyRangeToOpt zusammen oder nur einer von beiden angegeben werden.
+                 * @returns {IDBKeyRange}
+                 */
+                static #getQueryKeyRange(keyMatch, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen) {
+                    if (keyMatch instanceof IDBKeyRange) return keyMatch;
+                    let hasWildcards = false;
+                    if (keyMatch) {
+                        hasWildcards = keyMatch.filter(a => typeof a === "object").length > 0;
+                        if (!hasWildcards) return IDBKeyRange.only(keyMatch);
+                        keyMatchFrom = keyMatch;
+                        keyMatchTo = keyMatch;
+                    } else {
+                        if (keyMatchFrom) hasWildcards = keyMatchFrom.filter(a => typeof a === "object").length > 0;
+                        if (!hasWildcards && keyMatchTo) hasWildcards = keyMatchTo.filter(a => typeof a === "object").length > 0;
+                    }
+
+                    if (hasWildcards) {
+                        const lowerBound = []; // Wildcards werden mit den minimalst möglichen Werten gefüllt
+                        const upperBound = []; // Wildcards werden mit den maximalst möglichen Werten gefüllt
+                        for (let i = 0, l = (keyMatchFrom || keyMatchTo).length; i < l; i++) {
+                            const low = keyMatchFrom && keyMatchFrom[i];
+                            const high = keyMatchTo && keyMatchTo[i];
+                            if (low) {
+                                if (low === _.Storages.MATCHER.NUMBER.ANY) {
+                                    lowerBound.push(_.Storages.MATCHER.NUMBER.MIN);
+                                } else if (low === _.Storages.MATCHER.STRING.ANY) {
+                                    lowerBound.push(_.Storages.MATCHER.STRING.MIN);
+                                } else { // exakt match
+                                    lowerBound.push(low);
+                                }
+                            }
+                            if (high) {
+                                if (high === _.Storages.MATCHER.NUMBER.ANY) {
+                                    upperBound.push(_.Storages.MATCHER.NUMBER.MAX);
+                                } else if (high === _.Storages.MATCHER.STRING.ANY) {
+                                    upperBound.push(_.Storages.MATCHER.STRING.MAX);
+                                } else { // exakt match
+                                    upperBound.push(high);
+                                }
+                            }
+                        }
+                        if (lowerBound.length > 0) {
+                            if (upperBound.length > 0) {
+                                return IDBKeyRange.bound(lowerBound, upperBound, keyMatchFromOpen, keyMatchToOpen);
+                            } else {
+                                return IDBKeyRange.lowerBound(lowerBound, keyMatchFromOpen);
+                            }
+                        } else {
+                            return IDBKeyRange.upperBound(upperBound, keyMatchToOpen);
+                        }
+                    } else { // no wildcards, die Arrays werden 1:1 übernommen
+                        if (keyMatchFrom) {
+                            if (keyMatchTo) {
+                                return IDBKeyRange.bound(keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen);
+                            } else {
+                                return IDBKeyRange.lowerBound(keyMatchFrom, keyMatchFromOpen);
+                            }
+                        } else {
+                            return IDBKeyRange.upperBound(keyMatchTo, keyMatchToOpen);
+                        }
+                    }
+                }
+
+                /**
+                 * Ruft die iterations-Methode auf, sollte diese 'false' zurückliefern wird die Schleife abgebrochen.
+                 * Ansonsten wird bis zum optionalen limit oder bis zum Ende weitergemacht.
+                 */
+                static async #openCursorIteration(request, iteration, limit) {
+                    limit = limit || Number.MAX_VALUE;
+                    const _this = this;
+                    return new Promise((result, reject) => {
+                        let i = 0;
+                        request.onsuccess = async function (event) {
+                            const cursor = event.target.result;
+                            // können kein await auf die Iteration setzen, da ansonsten die Transaktion des Cursors beendet wird.
+                            if (!cursor || i >= limit || _this.#checkIteration(iteration, cursor.value, i) === false) {
+                                result(); // just finish promise
+                            } else {
+                                i++;
+                                cursor.continue();
+                            }
+                        };
+                    });
+                }
+
+                static #checkIteration(fn, value, index) {
+                    const result = fn(value, index);
+                    // TODO: wieder scharf schalten, wenn es an allen Stellen gefixt ist
+                    // if (result instanceof Promise) throw new Error("Eine Iterations-Funktion darf kein Promise liefern!");
+                    return result;
+                }
+
+                /**
+                 * Sammelt das ganze Resultat in einem Array und liefert dieses einmalig aus.
+                 */
+                static async #openCursorFetch(request, limit) {
+                    limit = limit || Number.MAX_VALUE;
+                    return new Promise((result, reject) => {
+                        const results = [];
+                        let i = 0;
+                        request.onsuccess = function (event) {
+                            const cursor = event.target.result;
+                            if (cursor && i < limit) {
+                                results.push(cursor.value);
+                                i++;
+                                cursor.continue();
+                            } else {
+                                result(results);
+                            }
+                        };
+                    });
+                }
+
+                static #awaitRequest(idbRequest) {
+                    return new Promise((resolve, reject) => {
+                        idbRequest.onsuccess = function (event) {
+                            resolve(event.target.result);
+                        };
+                    })
+                }
+            }
+
+            static IndexOps = class IndexOps {
+
+                /**
+                 * index: ["world", "gruppe_id", "loc.name", "world_season"]
+                 * sortBy "gruppe_id"
+                 * @param objectStore die aktuelle Verbindung zum ObjectStore
+                 * @param indexDef indexName or keyPath
+                 * @param needPrimaryKey ob der PrimärSchlüssel im index enthalten sein muss.
+                 */
+                static async getQueryIndex(objectStorage, objectStore, indexDef, needPrimaryKey) {
+                    if (typeof indexDef === "string") {
+                        return objectStore.index(indexDef);
+                        if (!needPrimaryKey) return objectStore.index(indexDef); // check if it's a already given name
+                        indexDef = this.getKeyPathArray(objectStore.index(indexDef).keyPath);
+                    }
+                    if (false && needPrimaryKey) {
+                        const primaryKey = this.getKeyPathArray(objectStore.keyPath);
+                        for (const cur of primaryKey) {
+                            if (!indexDef.includes(cur)) indexDef.push(cur);
+                        }
+                    }
+                    // should be an array
+                    return await this.#findIndex(objectStorage, objectStore, indexDef);
+                }
+
+                static getKeyPathArray(def) {
+                    if (typeof def === "string") return [def];
+                    return def;
+                }
+
+                static async #findIndex(objectStorage, objectStore, indexDefArray) {
+                    for (const indexName of objectStore.indexNames) {
+                        const curIndex = objectStore.index(indexName);
+                        if (_.util.arraysEqual(curIndex.keyPath, indexDefArray)) {
+                            return curIndex;
+                        }
+                    }
+                    // nichts gefunden wir legen einen neuen index an
+                    return await this.#createAdHocIndex(objectStorage, objectStore, indexDefArray);
+                }
+
+                /**
+                 * Sucht nach einem noch freien Namen und legt diesen dann mit der Keypath-Definition an
+                 */
+                static async #createAdHocIndex(objectStorage, objectStore, keyPath) {
+                    let i = 1;
+                    while (true) {
+                        const curIndexName = "" + i;
+                        if (!objectStore.indexNames.contains(curIndexName)) {
+                            return await this.#createAndGetNewIndex(objectStorage, objectStore, curIndexName, keyPath);
+                        }
+                        i++;
+                    }
+                }
+
+                static async #createAndGetNewIndex(objectStorage, objectStore, indexName, keyPath) {
+                    console.log("Benötige Index: " + indexName, keyPath);
+                    objectStorage.ensureIndex(indexName, keyPath);
+                    const idbObjectStore = await objectStorage.connect(); // den Objectstorage das Upgrade ausführen lassen
+                    return idbObjectStore.index(indexName);
+                }
             }
         }
 
@@ -2299,6 +2328,10 @@ class demawiRepository {
      */
     static util = class {
 
+        static isAsyncFunction(fn) {
+            return fn.constructor.name === "AsyncFunction"
+        }
+
         // Sicher für concurrent modification
         static forEachSafe(array, fn) {
             const newArray = Array();
@@ -3439,7 +3472,7 @@ class demawiRepository {
             // Auf alte dataversions prüfen
             const needRewrite = await _.WoDStorages.getItemDb().getAll({
                 index: ["dv"],
-                keyRangeTo: [_.ItemParserDataVersion],
+                keyMatchTo: [_.ItemParserDataVersion],
                 keyRangeToOpen: true,
             });
             if (needRewrite.length > 0) {
