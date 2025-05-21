@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
+// @version        0.12.0.2
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
-// @version        0.12.0.1
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
