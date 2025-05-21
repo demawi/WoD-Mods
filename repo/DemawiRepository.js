@@ -3978,6 +3978,7 @@ class demawiRepository {
         console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")");
         //document.domain = "world-of-dungeons.de";
         const iframe = await _.Libs.loadViaIFrame("https://world-of-dungeons.de/wod/spiel/news/"); //
+        iframe.contentWindow.domain = "world-of-dungeons.de";
         console.log("IFrameDBs: ", await iframe.contentWindow.indexedDB.databases());
         const request = iframe.contentWindow.indexedDB.open("wodDB");
         request.onSuccess = function() {
