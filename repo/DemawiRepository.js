@@ -186,7 +186,7 @@ class demawiRepository {
             static staticInstanceId = 1;
             instanceId;
             requestIdx = 1; // only for debugging
-            debug = false;
+            debug = true;
 
             constructor(modname, dbname) {
                 this.modname = modname;
@@ -197,7 +197,7 @@ class demawiRepository {
             /**
              * Prüft, ob der ObjectStore existiert. Wenn er dies tut, wird dieser zurückgeliefert.
              */
-            async getObjectStore(storageId) {
+            async getObjectStoreChecked(storageId) {
                 const dbConnection = await this.getConnection();
                 if (dbConnection.objectStoreNames.contains(storageId)) {
                     /**
@@ -276,9 +276,9 @@ class demawiRepository {
             /**
              * @return IDBDatabase
              */
-            async getConnection(forceUpgrade) {
-                if (forceUpgrade) {
-                    console.log("ForceUpgradeGrund: ", forceUpgrade);
+            async getConnection(...args) {
+                if (args.length > 0) {
+                    if (this.debug) console.log("ForceUpgradeGrund: ", ...args);
                     return await this.#dbConnect(true);
                 }
                 if (this.dbConnection) return this.dbConnection;
@@ -345,8 +345,8 @@ class demawiRepository {
                         resolve(_this.#dbConnectIntern(undefined, tracingId));
                     }
                     request.onblocked = function (event) {
-                        if (_this.debug) console.log("Request-blocked[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version, tracingId);
-                        // hier heißt es abwarten..
+                        console.warn("Request-blocked[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version, tracingId);
+                        // hier heißt es abwarten.. kann immer noch successen
                     }
                     request.onupgradeneeded = async function (event) {
                         if (_this.debug) console.log("Request-upgradeneed[" + _this.instanceId + ":" + request.idx + "]: " + _this.modname + " " + _this.dbname + ":" + version, tracingId);
@@ -364,11 +364,11 @@ class demawiRepository {
              * @param dbTransaction @type IDBTransaction
              */
             async #syncDatabase(dbConnection, dbTransaction) {
-                console.log("[" + this.dbname + "]: syncDatabase...");
+                if (this.debug) console.log("[" + this.dbname + "]: syncDatabase...");
                 try {
                     this.objectStoresToDelete.slice().forEach((storageId, idx) => {
                         if (dbConnection.objectStoreNames.contains(storageId)) {
-                            console.log("Lösche Objectstore " + this.dbname + "." + storageId);
+                            if (this.debug) console.log("Lösche Objectstore " + this.dbname + "." + storageId);
                             dbConnection.deleteObjectStore(storageId);
                         }
                         this.objectStoresToDelete.splice(idx, 1);
@@ -389,7 +389,7 @@ class demawiRepository {
                         if (objectStoreDef.indizesToDelete) {
                             for (const indexName of objectStoreDef.indizesToDelete) {
                                 if (dbStore.indexNames.contains(indexName)) {
-                                    console.log("[" + this.dbname + "|" + storageId + "] Entferne Index: " + indexName);
+                                    if (this.debug) console.log("[" + this.dbname + "|" + storageId + "] Entferne Index: " + indexName);
                                     dbStore.deleteIndex(indexName);
                                 }
                             }
@@ -398,7 +398,7 @@ class demawiRepository {
                         if (objectStoreDef.indizesToEnsure) {
                             for (const [indexName, keyPath] of Object.entries(objectStoreDef.indizesToEnsure)) {
                                 if (!dbStore.indexNames.contains(indexName)) {
-                                    console.log("[" + this.dbname + "|" + storageId + "] Füge neuen Index hinzu: " + indexName + " => ", keyPath);
+                                    if (this.debug) console.log("[" + this.dbname + "|" + storageId + "] Füge neuen Index hinzu: " + indexName + " => ", keyPath);
                                     dbStore.createIndex(indexName, keyPath);
                                 }
                             }
@@ -437,22 +437,10 @@ class demawiRepository {
                 const dbTo = new demawiRepository.Storages.IndexedDb(this.modname, dbNameTo);
                 const dbConnectionFrom = await this.getConnection();
                 const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
-                const objectStoresRead = [];
-                const objectStoresWrite = [];
                 for (const objectStoreName of objectStoreNames) {
-                    let transactionFrom = dbConnectionFrom.transaction(objectStoreName, "readonly");
-                    let objectStoreFrom = transactionFrom.objectStore(objectStoreName);
-                    dbTo.createObjectStore(objectStoreName, objectStoreFrom.keyPath);
-                    const readFrom = new demawiRepository.Storages.ObjectStorage(objectStoreName, objectStoreFrom.keyPath, null, true);
-                    readFrom.indexedDb = this;
-                    const writeTo = new demawiRepository.Storages.ObjectStorage(objectStoreName, objectStoreFrom.keyPath, null, false);
-                    writeTo.indexedDb = dbTo;
-                    objectStoresRead.push(readFrom);
-                    objectStoresWrite.push(writeTo);
-                }
-                for (let i = 0, l = objectStoresRead.length; i < l; i++) {
-                    let readFrom = objectStoresRead[i];
-                    let writeTo = objectStoresWrite[i];
+                    const readFrom = await this.getObjectStoreChecked(objectStoreName);
+                    const writeTo = dbTo.createObjectStore(objectStoreName, await readFrom.getPrimaryKey());
+                    console.log("Clone '" + this.dbname + "' to '" + dbNameTo + "'... " + objectStoreName + "...");
                     await readFrom.getAll(false, async cur => {
                         await writeTo.setValue(cur);
                     })
@@ -605,7 +593,7 @@ class demawiRepository {
                 let objectStore = transaction.objectStore(this.storageId);
                 if (!this.#areAllIndicesSynced(objectStore)) {
                     // Es sind nicht alle Indizes installiert, wir forcieren ein update und machen alles nochmal
-                    await this.indexedDb.getConnection("Indizes müssen gesynced werden");
+                    await this.indexedDb.getConnection("[" + this.indexedDb.dbname + "." + this.storageId + "} Indizes müssen gesynced werden", this.indizesToDelete, this.indizesToEnsure);
                     return await this.connect(withWrite);
                 }
                 return objectStore;
@@ -729,6 +717,16 @@ class demawiRepository {
                 return this.primaryKey;
             }
 
+            async getMissingEntries(indexName) {
+                const connection = await this.indexedDb.getConnection();
+                const transaction = connection.transaction(this.storageId, "readonly");
+                const objectStore = transaction.objectStore(this.storageId);
+                const index = objectStore.index(indexName);
+                const indexKeys = await this.constructor.QueryOps.awaitRequest(index.getAllKeys());
+                const objectStoreKeys = await this.constructor.QueryOps.awaitRequest(objectStore.getAllKeys());
+                return objectStoreKeys.filter(k => !indexKeys.includes(k));
+            }
+
             /**
              * @param queryOpt Sofern angegeben hat queryOpt folgende Struktur. Es lässt sich damit über die Datenbank filtern und auch sortieren.
              * {
@@ -739,26 +737,24 @@ class demawiRepository {
              *     keyMatcheTo: [1231233, "Balesh"], // [Array] wird als upperBound verwendet. Sofern die obere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
              *     keyMatchFromOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
              *     keyMatchToOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
-             *     limit: 20, // [int] eine Limitierung der Ergebnisse
-             *     skip: 20, // [int] die erste Funde ignorieren und erst danach zurückgeben
-             *     start: ["WA12312323"], // primary key Wert (kann auch mehrere Werte enthalten, falls der PrimaryKey sich aus mehreren Spalten zusammensetzt) von dem die Suche aus startet
-             *                            // der Wert selber ist dabei nicht in der Ergebnismenge enthalten
-             *                            // sofern die Primary-Key Spalten nicht im 'index' enthalten sind, werden diese dort angehängt. Abhängig von der Sortierung wird 'keyRangeFrom' oder 'keyRangeTo' gesetzt.
-             *     batchSize: 1,          // [int] in welcher Menge die Datenobjekte aus der Datenbank geholt werden
+             *     limit: 20,             // [int] eine Limitierung der Ergebnisse
+             *     batchSize: 100,        // [int] default:100 wie viele Objekte maximal gleichzeitig aus der Datenbank geholt werden, wird dieses angegeben muss eine iterationFn angegeben werden
              * }
-             * @param iterationOpt @type Function(object, idx): die Objekte werden der Reihe nach in die Methode reingereicht, bei false wird die Schleife abgebrochen oder bei gesetztem query-limit
+             * @param iterationFn @type Function(object, idx): die Objekte werden der Reihe nach in die Methode reingereicht, bei false wird die Schleife abgebrochen oder bei gesetztem query-limit
+             *                    die Funktion darf mittlerweile auch async sein. Dann wird allerdings die Batch-Search verwendet. Abhängig von der BatchSize werden x-Objekte jeweils geholt und diese dann reingereicht.
+             *                    Danach wird erneut eine Transaktion aufgebaut für den nächsten Batch.
              * @return wenn iteration nicht gesetzt wird, wird ein Array der Objekte zurückgeliefert
              *         wenn iteration gesetzt ist, werden die Objekte einem nach dem anderen in die iteration-Funktion reingereicht iteration(object, idx), der Rückgabewert von getAll ist dann nicht gesetzt.
              */
-            async getAll(queryOpt, iterationOpt) {
-                return await this.constructor.QueryOps.doSearch(this, queryOpt, iterationOpt, "getAll");
+            async getAll(queryOpt, iterationFn) {
+                return this.constructor.QueryOps.doSearch(this, queryOpt, iterationFn, "getAll");
             }
 
             /**
              * Liefert ein Array über alle vorhandenen Objekte.
              */
             async getAllKeys(queryOpt, iterationOpt) {
-                return await this.constructor.QueryOps.doSearch(this, queryOpt, iterationOpt, "getAllKeys");
+                return this.constructor.QueryOps.doSearch(this, queryOpt, iterationOpt, "getAllKeys");
             }
 
             // für readonly objectstores, kann man hierüber abfragen, ob der ObjectStore auch existiert
@@ -783,31 +779,157 @@ class demawiRepository {
                 console.log("Clone objectstore '" + this.storageId + "' to '" + toObjectStore.storageId + "'... finished!");
             }
 
+            /**
+             * Die erste Anfrage wird standard-gemäß der query.batchSize (default = 100) ausgeführt.
+             * Für nachfolgende Anfragen wird der Query angepasst und
+             * für Vorwärtssuche: keyMatchFrom und keyMatchFromOpen
+             * für Rückwartssuche: keyMatchTo und keyMatchToOpen
+             * gesetzt.
+             * Abhängig der query.batchSize wird den Unteranfragen ein entsprechendes query.limit mitgegeben.
+             */
+            static BatchSearch = class BatchSearch {
+                objectStorage;
+                idbObjectStore;
+                idbTarget;
+                query;
+                iteration;
+                retrieveFnName; // getAll oder getAllKeys
+                batchSize;
+                results;
+                limit;
+                alreadyFetched = 0;
+                indexKeyPath;
+                pointerName;
+
+                constructor(objectStorage, idbObjectStore, idbTarget, query, iteration, retrieveFnName) {
+                    if (retrieveFnName !== "getAll") throw new Error("Für den Batch-Search wird bisher nur 'getAll' unterstützt");
+                    this.objectStorage = objectStorage;
+                    this.idbObjectStore = idbObjectStore;
+                    this.idbTarget = idbTarget;
+                    this.query = query;
+                    this.iteration = iteration;
+                    this.limit = this.query.limit || Number.MAX_VALUE;
+                    this.retrieveFnName = retrieveFnName;
+                    this.batchSize = query.batchSize || 100;
+                    delete query.batchSize; // für die Subanfragen selbst soll keine Batch-Search verwendet werden
+                    if (!this.query.order || this.query.order.startsWith("next")) {
+                        this.pointerName = "keyMatchFrom";
+                    } else {
+                        this.pointerName = "keyMatchTo";
+                    }
+                }
+
+                async batchIt() {
+                    await (a => {
+                    })(); // erst die nachfolgenden Debug-Werte ändern wenn wir wirklich dran sind.
+                    const debug = this.query.debug;
+                    if (debug === 2) this.query.debug = 1;
+                    else delete this.query.debug;
+                    while (await this.#run() !== true) ;
+                    this.query.debug = debug;
+                }
+
+                async #run() {
+                    this.query.limit = Math.min(this.batchSize, this.limit);
+                    this.results = await this.objectStorage[this.retrieveFnName](this.query);
+                    for (let i = 0, l = this.results.length; i < l; i++) {
+                        if (await this.iteration(this.results[i], i) === false) return true;
+                    }
+                    this.alreadyFetched += this.results.length;
+                    this.limit -= this.results.length;
+                    // Limit erreicht oder Anzahl der Resulstate weniger als erwartet=keine weiteren Ergebnisse aus der Datenbank
+                    if (this.query.limit < 0 || this.results.length < this.batchSize) return true;
+
+                    if (!this.indexKeyPath) { // wird nur einmalig nach dem ersten Request durchgeführt
+                        if (this.idbObjectStore === this.idbTarget) {
+                            this.indexKeyPath = this.idbObjectStore.keyPath;
+                        } else {
+                            let primaryKey = this.idbObjectStore.keyPath;
+                            if (typeof primaryKey === "string") primaryKey = [primaryKey];
+                            let indexDef = this.idbTarget.keyPath;
+                            if (typeof indexDef === "string") indexDef = [indexDef];
+                            for (const cur of primaryKey) {
+                                if (!indexDef.includes(cur)) indexDef.push(cur);
+                            }
+                            this.indexKeyPath = indexDef;
+                            this.query.index = indexDef;
+                        }
+                        if (!this.query.order || this.query.order.startsWith("next")) {
+                            this.query.keyMatchFromOpen = true;
+                        } else {
+                            this.query.keyMatchToOpen = true;
+                        }
+                    }
+                    // TODO: funktioniert nur bei "getAll". Bei "getAllKeys" könnten wir den Pointer nicht neu setzen
+                    this.query[this.pointerName] = await this.constructor.getValuesFor(this.results[this.results.length - 1], this.indexKeyPath);
+                }
+
+                static async getValuesFor(dataStoreObject, keyPath) {
+                    if (typeof keyPath === "string") return this.#getValueFromObject(dataStoreObject, keyPath);
+                    const result = [];
+                    for (const cur of keyPath) {
+                        result.push(this.#getValueFromObject(dataStoreObject, cur));
+                    }
+                    return result;
+                }
+
+                static #getValueFromObject(object, pathToValue) {
+                    if (pathToValue.includes(".")) throw new Error("KeyPfad innerhalb eines Objekte sind noch nicht möglich '" + pathToValue + "'");
+                    return object[pathToValue]
+                }
+            }
+
             static QueryOps = class QueryOps {
 
                 /**
                  * @param retrieveFnName was wird als Resultat erwartet nur die Primärschlüssel oder die Objekte selbst.
                  */
-                static async doSearch(objectStorage, queryOpt, iterationOpt, retrieveFnName) {
-                    if (!queryOpt) {
-                        if (queryOpt !== false) console.warn("getAll ohne query-Parametern kann bei großen Datenbanken zu Problemen führen")
-                        queryOpt = {};
+                static async doSearch(objectStorage, query, iterationOpt, retrieveFnName) {
+                    const startTime = new Date().getTime();
+                    if (!query) {
+                        if (query !== false) console.warn("getAll ohne query-Parametern kann bei großen Datenbanken zu Problemen führen")
+                        query = {};
                     }
                     const connection = await objectStorage.indexedDb.getConnection();
-                    const transaction = connection.transaction(objectStorage.storageId, "readwrite");
-                    let target = transaction.objectStore(objectStorage.storageId);
+                    const transaction = connection.transaction(objectStorage.storageId, "readonly");
+                    const idbObjectStore = transaction.objectStore(objectStorage.storageId);
+                    let target = idbObjectStore;
                     /**
                      * In bestimmten Fällen müssen wir eine Suchanfrage an einer bestimmten Stelle wiederaufnehmen, weil wir es nicht in einer einzigen Transaktion abhandeln können.
-                     * - Gesetzte .batchSize: hier rufen wir öfter hintereinander die Suchanfrage auf, um nur eine bestimmte maximale Anzahl an Objekten gleichzeitig aus dem Store in der Hand zu haben
+                     * - Gesetzte query.batchSize: hier rufen wir öfter hintereinander die Suchanfrage auf, um nur eine bestimmte maximale Anzahl an Objekten gleichzeitig aus dem Store in der Hand zu haben
                      * - Asynchrone 'iterationOpt': eine asynchrone Verarbeitung führt automatisch dazu, dass eine Such-Transaktion endet.
-                     * Für die Wiederaufnahme muss auf jeden Fall auch der primäre Schlüssel im Index mit enthalten sein.
+                     * Für die Wiederaufnahme muss auf jeden Fall auch der primäre Schlüssel im Index mit enthalten sein (der Index wir mit fehlenden PrimaryKeys angereichert).
+                     * Für diese beiden Fälle wird die BatchSearch-Klasse verwendet, wo die eigentliche Anfrage durch Subanfragen mit entsprechendem gesteuertem query.limit durchgeführt wird.
                      */
-                    const needReconnectable = !!(queryOpt.batchSize || (iterationOpt && _.util.isAsyncFunction(iterationOpt)));
-                    if (queryOpt.index) target = await objectStorage.constructor.IndexOps.getQueryIndex(objectStorage, target, queryOpt.index, needReconnectable);
-                    if (queryOpt.keyMatch || queryOpt.keyMatchFrom || queryOpt.keyMatchTo) queryOpt.keyMatch = this.#getQueryKeyRange(queryOpt.keyMatch, queryOpt.keyMatchFrom, queryOpt.keyMatchTo, queryOpt.keyMatchFromOpen, queryOpt.keyMatchToOpen);
-                    if (iterationOpt) return await this.#openCursorIteration(target.openCursor(queryOpt.keyMatch, queryOpt.order), iterationOpt, queryOpt.limit);
-                    if (queryOpt.order) return await this.#openCursorFetch(target.openCursor(queryOpt.keyMatch, queryOpt.order), queryOpt.limit);
-                    return this.#awaitRequest(target[retrieveFnName](queryOpt.keyMatch, queryOpt.limit));
+                    const needReconnectable = query.batchSize || (iterationOpt && _.util.isAsyncFunction(iterationOpt));
+                    // Zuerst versuchen wir das Ziel zu bekommen
+                    if (query.index) target = await objectStorage.constructor.TargetOps.getQueryTarget(objectStorage, target, query);
+
+                    let result;
+                    if (needReconnectable && !query.noBatch) {
+                        if (query.debug) console.log("SearchType: Batch", _.util.cloneObject(query));
+                        result = new objectStorage.constructor.BatchSearch(objectStorage, idbObjectStore, target, query, iterationOpt, retrieveFnName).batchIt();
+                    } else {
+                        let keyRange;
+                        if (query.keyMatch || query.keyMatchFrom || query.keyMatchTo) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchFrom, query.keyMatchTo, query.keyMatchFromOpen, query.keyMatchToOpen);
+                        if (iterationOpt) {
+                            if (query.debug) console.log("SearchType: openCursorIteration", keyRange, _.util.cloneObject(query));
+                            result = this.#openCursorIteration(target.openCursor(keyRange, query.order), iterationOpt, query.limit, retrieveFnName);
+                        } else if (query.order) {
+                            if (query.debug) console.log("SearchType: openCursor", keyRange, _.util.cloneObject(query));
+                            result = this.#openCursorFetch(target.openCursor(keyRange, query.order), query.limit, retrieveFnName);
+                        } else {
+                            if (query.debug) console.log("SearchType: " + retrieveFnName, keyRange, _.util.cloneObject(query));
+                            result = this.awaitRequest(target[retrieveFnName](keyRange, query.limit));
+                        }
+                    }
+                    if (query.debug === 1) {
+                        result = result.then(a => {
+                            console.log("QueryTime: ", (new Date().getTime() - startTime) / 1000 + " secs", query);
+                            return a;
+                        });
+                    }
+                    return result;
                 }
 
                 /**
@@ -815,8 +937,11 @@ class demawiRepository {
                  * keyRangeSingle muss alleine angegeben werden. Ansonsten können keyRangeFromOpt und keyRangeToOpt zusammen oder nur einer von beiden angegeben werden.
                  * @returns {IDBKeyRange}
                  */
-                static #getQueryKeyRange(keyMatch, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen) {
-                    if (keyMatch instanceof IDBKeyRange) return keyMatch;
+                static async #getQueryKeyRange(objectStorage, target, query, keyMatch, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen) {
+                    if (query.keyMatch instanceof IDBKeyRange) return keyMatch;
+                    if (keyMatch && typeof keyMatch === "string") keyMatch = [keyMatch];
+                    if (keyMatchFrom && typeof keyMatchFrom === "string") keyMatchFrom = [keyMatchFrom];
+                    if (keyMatchTo && typeof keyMatchTo === "string") keyMatchTo = [keyMatchTo];
                     let hasWildcards = false;
                     if (keyMatch) {
                         hasWildcards = keyMatch.filter(a => typeof a === "object").length > 0;
@@ -853,25 +978,25 @@ class demawiRepository {
                                 }
                             }
                         }
-                        if (lowerBound.length > 0) {
-                            if (upperBound.length > 0) {
-                                return IDBKeyRange.bound(lowerBound, upperBound, keyMatchFromOpen, keyMatchToOpen);
-                            } else {
-                                return IDBKeyRange.lowerBound(lowerBound, keyMatchFromOpen);
-                            }
-                        } else {
-                            return IDBKeyRange.upperBound(upperBound, keyMatchToOpen);
-                        }
+                        return this.#toIDBKeyRange(target, lowerBound.length > 0 ? lowerBound : undefined, upperBound.length > 0 ? upperBound : undefined, keyMatchFromOpen, keyMatchToOpen);
                     } else { // no wildcards, die Arrays werden 1:1 übernommen
-                        if (keyMatchFrom) {
-                            if (keyMatchTo) {
-                                return IDBKeyRange.bound(keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen);
-                            } else {
-                                return IDBKeyRange.lowerBound(keyMatchFrom, keyMatchFromOpen);
-                            }
+                        return this.#toIDBKeyRange(target, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen);
+                    }
+                }
+
+                static #toIDBKeyRange(target, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen) {
+                    if (typeof target.keyPath === "string") {
+                        if (keyMatchFrom) keyMatchFrom = keyMatchFrom[0];
+                        if (keyMatchTo) keyMatchTo = keyMatchTo[0];
+                    }
+                    if (keyMatchFrom) {
+                        if (keyMatchTo) {
+                            return IDBKeyRange.bound(keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen);
                         } else {
-                            return IDBKeyRange.upperBound(keyMatchTo, keyMatchToOpen);
+                            return IDBKeyRange.lowerBound(keyMatchFrom, keyMatchFromOpen);
                         }
+                    } else {
+                        return IDBKeyRange.upperBound(keyMatchTo, keyMatchToOpen);
                     }
                 }
 
@@ -879,15 +1004,15 @@ class demawiRepository {
                  * Ruft die iterations-Methode auf, sollte diese 'false' zurückliefern wird die Schleife abgebrochen.
                  * Ansonsten wird bis zum optionalen limit oder bis zum Ende weitergemacht.
                  */
-                static async #openCursorIteration(request, iteration, limit) {
+                static async #openCursorIteration(request, iteration, limit, retrieveFnName) {
                     limit = limit || Number.MAX_VALUE;
                     const _this = this;
                     return new Promise((result, reject) => {
                         let i = 0;
-                        request.onsuccess = async function (event) {
+                        request.onsuccess = function (event) {
                             const cursor = event.target.result;
                             // können kein await auf die Iteration setzen, da ansonsten die Transaktion des Cursors beendet wird.
-                            if (!cursor || i >= limit || _this.#checkIteration(iteration, cursor.value, i) === false) {
+                            if (!cursor || i >= limit || _this.#checkIteration(iteration, cursor, retrieveFnName, i) === false) {
                                 result(); // just finish promise
                             } else {
                                 i++;
@@ -897,25 +1022,33 @@ class demawiRepository {
                     });
                 }
 
-                static #checkIteration(fn, value, index) {
+                static #checkIteration(fn, cursor, retrieveFnName, index) {
+                    const value = this.#getResultForCursor(cursor, retrieveFnName);
                     const result = fn(value, index);
                     // TODO: wieder scharf schalten, wenn es an allen Stellen gefixt ist
                     // if (result instanceof Promise) throw new Error("Eine Iterations-Funktion darf kein Promise liefern!");
                     return result;
                 }
 
+                static #getResultForCursor(cursor, retrieveFnName) {
+                    if (retrieveFnName === "getAll") return cursor.value;
+                    if (retrieveFnName === "getAllKeys") return cursor.primaryKey;
+                    if (retrieveFnName === "cursor") return cursor;
+                }
+
                 /**
                  * Sammelt das ganze Resultat in einem Array und liefert dieses einmalig aus.
                  */
-                static async #openCursorFetch(request, limit) {
+                static async #openCursorFetch(request, limit, retrieveFnName) {
                     limit = limit || Number.MAX_VALUE;
+                    const _this = this;
                     return new Promise((result, reject) => {
                         const results = [];
                         let i = 0;
                         request.onsuccess = function (event) {
                             const cursor = event.target.result;
                             if (cursor && i < limit) {
-                                results.push(cursor.value);
+                                results.push(_this.#getResultForCursor(cursor, retrieveFnName));
                                 i++;
                                 cursor.continue();
                             } else {
@@ -925,7 +1058,7 @@ class demawiRepository {
                     });
                 }
 
-                static #awaitRequest(idbRequest) {
+                static awaitRequest(idbRequest) {
                     return new Promise((resolve, reject) => {
                         idbRequest.onsuccess = function (event) {
                             resolve(event.target.result);
@@ -934,29 +1067,23 @@ class demawiRepository {
                 }
             }
 
-            static IndexOps = class IndexOps {
+            static TargetOps = class TargetOps {
 
                 /**
+                 * Gibt das idbTarget (idbObjectStore oder idbIndex) zurück, auf dem die Anfrage arbeiten kann.
+                 * Sofern kein geeigneter Index gefunden werden kann, wird adHoc ein neuer dafür angelegt.
                  * index: ["world", "gruppe_id", "loc.name", "world_season"]
                  * sortBy "gruppe_id"
-                 * @param objectStore die aktuelle Verbindung zum ObjectStore
-                 * @param indexDef indexName or keyPath
-                 * @param needPrimaryKey ob der PrimärSchlüssel im index enthalten sein muss.
+                 * @param objectStorage die aktuelle ObjectStoragen-Instanz
+                 * @param idbObjectStore die aktuelle Verbindung zum ObjectStore
+                 * @param query die aktuelle Suchanfrage.
                  */
-                static async getQueryIndex(objectStorage, objectStore, indexDef, needPrimaryKey) {
-                    if (typeof indexDef === "string") {
-                        return objectStore.index(indexDef);
-                        if (!needPrimaryKey) return objectStore.index(indexDef); // check if it's a already given name
-                        indexDef = this.getKeyPathArray(objectStore.index(indexDef).keyPath);
+                static async getQueryTarget(objectStorage, idbObjectStore, query) {
+                    let indexDef = query.index;
+                    if (typeof indexDef === "string" && idbObjectStore.indexNames[indexDef]) {
+                        return idbObjectStore.index(indexDef);
                     }
-                    if (false && needPrimaryKey) {
-                        const primaryKey = this.getKeyPathArray(objectStore.keyPath);
-                        for (const cur of primaryKey) {
-                            if (!indexDef.includes(cur)) indexDef.push(cur);
-                        }
-                    }
-                    // should be an array
-                    return await this.#findIndex(objectStorage, objectStore, indexDef);
+                    return await this.#findTarget(objectStorage, idbObjectStore, indexDef);
                 }
 
                 static getKeyPathArray(def) {
@@ -964,15 +1091,24 @@ class demawiRepository {
                     return def;
                 }
 
-                static async #findIndex(objectStorage, objectStore, indexDefArray) {
+                static async #findTarget(objectStorage, objectStore, keyPath) {
+                    if (this.isKeyPathEquals(objectStore.keyPath, keyPath)) {
+                        return objectStore;
+                    }
                     for (const indexName of objectStore.indexNames) {
                         const curIndex = objectStore.index(indexName);
-                        if (_.util.arraysEqual(curIndex.keyPath, indexDefArray)) {
+                        if (this.isKeyPathEquals(curIndex.keyPath, keyPath)) {
                             return curIndex;
                         }
                     }
                     // nichts gefunden wir legen einen neuen index an
-                    return await this.#createAdHocIndex(objectStorage, objectStore, indexDefArray);
+                    return await this.#createAdHocIndex(objectStorage, objectStore, keyPath);
+                }
+
+                static isKeyPathEquals(keyPath1, keyPath2) {
+                    if (typeof keyPath1 === "string") keyPath1 = [keyPath1];
+                    if (typeof keyPath2 === "string") keyPath2 = [keyPath2];
+                    return _.util.arraysEqual(keyPath1, keyPath2);
                 }
 
                 /**
@@ -1747,7 +1883,8 @@ class demawiRepository {
                 reportId = form["report"].value;
                 schlachtName = "Unbekannte Schlacht";
                 reportIdSuffix = "S";
-                const schlachtLink = doc.querySelector("h1 a");
+                let schlachtLink = doc.querySelector("h1 a[href*='/clanquest/']");
+                if(!schlachtLink) schlachtLink = doc.querySelector("h2 a[href*='/clanquest/']");
                 if (schlachtLink) schlachtName = schlachtLink.textContent.trim();
             } else if (form["DuellId"]) {
                 reportId = form["DuellId"].value;
@@ -1962,13 +2099,13 @@ class demawiRepository {
                             for (let i = 1, l = trs.length; i < l; i++) {
                                 const tr = trs[i];
                                 if (tr.children[0].textContent !== "") {
-                                    item = { keeped: 1 }; // keeped
+                                    item = {keeped: 1}; // keeped
                                     if (!member.loot) member.loot = [];
                                     member.loot.push(item);
                                     item.name = tr.children[1].textContent.trim();
                                     let splitter = tr.children[4].textContent.split("/");
                                     if (splitter.length > 1) item.vg = Number(splitter[0]);
-                                } else if(tr.children[1].textContent.startsWith("wurde von")) {
+                                } else if (tr.children[1].textContent.startsWith("wurde von")) {
                                     delete item.keeped;
                                 }
                             }
@@ -3471,13 +3608,12 @@ class demawiRepository {
         }
 
         static async reportNonExistingItem(itemName) {
-            let item = this.getItemSourceDB().getValue(itemName.toLowerCase());
-            if (!item) {
+            let item = await this.getItemSourceDB().getValue(itemName.toLowerCase());
+            if (!item || !item.details) {
                 item = this.createItem(itemName);
                 item.invalid = true;
-            } else {
-                item.ts = new Date().getTime();
             }
+            item.ts = new Date().getTime();
             await this.getItemSourceDB().setValue(item);
         }
 

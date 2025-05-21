@@ -62,7 +62,7 @@
                     break;
                 case "items.php":
                     const view = new URL(window.location.href).searchParams.get("view");
-                    if (!view || view === "gear") await Ausruestung.start();
+                    if (view === "gear") await Ausruestung.start();
                     break;
                 case "dungeon.php":
                     await DungeonAuswahl.start();
@@ -77,7 +77,8 @@
                     await _ItemParser.onItemPage();
                     await ItemFunde.start();
                     break;
-                case "report.php":
+                case "combat_report.php": // Schlacht
+                case "report.php": // Dungeon
                     const title = document.getElementsByTagName("h1")[0];
                     if (title.textContent.trim() === "Kampfberichte") {
                         await ArchivView.onKampfberichteSeite();
@@ -99,14 +100,14 @@
                 const groupName = header.textContent;
                 const groupId = new URL(header.href).searchParams.get("id");
                 const schlachtName = document.getElementsByTagName("h2")[0].textContent.trim();
+                console.log("Schlachtname: " + schlachtName)
                 for (const roundX of oldRound1.parentElement.children) {
                     for (const aElem of roundX.getElementsByTagName("a")) {
                         if (aElem.textContent === "(Bericht)") {
                             const boldElements = aElem.parentElement.getElementsByTagName("b");
                             const locName = boldElements[0].textContent + " vs. " + boldElements[1].textContent;
                             const searchParams = new URL(aElem.href).searchParams;
-                            const reportId = _WoD.getMyWorld() + searchParams.get("report");
-                            const battleId = searchParams.get("battle");
+                            const reportId = _WoD.getMyWorld() + searchParams.get("report") + "S";
                             let tsMsecs = undefined;
                             for (const h2 of roundX.getElementsByTagName("h2")) {
                                 const text = h2.textContent;
@@ -165,7 +166,7 @@
                 title.appendChild(warning);
             }
 
-            if (reportData.loc.schlacht) reportMeta.loc.schlacht = reportData.loc.schlacht; // kommt evtl. nachträglich erst herein
+            if (reportData.loc.schlacht && reportData.loc.schlacht !== "Unbekannte Schlacht") reportMeta.loc.schlacht = reportData.loc.schlacht; // kommt evtl. nachträglich erst herein
             if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe; // Stufe nur setzen, wenn noch nicht vorhanden.
             if (!reportMeta.srcs) reportMeta.srcs = {};
             const reportSource = await MyStorage.getSourceReport(reportData.reportId) || {
@@ -416,9 +417,25 @@
         }
 
         static async onKampfberichteSeite() {
-            //await MyStorage.indexedDb.cloneTo("wodDB_Backup5");
+            //await MyStorage.indexedDb.cloneTo("wodDB_Backup6");
             //await this.resyncSourcesToReports();
             //await this.rewriteReportArchiveItems();
+
+            let count = 0;
+            const found = {}
+            await MyStorage.reportArchive.getAll({
+                //index: "ts",
+                order: "next",
+                keyMatchFrom: "WA15389813",
+                keyMatchFromOpen: false,
+                //debug: 2,
+            }, async a => {
+                //console.log("Result: ", a);
+                if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
+                found[a.reportId] = true;
+                count++;
+            });
+            console.log("AAAAAAAAAA ", count);
 
             if (false) {
                 console.log("AAAAAAAAAAA", (await MyStorage.reportArchive.getAll({
@@ -591,22 +608,18 @@
                 curTR = tbody.children[i];
                 curTR.style.borderTop = "2px solid #404040";
                 const inputs = curTR.getElementsByTagName("input");
-                let inputReportId;
+                let reportId;
                 for (var k = 0, kl = inputs.length; k < kl; k++) {
                     const curInput = inputs[k];
                     if (curInput.name.startsWith("report_id")) {
-                        inputReportId = curInput.value;
+                        // Gesetzte ID aus dem Archiv oder die direkt Kampfbereichte-ID
+                        reportId = curInput.getAttribute("_reportId") || (_WoD.getMyWorld() + curInput.value);
                         break;
                     }
                 }
-                if (!inputReportId) continue;
-                let reportId = inputReportId;
-                if (reportId.match(/^(\d)*$/)) { // besteht nur aus nummern, die Welt fehlt noch
-                    const myWorld = _WoD.getMyWorld();
-                    reportId = myWorld + reportId;
-                }
+                if (!reportId) continue;
                 let reportMeta = await reportDBMeta.getValue(reportId);
-                if (!reportMeta) {
+                if (!isArchiv && !reportMeta) {
                     reportMeta = {
                         reportId: reportId,
                         loc: {
@@ -1493,17 +1506,18 @@
             lootUeberschrift.innerHTML = "Sichtungen <span style='font-size:10px'>(maximal " + _WoDLootDb.MAX_LOOT_ENTRIES + ")</span>";
             hints.parentElement.insertBefore(lootUeberschrift, hints);
             hints.parentElement.insertBefore(table, hints);
-            if (entries.length > 1) {
+            if (entries.length > 0) {
                 const aggregateInfos = [];
-                let stufeMin = 0;
+                let stufeMin = 100;
                 let stufeMax = 0;
-                for (const cur of Object.keys(item.stufen)) {
+                const stufen = Object.keys(item.stufen);
+                for (const cur of stufen) {
                     const curNr = Number(cur);
                     if (curNr < stufeMin) stufeMin = curNr;
                     if (curNr > stufeMax) stufeMax = curNr;
                 }
-                aggregateInfos.push(["Stufe (min-max):", stufeMin + "-" + stufeMax]);
-                aggregateInfos.push(["Unterschiedliche Dungeons:", Object.entries(item.locs).length]);
+                if (stufen.length > 0) aggregateInfos.push(["Stufe (min-max):", stufeMin + "-" + stufeMax]);
+                aggregateInfos.push(["Unterschiedliche Orte:", Object.entries(item.locs).length]);
                 const aggregateTable = _UI.createContentTable(aggregateInfos);
                 aggregateTable.classList.add("nowod");
                 aggregateTable.style.marginLeft = "15px";
@@ -1569,6 +1583,9 @@
             await MyStorage.getReportDBMeta().getAll({
                 index: "ts",
                 order: "prev",
+                //noBatch: true,
+                //debug: 1,
+                // limit wird nicht gesetzt, da wir selbst auf den Ergebnissen filtern
             }, async function (reportMeta, idx) {
                 if (!thisObject.isValidDate(reportMeta)) return;
                 if (!thisObject.isValidFavorit(reportMeta)) return;
@@ -1894,31 +1911,31 @@
             if (this.searchQuery.dateMax) dateMaxInput.value = _util.formatDateAndTime(this.searchQuery.dateMax * 60000);
             const datumRow = document.createElement("div");
             datumRow.append(dateMinInput);
-            datumRow.append(_UI.createButton("❌", function () {
+            datumRow.append(_UI.createButton("❌", async function () {
                 if (dateMinInput.value.trim() !== "") {
                     dateMinInput.value = "";
                     thisObject.searchQuery.dateMin = null;
-                    ArchivSearch.updateSearch();
+                    await ArchivSearch.updateSearch();
                 }
             }));
             datumRow.append(" - ");
             datumRow.append(dateMaxInput);
-            datumRow.append(_UI.createButton("❌", function () {
+            datumRow.append(_UI.createButton("❌", async function () {
                 if (dateMaxInput.value.trim() !== "") {
                     dateMaxInput.value = "";
                     thisObject.searchQuery.dateMax = null;
-                    ArchivSearch.updateSearch();
+                    await ArchivSearch.updateSearch();
                 }
             }));
-            dateMinInput.onchange = function () {
+            dateMinInput.onchange = async function () {
                 try {
                     thisObject.searchQuery.dateMin = new Date(_util.parseStandardDateString(dateMinInput.value)).getTime() / 60000;
                 } catch (e) {
                     thisObject.searchQuery.dateMin = null;
                 }
-                ArchivSearch.updateSearch();
+                await ArchivSearch.updateSearch();
             }
-            dateMaxInput.onchange = function () {
+            dateMaxInput.onchange = async function () {
                 try {
                     thisObject.searchQuery.dateMax = new Date(_util.parseStandardDateString(dateMaxInput.value));
                     thisObject.searchQuery.dateMax.setDate(thisObject.searchQuery.dateMax.getDate() + 1);
@@ -1926,7 +1943,7 @@
                 } catch (e) {
                     thisObject.searchQuery.dateMax = null;
                 }
-                ArchivSearch.updateSearch();
+                await ArchivSearch.updateSearch();
             }
             content.push(["Zeitraum", datumRow]);
             const thisObject = this;
@@ -1941,7 +1958,7 @@
                     if (value === "") continue;
                     thisObject.searchQuery.nurFavoriten.push(value);
                 }
-                ArchivSearch.updateSearch();
+                await ArchivSearch.updateSearch();
             }
             this.nurFavoritenSelect.innerHTML += "<option></option>";
             this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_MANUELL + "</option>";
@@ -1963,7 +1980,7 @@
                     if (value === "") continue;
                     thisObject.searchQuery.typeSelection.push(value);
                 }
-                ArchivSearch.updateSearch();
+                await ArchivSearch.updateSearch();
             }
             content.push(["Typ", this.typeSelect]);
 
@@ -1977,7 +1994,7 @@
                     if (value === "") continue;
                     thisObject.searchQuery.worldSelection.push(value);
                 }
-                ArchivSearch.updateSearch();
+                await ArchivSearch.updateSearch();
             }
             content.push(["Welt", this.worldSelect]);
 
@@ -1991,7 +2008,7 @@
                     if (value === "") continue;
                     thisObject.searchQuery.groupSelection.push(value);
                 }
-                ArchivSearch.updateSearch();
+                await ArchivSearch.updateSearch();
             }
             content.push(["Gruppe", this.groupSelect]);
 
@@ -2006,7 +2023,7 @@
                     if (value === "") continue;
                     thisObject.searchQuery.dungeonSelection.push(value);
                 }
-                ArchivSearch.updateSearch();
+                await ArchivSearch.updateSearch();
             }
             content.push(["Dungeon", this.dungeonSelect]);
 
@@ -2028,7 +2045,7 @@
                     const settings = await MySettings.get();
                     settings.maxResults = newValue;
                     await MySettings.save();
-                    ArchivSearch.updateSearch();
+                    await ArchivSearch.updateSearch();
                 } catch (e) { // reset
                     maxResultsInput.value = ArchivSearch.searchQuery.maxResults;
                 }
@@ -2165,6 +2182,7 @@
              */
             const realReportId = reportMeta.reportId.match(/\D*(\d*)/)[1];
             const reportIdInput = document.createElement("input");
+            reportIdInput.setAttribute("_reportId", reportMeta.reportId);
             result.append(reportIdInput);
             reportIdInput.value = realReportId;
             reportIdInput.type = "hidden";
@@ -2901,13 +2919,13 @@
          * Meta-Daten für einen Kammpfbericht
          */
         static reportArchive = this.checkValidReportId(this.indexedDb.createObjectStore("reportArchive", "reportId", {
-            ts: "ts",
-            locName: "loc.name",
-            locName2: ["loc.name"],
+            //ts: "ts",
+            //locName: "loc.name",
+            //locName2: ["loc.name"],
             //wgls: ["world", "gruppe_id", "loc.name", "world_season"],
         }));
         static {
-            if (true) {
+            if (false) {
                 const _this = this;
                 (async function () {
                     await _this.reportArchive.connect();
@@ -2916,8 +2934,10 @@
                     await _this.reportArchive.deleteIndex("2");
                     await _this.reportArchive.deleteIndex("3");
                     await _this.reportArchive.deleteIndex("4");
-                    await _this.reportArchive.deleteIndex("5");
-                    await _this.reportArchive.ensureIndex("1", ["ts"]);
+                    await _this.reportArchive.deleteIndex("locName");
+                    await _this.reportArchive.deleteIndex("locName2");
+                    await _this.reportArchive.deleteIndex("ts");
+                    //await _this.reportArchive.ensureIndex("1", ["ts"]);
                     await _this.reportArchive.connect();
                 })();
             }

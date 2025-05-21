@@ -53,7 +53,6 @@
         static async start() {
             const item = await this.findNext();
             if (item) {
-                // console.log("Auto-Load Item: " + item.name);
                 const iframe = document.createElement("iframe");
                 iframe.src = WoD.getItemUrl(item.name);
                 iframe.style.display = "none";
@@ -63,16 +62,17 @@
 
         static async findNext() {
             let result;
+            // Es ist wahrscheinlicher solche Einträge bei Neueinträgen zu finden
             await MyStorage.getItemSourceDB().getAll({
                 index: "ts",
                 order: "prev",
             }, function (sourceItem) {
-                if (sourceItem.invalid) return;
-                if (!sourceItem.details) {
+                if (!sourceItem.invalid && !sourceItem.details) {
                     result = sourceItem;
                     return false;
                 }
             });
+            return result;
         }
     }
 
