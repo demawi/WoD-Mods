@@ -24,7 +24,7 @@
         static dbname = "wodDB";
 
         static async startMod() {
-            demawiRepository.startMod();
+            await demawiRepository.startMod();
 
             OldSmarttab.addSmartTab("IndexDB", "indexdb", await IndexDbBrowser.create());
 

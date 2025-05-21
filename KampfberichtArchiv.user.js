@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.12.0.2
+// @version        0.12.0.3
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -47,8 +47,9 @@
         static modname = "KampfberichtArchiv";
 
         static async startMod() {
-            demawiRepository.startMod();
+            await demawiRepository.startMod();
             await _WoDWorldDb.placeSeasonElem();
+
 
             const page = _util.getWindowPage();
             console.log("Page: '" + page + "'")

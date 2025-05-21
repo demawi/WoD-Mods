@@ -32,7 +32,7 @@
         static dbname = "wodDB";
 
         static async startMod() {
-            demawiRepository.startMod();
+            await demawiRepository.startMod();
             const page = _util.getWindowPage();
 
             // Links zu Items finden und markieren. Nahezu überall.

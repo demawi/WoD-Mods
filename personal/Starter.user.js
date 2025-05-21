@@ -23,7 +23,7 @@
         static dbname = "wodDB";
 
         static async startMod() {
-            demawiRepository.startMod();
+            await demawiRepository.startMod();
 
         }
     }

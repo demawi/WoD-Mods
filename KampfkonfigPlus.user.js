@@ -28,7 +28,7 @@
     class Mod {
 
         static async startMod() {
-            demawiRepository.startMod();
+            await demawiRepository.startMod();
             WodKonfig.addButtons();
         }
 

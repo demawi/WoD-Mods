@@ -2397,6 +2397,18 @@ class demawiRepository {
             return false;
         }
 
+        static async loadViaIFrame(url) {
+            return new Promise((resolve, reject) => {
+                const iframe = document.createElement("iframe");
+                iframe.onload = function() {
+                    resolve(iframe);
+                }
+                iframe.style.display = "none";
+                document.body.append(iframe);
+                iframe.src = url; // src muss als letztes gesetzt werden
+            })
+        }
+
         static async loadViaInjection(url) {
             if (this.#alreadyLoaded[url]) return false;
             const thisObject = this;
@@ -3962,8 +3974,18 @@ class demawiRepository {
         return this[type];
     }
 
-    static startMod() {
+    static async startMod() {
         console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")");
+        //document.domain = "world-of-dungeons.de";
+        const iframe = await _.Libs.loadViaIFrame("https://world-of-dungeons.de/wod/spiel/news/"); //
+        console.log("IFrameDBs: ", await iframe.contentWindow.indexedDB.databases());
+        const request = iframe.contentWindow.indexedDB.open("wodDB");
+        request.onSuccess = function() {
+            console.log("SSSSSSSSSSSSSSS");
+        }
+        request.onError = function() {
+            console.log("EEEEEEEEE");
+        }
     }
 
     static getModName() {

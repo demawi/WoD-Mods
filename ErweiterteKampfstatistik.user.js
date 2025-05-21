@@ -48,7 +48,7 @@
          * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
          */
         static async startMod(kampfbericht, kampfstatistik, dbReportSource) {
-            demawiRepository.startMod();
+            await demawiRepository.startMod();
             let thisObject = this;
             unsafeWindow.statExecuter = async function (...args) {
                 await Mod.startMod(...args);
