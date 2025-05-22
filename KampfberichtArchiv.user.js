@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.12.0.3
+// @version        0.12.0.4
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -13,7 +13,7 @@
 // @include        https://*/wod/spiel/hero/items.php*
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
-// @include        http*://*.world-of-dungeons.de*
+// @include        http*://*world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js
@@ -41,15 +41,26 @@
     const _Libs = demawiRepository.import("Libs");
     const _Settings = demawiRepository.import("Settings");
     const _ItemParser = demawiRepository.import("ItemParser");
+    const _Messenger = demawiRepository.import("Messenger");
 
     class Mod {
         static dbname = "wodDB";
         static modname = "KampfberichtArchiv";
 
         static async startMod() {
+            if (!window.location.hostname.match(/^(.*)\.world-of-dungeons\.de$/)) {
+                await MyStorage.initMyStorage(false, true);
+                _Messenger.actAsResponder(async (code) => eval(code)); // and eval here
+                return;
+            } else {
+                await MyStorage.initMyStorage(true, true);
+                const startTime = new Date().getTime();
+                const mainDomain = await _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", (a) => eval(a));
+                console.log("Messenger installation time: " + (new Date().getTime() - startTime) / 1000 + " secs");
+                await MyStorage.location2.setValue({name: "TestLoc"});
+            }
             await demawiRepository.startMod();
             await _WoDWorldDb.placeSeasonElem();
-
 
             const page = _util.getWindowPage();
             console.log("Page: '" + page + "'")
@@ -807,7 +818,7 @@
                         } else if (members[0] > 0) {
                             curTR.style.backgroundColor = ArchivView.COLOR_YELLOW;
                             successTie++;
-                        } else {
+                        } else if (members[0] !== undefined) {
                             curTR.style.backgroundColor = ArchivView.COLOR_RED;
                             successLose++;
                         }
@@ -822,9 +833,9 @@
                         }
                     }
                     if (rooms) {
-                        const successRate = Math.round(100 * rooms[0] / rooms[1]);
+                        const successRate = rooms[0] !== undefined && rooms[1] !== undefined ? Math.round(100 * rooms[0] / rooms[1]) : "?";
                         if (members) {
-                            zielTD.innerHTML = members[0] + "/" + members[1];
+                            zielTD.innerHTML = (members[0] === undefined ? "?" : members[0]) + "/" + members[1];
                         } else {
                             zielTD.innerHTML = "?";
                         }
@@ -2893,41 +2904,43 @@
     }
 
     class MyStorage {
-        static checkValidReportId = function (objStore) {
-            if (!objStore) return;
-            let resultGetValue = objStore.getValue;
-            objStore.getValue = async function (dbObjectId) {
-                // darf auch nicht mit einer Nummer starten
-                if (dbObjectId.includes("undefined") || dbObjectId.match(/^\d.*/)) throw new Error("Die ID ist nicht valide! " + dbObjectId);
-                return await resultGetValue.call(objStore, dbObjectId);
-            }
-            let resultSetValue = objStore.setValue;
-            objStore.setValue = async function (dbObject) {
-                if (dbObject.reportId.includes("undefined")) throw new Error("Die ID ist nicht valide! " + dbObject.reportId);
-                await resultSetValue.call(objStore, dbObject);
-            }
-            let resultDeleteValue = objStore.deleteValue;
-            objStore.deleteValue = async function (dbObjectId) {
-                if (dbObjectId.includes("undefined")) throw new Error("Die ID ist nicht valide! " + dbObjectId);
-                await resultDeleteValue.call(objStore, dbObjectId);
-            }
-            return objStore;
-        }
 
-        static indexedDb = _WoDStorages.getDb("WoDReportArchiv", Mod.dbname);
+        static async initMyStorage(initProxyDomain, initThisDomain) {
+            const checkValidReportId = function (objStore) {
+                if (!objStore) return;
+                let resultGetValue = objStore.getValue;
+                objStore.getValue = async function (dbObjectId) {
+                    // darf auch nicht mit einer Nummer starten
+                    if (dbObjectId.includes("undefined") || dbObjectId.match(/^\d.*/)) throw new Error("Die ID ist nicht valide! " + dbObjectId);
+                    return await resultGetValue.call(objStore, dbObjectId);
+                }
+                let resultSetValue = objStore.setValue;
+                objStore.setValue = async function (dbObject) {
+                    if (dbObject.reportId.includes("undefined")) throw new Error("Die ID ist nicht valide! " + dbObject.reportId);
+                    await resultSetValue.call(objStore, dbObject);
+                }
+                let resultDeleteValue = objStore.deleteValue;
+                objStore.deleteValue = async function (dbObjectId) {
+                    if (dbObjectId.includes("undefined")) throw new Error("Die ID ist nicht valide! " + dbObjectId);
+                    await resultDeleteValue.call(objStore, dbObjectId);
+                }
+                return objStore;
+            }
 
-        /**
-         * Meta-Daten für einen Kammpfbericht
-         */
-        static reportArchive = this.checkValidReportId(this.indexedDb.createObjectStore("reportArchive", "reportId", {
-            //ts: "ts",
-            //locName: "loc.name",
-            //locName2: ["loc.name"],
-            //wgls: ["world", "gruppe_id", "loc.name", "world_season"],
-        }));
-        static {
+            if (initThisDomain) this.indexedDb = _WoDStorages.getDb("WoDReportArchiv", Mod.dbname);
+            if (initProxyDomain) this.indexedDb2 = _WoDStorages.getDb2("WoDReportArchiv", Mod.dbname + "Main", _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", (a) => eval(a)));
+
+            /**
+             * Meta-Daten für einen Kammpfbericht
+             */
+            if (initThisDomain) this.reportArchive = checkValidReportId(this.indexedDb.createObjectStore("reportArchive", "reportId", {
+                //ts: "ts",
+                //locName: "loc.name",
+                //locName2: ["loc.name"],
+                //wgls: ["world", "gruppe_id", "loc.name", "world_season"],
+            }));
+
             if (false) {
-                const _this = this;
                 (async function () {
                     await _this.reportArchive.connect();
                     //await _this.reportArchive.deleteIndex("wgls");
@@ -2942,20 +2955,23 @@
                     await _this.reportArchive.connect();
                 })();
             }
+
+            /**
+             * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
+             * Resultat aus WoDParser.parseKampfberichtGegenstaende
+             */
+            if (initThisDomain) this.reportArchiveItems = this.indexedDb.createObjectStore("reportArchiveItems", "reportId");
+            /**
+             * Quell-Dateien der Kampfberichte
+             */
+            if (initThisDomain) this.reportArchiveSources = this.indexedDb.createObjectStore("reportArchiveSources", "reportId");
+            /**
+             * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
+             */
+            if (initThisDomain) this.location = this.indexedDb.createObjectStore("location", "name");
+            if (initProxyDomain) this.location2 = this.indexedDb2.createObjectStore("location", "name");
         }
-        /**
-         * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
-         * Resultat aus WoDParser.parseKampfberichtGegenstaende
-         */
-        static reportArchiveItems = this.indexedDb.createObjectStore("reportArchiveItems", "reportId");
-        /**
-         * Quell-Dateien der Kampfberichte
-         */
-        static reportArchiveSources = this.indexedDb.createObjectStore("reportArchiveSources", "reportId");
-        /**
-         * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
-         */
-        static location = this.indexedDb.createObjectStore("location", "name");
+
 
         static getReportDBMeta() {
             return this.reportArchive;

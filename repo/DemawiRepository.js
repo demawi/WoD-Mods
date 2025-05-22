@@ -177,6 +177,84 @@ class demawiRepository {
             },
         }
 
+        static IndexedDbProxy = class IndexedCSDb {
+
+            csdbExecuter; // Cross-Site Database
+            objectStores = {};
+
+            constructor(modname, dbname, messengerPromise) {
+                this.modname = modname;
+                this.dbname = dbname;
+                const _this = this;
+                this.csdbExecuterPromise = messengerPromise.then(msger => {
+                    _this.csdbExecuter = msger;
+                    delete _this.csdbExecuterPromise;
+                });
+            }
+
+            async exec(...args) {
+                if (this.csdbExecuter) await this.csdbExecuter.exec(...args);
+                else {
+                    const _this = this;
+                    this.csdbExecuterPromise.then(() => {
+                        _this.csdbExecuter.exec(...args);
+                    })
+                }
+            }
+
+            createObjectStore(storageId, key, indizes) {
+                const objectStore = new _.Storages.ObjectStorageProxy(storageId, key, indizes);
+                objectStore.indexedDb = this;
+                const _this = this;
+                this.exec(function (modname, dbname, storageId, key, indizes) {
+                    const objectStorage = _.WoDStorages.getDb(modname, dbname).createObjectStore(storageId, key, indizes);
+                    objectStorage.connect();
+                }, _this.modname, _this.dbname, storageId, key, indizes);
+
+                this.objectStores[storageId] = objectStore;
+                return objectStore;
+            }
+
+        }
+
+        static ObjectStorageProxy = class {
+
+            storageId;
+            key;
+            indizes;
+            indexedDb;
+
+            constructor(storageId, key, indizes) {
+                this.storageId = storageId;
+                this.key = key;
+                this.indizes = indizes;
+            }
+
+            async getValue(dbObjectId) {
+                return await this.indexedDb.exec(async function (storageId, dbObjectId) {
+                    return await (await _.WoDStorages.getDb().getObjectStoreChecked(storageId)).getValue(dbObjectId);
+                }, this.storageId, dbObjectId);
+            }
+
+            async setValue(dbObject) {
+                return await this.indexedDb.exec(async function (storageId, dbObject) {
+                    return await (await _.WoDStorages.getDb().getObjectStoreChecked(storageId)).setValue(dbObject);
+                }, this.storageId, dbObject);
+            }
+
+            async deleteValue(dbObjectId) {
+
+            }
+
+            async getAll(queryOpt, iterationFnOpt) {
+
+            }
+
+            async getAllKeys(queryOpt, iterationFnOpt) {
+
+            }
+        }
+
         static IndexedDb = class {
             modname;
             dbname;
@@ -740,21 +818,21 @@ class demawiRepository {
              *     limit: 20,             // [int] eine Limitierung der Ergebnisse
              *     batchSize: 100,        // [int] default:100 wie viele Objekte maximal gleichzeitig aus der Datenbank geholt werden, wird dieses angegeben muss eine iterationFn angegeben werden
              * }
-             * @param iterationFn @type Function(object, idx): die Objekte werden der Reihe nach in die Methode reingereicht, bei false wird die Schleife abgebrochen oder bei gesetztem query-limit
+             * @param iterationFnOpt @type Function(object, idx): die Objekte werden der Reihe nach in die Methode reingereicht, bei false wird die Schleife abgebrochen oder bei gesetztem query-limit
              *                    die Funktion darf mittlerweile auch async sein. Dann wird allerdings die Batch-Search verwendet. Abhängig von der BatchSize werden x-Objekte jeweils geholt und diese dann reingereicht.
              *                    Danach wird erneut eine Transaktion aufgebaut für den nächsten Batch.
              * @return wenn iteration nicht gesetzt wird, wird ein Array der Objekte zurückgeliefert
              *         wenn iteration gesetzt ist, werden die Objekte einem nach dem anderen in die iteration-Funktion reingereicht iteration(object, idx), der Rückgabewert von getAll ist dann nicht gesetzt.
              */
-            async getAll(queryOpt, iterationFn) {
-                return this.constructor.QueryOps.doSearch(this, queryOpt, iterationFn, "getAll");
+            async getAll(queryOpt, iterationFnOpt) {
+                return this.constructor.QueryOps.doSearch(this, queryOpt, iterationFnOpt, "getAll");
             }
 
             /**
              * Liefert ein Array über alle vorhandenen Objekte.
              */
-            async getAllKeys(queryOpt, iterationOpt) {
-                return this.constructor.QueryOps.doSearch(this, queryOpt, iterationOpt, "getAllKeys");
+            async getAllKeys(queryOpt, iterationFnOpt) {
+                return this.constructor.QueryOps.doSearch(this, queryOpt, iterationFnOpt, "getAllKeys");
             }
 
             // für readonly objectstores, kann man hierüber abfragen, ob der ObjectStore auch existiert
@@ -1156,10 +1234,19 @@ class demawiRepository {
         static #indexedDb;
         static #objectStores = {};
 
+        static #indexedDb2;
+        static #objectStores2 = {};
+
         static getDb(modname, dbname) {
-            if (modname) this.#indexedDb = new _.Storages.IndexedDb(modname, dbname);
-            if (!this.#indexedDb) throw new Error("Datenbank muss initial von der Mod definiert werden!")
+            if (dbname) this.#indexedDb = new _.Storages.IndexedDb(modname, dbname);
+            if (!this.#indexedDb) throw new Error("Datenbank wurde noch nicht definiert!")
             return this.#indexedDb;
+        }
+
+        static getDb2(modname, dbname, messengerPromise) {
+            if (dbname) this.#indexedDb2 = new _.Storages.IndexedDbProxy(modname, dbname, messengerPromise);
+            if (!this.#indexedDb2) throw new Error("Datenbank wurde noch nicht definiert!");
+            return this.#indexedDb2;
         }
 
         static getItemDb() {
@@ -1713,6 +1800,201 @@ class demawiRepository {
 
     }
 
+    static Messenger = class Messenger {
+
+        /**
+         * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
+         */
+        static actAsResponder(evaluateFn) {
+            const myMid = new URL(window.location.href).searchParams.get("messengerId");
+            const parentOrigin = document.referrer;
+
+            const iterators = {};
+            const respond = function (data, result) {
+                data.result = result;
+                data.mid = myMid;
+                window.parent.postMessage(data, parentOrigin);
+            }
+
+            window.addEventListener( // Main-Domain
+                "message",
+                async event => {
+                    const data = event.data;
+                    if (data.type !== "iteration") {
+                        const dataExec = data.exec;
+                        if (dataExec) {
+                            delete data.exec;
+                            //console.log("Code2", dataExec, data);
+                            respond(data, await evaluateFn(dataExec));
+                        }
+                    } else { // type === "iteration"
+                        const cmd = data.cmd;
+                        delete data.cmd;
+                        let finished = false;
+                        if (cmd === "start") {
+                            const iterator = evaluateFn(data.exec);
+                            iterators[data.id] = iterator;
+                            const result = iterator();
+                            respond(data, result);
+                            if (result === undefined) finished = true;
+                        } else if (cmd === "next") {
+                            const result = iterators[data.id]();
+                            respond(data, result);
+                            if (result === undefined) finished = true;
+                        } else if (cmd === "stop") {
+                            // no response necessary
+                            finished = true;
+                        }
+                        if (finished) delete iterators[data.id]; // cleanup
+                    }
+                },
+                false,
+            );
+
+            // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
+            try {
+                window.parent.postMessage({mid: myMid}, parentOrigin);
+            } catch (e) {
+            }
+        }
+
+        static messengerId = 1;
+        static messengers = {};
+
+        /**
+         * @param iFrameHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
+         */
+        static async createMessenger(iFrameHttp) {
+            if (this.messengerId === 1) { // nur beim ersten Mal
+                const _this = this;
+                window.addEventListener(
+                    "message",
+                    async (event) => {
+                        const data = event.data;
+                        if (data.mid) {
+                            // console.log("Incoming message: ", data);
+                            const messenger = _this.messengers[data.mid];
+                            await messenger.onMessage(data);
+                        }
+                    },
+                    false,
+                );
+            }
+            const messengerId = this.messengerId++;
+            const iFrameUrl = new URL(iFrameHttp);
+            iFrameUrl.searchParams.append("messengerId", messengerId);
+            const iframe = _.Libs.loadViaIFrame(iFrameUrl.toString());
+            const messenger = new Messenger(messengerId, iframe.contentWindow, iFrameUrl.origin);
+            this.messengers[messengerId] = messenger;
+            let resolver;
+            const promise = new Promise((resolve, reject) => {
+                resolver = resolve;
+                if (false) {
+                    // iframe.onload reicht hier nicht aus, der Responder muss auch erstmal noch am window auf die Nachrichten horchen.
+                    let interval = setInterval(function () {
+                        if (!messenger.responderInstalled) {
+                            messenger.exec("a => 1");
+                        } // send testmessage
+                        else {
+                            clearInterval(interval);
+                            resolve(messenger);
+                        }
+                    }, 100);
+                }
+            });
+            messenger.onReady = resolver;
+            return promise;
+        }
+
+        targetWindow;
+        targetOrigin;
+        myOrigin;
+        resolver = {};
+        iterations = {};
+        id = 1;
+        onReady;
+        messengerId;
+
+        constructor(messengerId, targetWindow, targetOrigin) {
+            this.messengerId = messengerId;
+            this.targetWindow = targetWindow;
+            this.targetOrigin = targetOrigin;
+            this.myOrigin = window.location.origin;
+        }
+
+        async onMessage(data) {
+            const id = data.id;
+            if (id === undefined) { // Responder meldet Bereitschaft, wir geben somit den Messenger frei.
+                if (this.onReady) this.onReady(this);
+                delete this.onReady;
+                return;
+            }
+            if (data.type !== "iteration") {
+                this.resolver[id](data.result);
+                delete this.resolver[id];
+            } else { // type === "iteration"
+                let stop = false;
+                if (data.result === undefined) stop = true; // wenn der Datenlieferant abbricht
+                else if (await this.iterations[id](data.result) === false) { // wenn wir selbst abbrechen
+                    stop = true;
+                    this.postMessage({
+                        id: id,
+                        type: "iteration",
+                        cmd: "stop",
+                    })
+                }
+                if (stop) {
+                    delete this.iterations[id];
+                    this.resolver[id]();
+                } else {
+                    this.postMessage({
+                        id: id,
+                        type: "iteration",
+                        cmd: "next",
+                    })
+                }
+            }
+        }
+
+        /**
+         * Die 'execFn' muss eine Funktion erzeugen, die fortlaufend aufgerufen wird um den nächsten Datensatz zu liefern.
+         */
+        async sendMessageIteration(execFn, iteration) {
+            const id = this.#createId();
+            this.iterations[id] = iteration;
+            return this.execIntern(execFn, {id: id, type: "iteration", cmd: "start"});
+        }
+
+        async exec(execFn, ...vars) {
+            return await this.execIntern(execFn, undefined, ...vars);
+        }
+
+        async execIntern(execFn, dataOpt, ...vars) {
+            const data = dataOpt || {
+                id: this.#createId(),
+            }
+            let args = JSON.stringify(vars);
+            args = args.substring(1, args.length - 1);
+            data.exec = "(" + execFn.toString() + ")(" + args + ")";
+            console.log("Messenger.exec", data.exec);
+            let promiseResolver;
+            const promise = new Promise((resolve, reject) => {
+                promiseResolver = resolve;
+            });
+            this.resolver[data.id] = promiseResolver;
+            this.postMessage(data);
+            return promise;
+        }
+
+        postMessage(data) {
+            this.targetWindow.postMessage(data, this.targetOrigin);
+        }
+
+        #createId() {
+            return this.id++;
+        }
+    }
+
     static Settings = class {
         static #cache = {};
 
@@ -1884,7 +2166,7 @@ class demawiRepository {
                 schlachtName = "Unbekannte Schlacht";
                 reportIdSuffix = "S";
                 let schlachtLink = doc.querySelector("h1 a[href*='/clanquest/']");
-                if(!schlachtLink) schlachtLink = doc.querySelector("h2 a[href*='/clanquest/']");
+                if (!schlachtLink) schlachtLink = doc.querySelector("h2 a[href*='/clanquest/']");
                 if (schlachtLink) schlachtName = schlachtLink.textContent.trim();
             } else if (form["DuellId"]) {
                 reportId = form["DuellId"].value;
@@ -2102,7 +2384,7 @@ class demawiRepository {
                                     item = {keeped: 1}; // keeped
                                     if (!member.loot) member.loot = [];
                                     member.loot.push(item);
-                                    item.name = tr.children[1].textContent.trim();
+                                    item.name = tr.querySelector("a").textContent.trim();
                                     let splitter = tr.children[4].textContent.split("/");
                                     if (splitter.length > 1) item.vg = Number(splitter[0]);
                                 } else if (tr.children[1].textContent.startsWith("wurde von")) {
@@ -2397,11 +2679,26 @@ class demawiRepository {
             return false;
         }
 
-        static async loadViaIFrame(url) {
+        static loadViaIFrame(url, id, name) {
+            const iframe = document.createElement("iframe");
+            if (id) iframe.id = id;
+            if (name) iframe.name = name;
+            iframe.style.display = "none";
+            document.body.append(iframe);
+            iframe.src = url; // src muss als letztes gesetzt werden
+            return iframe;
+        }
+
+        static async loadViaIFrameAndWaitForIt(url, id, name) {
             return new Promise((resolve, reject) => {
                 const iframe = document.createElement("iframe");
-                iframe.onload = function() {
-                    resolve(iframe);
+                if (id) iframe.id = id;
+                if (name) iframe.name = name;
+                iframe.onload = function () {
+                    if (iframe.src === url) {
+                        console.log("IframeResolved ", iframe.src, iframe.contentWindow.location);
+                        resolve(iframe);
+                    }
                 }
                 iframe.style.display = "none";
                 document.body.append(iframe);
@@ -3976,17 +4273,6 @@ class demawiRepository {
 
     static async startMod() {
         console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")");
-        //document.domain = "world-of-dungeons.de";
-        const iframe = await _.Libs.loadViaIFrame("https://world-of-dungeons.de/wod/spiel/news/"); //
-        iframe.contentWindow.domain = "world-of-dungeons.de";
-        console.log("IFrameDBs: ", await iframe.contentWindow.indexedDB.databases());
-        const request = iframe.contentWindow.indexedDB.open("wodDB");
-        request.onSuccess = function() {
-            console.log("SSSSSSSSSSSSSSS");
-        }
-        request.onError = function() {
-            console.log("EEEEEEEEE");
-        }
     }
 
     static getModName() {

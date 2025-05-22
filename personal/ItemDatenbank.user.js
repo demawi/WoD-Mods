@@ -1219,16 +1219,16 @@
             return result;
         }
 
-        static async indexItem(itemName, element, sourceItem) {
-            const missingElement = element.parentElement.className === "missingWrapper" && element.parentElement.children.length > 1 && element.parentElement.children[1];
+        static async indexItem(itemName, itemA, sourceItem) {
+            const missingMeElement = itemA.parentElement.querySelector(".missingMe");
             if (!sourceItem || !sourceItem.details) {
-                if (!missingElement) {
-                    if (element.parentElement.className !== "missingWrapper") {
+                if (!missingMeElement) {
+                    if (!itemA.parentElement.classList.contains("missingWrapper")) {
                         const missingWrapper = document.createElement("span");
                         missingWrapper.className = "missingWrapper";
-                        element.parentElement.insertBefore(missingWrapper, element);
-                        element.parentElement.removeChild(element);
-                        missingWrapper.append(element);
+                        itemA.parentElement.insertBefore(missingWrapper, itemA);
+                        itemA.parentElement.removeChild(itemA);
+                        missingWrapper.append(itemA);
                         missingWrapper.onclick = function () {
                             if (missingWrapper.children.length > 1) {
                                 missingWrapper.removeChild(missingWrapper.children[1]);
@@ -1239,14 +1239,15 @@
                     missingSpan.onclick = function (event) {
                         event.stopPropagation();
                     }
+                    missingSpan.classList.add("nowod");
                     missingSpan.style.color = "red";
                     missingSpan.innerHTML = "�";
                     missingSpan.className = "missingMe";
-                    element.parentElement.append(missingSpan);
+                    itemA.parentElement.append(missingSpan);
                 }
             } else {
-                if (missingElement) {
-                    element.parentElement.removeChild(missingElement);
+                if (missingMeElement) {
+                    itemA.parentElement.removeChild(missingMeElement);
                 }
             }
             if (!sourceItem) {
