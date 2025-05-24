@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.12.0.4
+// @version        0.12.0.5
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -46,6 +46,8 @@
     class Mod {
         static dbname = "wodDB";
         static modname = "KampfberichtArchiv";
+        // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
+        static ffOpenWindowMode = navigator.userAgent.toLowerCase().includes('firefox');
 
         static async startMod() {
             if (!window.location.hostname.match(/^(.*)\.world-of-dungeons\.de$/)) {
@@ -53,9 +55,29 @@
                 _Messenger.actAsResponder(async (code) => eval(code)); // and eval here
                 return;
             } else {
+                if (this.ffOpenWindowMode) { // iframe it
+                    const iframeWrap = document.createElement("iframe");
+                    iframeWrap.style.width = "100%";
+                    iframeWrap.style.height = "100%";
+                    iframeWrap.style.position = "absolute";
+                    iframeWrap.style.border = "0px";
+                    iframeWrap.contentDocument.body.className = document.body.className;
+
+                    document.body.style.overflow = "hidden";
+                    document.body.style.margin = "0px";
+
+                    document.body.insertBefore(iframeWrap, document.body.children[0]);
+                    let cur;
+                    while (cur = document.head.children[0]) {
+                        iframeWrap.contentDocument.head.append(cur);
+                    }
+                    while (cur = document.body.children[1]) {
+                        iframeWrap.contentDocument.body.append(cur);
+                    }
+                }
                 await MyStorage.initMyStorage(true, true);
                 const startTime = new Date().getTime();
-                const mainDomain = await _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", (a) => eval(a));
+                const mainDomain = await _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php");
                 console.log("Messenger installation time: " + (new Date().getTime() - startTime) / 1000 + " secs");
                 await MyStorage.location2.setValue({name: "TestLoc"});
             }
@@ -2928,7 +2950,7 @@
             }
 
             if (initThisDomain) this.indexedDb = _WoDStorages.getDb("WoDReportArchiv", Mod.dbname);
-            if (initProxyDomain) this.indexedDb2 = _WoDStorages.getDb2("WoDReportArchiv", Mod.dbname + "Main", _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", (a) => eval(a)));
+            if (initProxyDomain) this.indexedDb2 = _WoDStorages.getDb2("WoDReportArchiv", Mod.dbname + "Main", _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php"));
 
             /**
              * Meta-Daten für einen Kammpfbericht

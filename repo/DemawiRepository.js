@@ -177,7 +177,7 @@ class demawiRepository {
             },
         }
 
-        static IndexedDbProxy = class IndexedCSDb {
+        static IndexedDbProxy = class IndexedDbProxy {
 
             csdbExecuter; // Cross-Site Database
             objectStores = {};
@@ -258,6 +258,7 @@ class demawiRepository {
         static IndexedDb = class {
             modname;
             dbname;
+            idbFactory;
             objectStores = [];
             objectStoresToDelete = [];
             dbConnection;
@@ -266,9 +267,10 @@ class demawiRepository {
             requestIdx = 1; // only for debugging
             debug = true;
 
-            constructor(modname, dbname) {
+            constructor(modname, dbname, idbFactory) {
                 this.modname = modname;
                 this.dbname = dbname;
+                this.idbFactory = idbFactory || indexedDB;
                 this.instanceId = this.constructor.staticInstanceId++;
             }
 
@@ -398,7 +400,7 @@ class demawiRepository {
                 const _this = this;
                 const requestId = this.requestIdx++;
                 return new Promise((resolve, reject) => {
-                    let request = indexedDB.open(_this.dbname, version);
+                    let request = _this.idbFactory.open(_this.dbname, version);
                     request.idx = requestId;
                     if (_this.debug) {
                         tracingId.push(request.idx);
@@ -1805,21 +1807,30 @@ class demawiRepository {
         /**
          * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
          */
-        static actAsResponder(evaluateFn) {
+        static actAsResponder(evaluateFn, debug) {
+            const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
             const myMid = new URL(window.location.href).searchParams.get("messengerId");
-            const parentOrigin = document.referrer;
+            const log = document.referrer ? console.log : window.top.console.log;
+            const errorlogger = document.referrer ? console.error : window.top.console.error;
+            const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
+
+            for (const cur of document.body.children) {
+                cur.parentElement.removeChild(cur);
+            }
+            document.body.append(document.createTextNode("Dieses Fenster dient als Kommunikationsschnittstelle zu: " + parentOrigin));
 
             const iterators = {};
             const respond = function (data, result) {
                 data.result = result;
                 data.mid = myMid;
-                window.parent.postMessage(data, parentOrigin);
+                parentWindow.postMessage(data, parentOrigin);
             }
 
             window.addEventListener( // Main-Domain
                 "message",
                 async event => {
                     const data = event.data;
+                    log("Responder hat Daten empfangen", data);
                     if (data.type !== "iteration") {
                         const dataExec = data.exec;
                         if (dataExec) {
@@ -1851,10 +1862,13 @@ class demawiRepository {
                 false,
             );
 
+            log("Responder ist empfangsbereit", parentOrigin, myMid);
+
             // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
             try {
-                window.parent.postMessage({mid: myMid}, parentOrigin);
+                parentWindow.postMessage({mid: myMid}, parentOrigin);
             } catch (e) {
+                errorlogger("Fehler bei der PostMessage vom Responder", e);
             }
         }
 
@@ -1862,9 +1876,9 @@ class demawiRepository {
         static messengers = {};
 
         /**
-         * @param iFrameHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
+         * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
          */
-        static async createMessenger(iFrameHttp) {
+        static async createMessenger(responderHttp) {
             if (this.messengerId === 1) { // nur beim ersten Mal
                 const _this = this;
                 window.addEventListener(
@@ -1881,31 +1895,28 @@ class demawiRepository {
                 );
             }
             const messengerId = this.messengerId++;
-            const iFrameUrl = new URL(iFrameHttp);
-            iFrameUrl.searchParams.append("messengerId", messengerId);
-            const iframe = _.Libs.loadViaIFrame(iFrameUrl.toString());
-            const messenger = new Messenger(messengerId, iframe.contentWindow, iFrameUrl.origin);
+            const responderUrl = new URL(responderHttp);
+            responderUrl.searchParams.append("messengerId", messengerId);
+            let targetWindow;
+            if (navigator.userAgent.toLowerCase().includes('firefox')) {
+                console.log("Create targetWindow as window.open")
+                targetWindow = window.open(responderUrl.toString());
+            } else {
+                console.log("Create targetWindow as iframe")
+                targetWindow = _.Libs.loadViaIFrame(responderUrl.toString()).contentWindow;
+            }
+
+            const messenger = new Messenger(messengerId, targetWindow, responderUrl.origin);
             this.messengers[messengerId] = messenger;
             let resolver;
             const promise = new Promise((resolve, reject) => {
                 resolver = resolve;
-                if (false) {
-                    // iframe.onload reicht hier nicht aus, der Responder muss auch erstmal noch am window auf die Nachrichten horchen.
-                    let interval = setInterval(function () {
-                        if (!messenger.responderInstalled) {
-                            messenger.exec("a => 1");
-                        } // send testmessage
-                        else {
-                            clearInterval(interval);
-                            resolve(messenger);
-                        }
-                    }, 100);
-                }
             });
             messenger.onReady = resolver;
             return promise;
         }
 
+        iframe;
         targetWindow;
         targetOrigin;
         myOrigin;
