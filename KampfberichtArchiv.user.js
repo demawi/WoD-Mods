@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.12.0.6
+// @version        0.12.0.7
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -76,7 +76,8 @@
                     await TombolaLoot.onNewsPage();
                     break;
                 case "items.php":
-                    const view = new URL(window.location.href).searchParams.get("view");
+                    let view = new URL(window.location.href).searchParams.get("view");
+                    if (!view) view = _WoD.getValueFromMainForm("view");
                     if (view === "gear") await Ausruestung.start();
                     break;
                 case "dungeon.php":
@@ -1179,7 +1180,7 @@
             title.parentElement.insertBefore(summaryContainer, title.nextSibling);
         }
 
-        static getFullItemNode(itemName, instanceId, destroyed, remainHPPicture, debug) {
+        static getFullItemNode(itemName, instanceId, destroyed, withHPPicture, debug) {
             let finding;
             if (instanceId) {
                 const searchFor = "&id=" + instanceId;
@@ -1192,13 +1193,15 @@
                 console.log("Cant find: ", itemName, instanceId, destroyed, debug);
                 return itemName;
             }
-            const newNode = finding.parentElement.cloneNode(true);
+            let newNode = finding.parentElement;
+            if (newNode.tagName !== "TD") newNode = newNode.parentElement; // evtl. MissingWrapper-Span
+            newNode = newNode.cloneNode(true);
             const infoImg = newNode.querySelector("img[src*=\"inf.gif\"]");
             if (infoImg) infoImg.parentElement.removeChild(infoImg); // Dies ist ein Gruppengegenstand entfernen
             const aHref = newNode.querySelector("a");
             if (destroyed) aHref.classList.add("item_destroyed");
             else aHref.classList.remove("item_destroyed");
-            if (!remainHPPicture) newNode.removeChild(newNode.children[0]);
+            if (!withHPPicture) newNode.removeChild(newNode.children[0]);
             return newNode;
         }
 
@@ -1341,17 +1344,17 @@
             // const ausruestungsTabelleKomplett = document.querySelectorAll("table:has(table #ausruestungstabelle_0):not(table:has(table table #ausruestungstabelle_0))")[0];
             const ausruestungsTabelle = document.querySelector("#ausruestungstabelle_2").parentElement.parentElement;
 
-            let lastKey;
-            for (const cur of await MyStorage.reportArchive.getAll({
+            let items;
+            await MyStorage.reportArchive.getAll({
                 index: ["loc.name"],
                 keyMatch: [naechsterDungeonName],
                 order: "prev",
-                limit: 1,
-            })) {
-                lastKey = cur.reportId;
-            }
-            if (!lastKey) return;
-            const items = await MyStorage.reportArchiveItems.getValue(lastKey);
+                batchSize: 10,
+            }, async item => {
+                items = await MyStorage.reportArchiveItems.getValue(item.reportId);
+                if (items) return false; // quit iteration
+            })
+
             if (!items) return;
             const myHeroId = _WoD.getMyHeroId();
             const myItems = items.members[myHeroId];
@@ -2728,7 +2731,7 @@
             const versionId = [];
             let isComplete = true;
             for (let i = 0, l = successLevels[1]; i < l; i++) {
-                const level = reportSource.levels[i];
+                const level = reportSource.levels && reportSource.levels[i];
                 if (level) {
                     const doc = _util.getDocumentFor(level);
                     const geschafft = !doc.getElementsByName("goto_last_level")[0];

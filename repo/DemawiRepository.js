@@ -1894,14 +1894,18 @@ class demawiRepository {
                 );
             }
             const targetUrl = new URL(responderHttp);
-            if (!window.top._messengers) window.top._messengers = {};
-            let messenger = window.top._messengers[targetUrl.origin];
+            if (!unsafeWindow.top._messengers) unsafeWindow.top._messengers = {};
+            let messenger = unsafeWindow.top._messengers[targetUrl.origin];
             if (messenger) return messenger.onReady;
 
             const messengerId = this.messengerId++;
             targetUrl.searchParams.append("messengerId", messengerId);
             messenger = new Messenger(messengerId, targetUrl);
-            window.top._messengers[targetUrl.origin] = messenger;
+            unsafeWindow.top._messengers[targetUrl.origin] = messenger;
+            unsafeWindow.top.demawiId = "aa";
+            unsafeWindow.demawiId = "bb";
+            window.top.demawiId = "cc";
+            window.demawiId = "dd";
             this.messengers[messengerId] = messenger;
             return messenger.onReady;
         }
@@ -2005,7 +2009,7 @@ class demawiRepository {
         getTargetWindow(responderUrl) {
             let targetWindow;
             if (navigator.userAgent.toLowerCase().includes('firefox')) {
-                if (window.opener) { // Popup: same-origin
+                if (window.opener && window.opener.top._messengers) { // Popup: same-origin
                     return window.opener.top._messengers[responderUrl.origin];
                 } else if (window.top === window) { // nur wenn iframe-wrap noch nicht erstellt wurde
                     const iframeWrap = document.createElement("iframe");
@@ -2866,12 +2870,14 @@ class demawiRepository {
         }
 
         // Sicher für concurrent modification
-        static forEachSafe(array, fn) {
+        static async forEachSafe(array, fn) {
             const newArray = Array();
             for (var i = 0, l = array.length; i < l; i++) {
                 newArray.push(array[i]);
             }
-            newArray.forEach(a => fn(a));
+            for (const cur of newArray) {
+                await fn(cur);
+            }
         }
 
         static async loadViaXMLRequest(url) {

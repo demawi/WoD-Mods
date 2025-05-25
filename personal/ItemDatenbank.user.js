@@ -36,18 +36,14 @@
             await MyStorage.init();
             const page = _util.getWindowPage();
 
-            // Links zu Items finden und markieren. Nahezu überall.
-            if (page !== "item.php") {
-                await ItemTracking.start();
-            }
-
             // Gegenstandsseite. Einlesen der Item-Werte.
-            if (page === "item.php") {
-                await _ItemParser.onItemPage();
-            }
+            if (page === "item.php") await _ItemParser.onItemPage();
 
             // Einbinden der Such-UI.
             if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
+
+            // Links zu Items finden und markieren. Nahezu überall.
+            if (page !== "item.php") await ItemTracking.start();
         }
     }
 
@@ -63,6 +59,14 @@
         }
 
         static async findNext() {
+            if(false) for(const curKey of await MyStorage.getItemSourceDB().getMissingEntries("ts")) {
+                const cur = await MyStorage.getItemSourceDB().getValue(curKey);
+                if(!cur.ts) {
+                    cur.ts = new Date().getTime();
+                    await MyStorage.getItemSourceDB().setValue(cur);
+                }
+            }
+
             let result;
             // Es ist wahrscheinlicher solche Einträge bei Neueinträgen zu finden
             await MyStorage.getItemSourceDB().getAll({
@@ -88,18 +92,20 @@
             missingSpanOverall.style.position = "fixed";
             missingSpanOverall.style.top = "0px";
             missingSpanOverall.style.right = "0px";
+            const observer = new MutationObserver(checkSiteForItems);
 
             async function checkSiteForItems() {
-                const allHrefs = document.getElementsByTagName("a");
+                observer.disconnect();
+                const allHrefs = document.querySelectorAll("a");
                 var missingItemsFound = 0;
-                for (const itemLinkElement of allHrefs) {
+                await _.util.forEachSafe(allHrefs, async itemLinkElement => {
                     const itemName = util.getItemNameFromElement(itemLinkElement);
-                    if (!itemName) continue;
+                    if (!itemName) return;
                     const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
-                    if (sourceItem && sourceItem.invalid) continue;
+                    if (sourceItem && sourceItem.invalid) return;
                     if (!sourceItem || !sourceItem.details) missingItemsFound++;
                     await MyStorage.indexItem(itemName, itemLinkElement, sourceItem);
-                }
+                });
                 missingSpanOverall.innerHTML = missingItemsFound + "�";
                 if (missingItemsFound === 0) {
                     if (document.body.contains(missingSpanOverall)) {
@@ -111,12 +117,15 @@
                     }
                 }
                 console.log("ItemDB.checkSiteForItems...finished!");
+                observer.observe(document.body, {
+                    attributes: false,
+                    childList: true,
+                    subtree: true,
+                });
             }
 
             await checkSiteForItems();
-            setInterval(async function () {
-                checkSiteForItems();
-            }, 10000);
+
             ItemAutoLoader.start();
         }
     }
@@ -1232,9 +1241,9 @@
                         const missingWrapper = document.createElement("span");
                         missingWrapper.className = "missingWrapper";
                         itemA.parentElement.insertBefore(missingWrapper, itemA);
-                        itemA.parentElement.removeChild(itemA);
                         missingWrapper.append(itemA);
                         missingWrapper.onclick = function () {
+                            // Remove missingMe marker
                             if (missingWrapper.children.length > 1) {
                                 missingWrapper.removeChild(missingWrapper.children[1]);
                             }
@@ -1258,6 +1267,7 @@
             if (!sourceItem) {
                 const newItem = {
                     name: itemName,
+                    ts: new Date().getTime(),
                 }
                 await this.itemSources.setValue(newItem);
             }
