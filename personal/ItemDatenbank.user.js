@@ -33,6 +33,7 @@
 
         static async startMod() {
             await demawiRepository.startMod();
+            await MyStorage.init();
             const page = _util.getWindowPage();
 
             // Links zu Items finden und markieren. Nahezu überall.
@@ -1168,28 +1169,32 @@
     }
 
     class MyStorage {
-        static adjust = function (objStore) {
-            if (!objStore) return;
-            let resultGetValue = objStore.getValue;
-            objStore.getValue = async function (dbObjectId) {
-                dbObjectId = dbObjectId.toLocaleLowerCase().trim();
-                return await resultGetValue.call(objStore, dbObjectId);
+
+        static async init() {
+            const adjust = function (objStore) {
+                if (!objStore) return;
+                let resultGetValue = objStore.getValue;
+                objStore.getValue = async function (dbObjectId) {
+                    dbObjectId = dbObjectId.toLocaleLowerCase().trim();
+                    return await resultGetValue.call(objStore, dbObjectId);
+                }
+                let resultSetValue = objStore.setValue;
+                objStore.setValue = async function (dbObject) {
+                    dbObject.id = dbObject.name.toLocaleLowerCase().trim();
+                    await resultSetValue.call(objStore, dbObject);
+                }
+                let resultDeleteValue = objStore.deleteValue;
+                objStore.deleteValue = async function (dbObjectId) {
+                    dbObjectId = dbObjectId.toLocaleLowerCase().trim();
+                    await resultDeleteValue.call(objStore, dbObjectId);
+                }
+                return objStore;
             }
-            let resultSetValue = objStore.setValue;
-            objStore.setValue = async function (dbObject) {
-                dbObject.id = dbObject.name.toLocaleLowerCase().trim();
-                await resultSetValue.call(objStore, dbObject);
-            }
-            let resultDeleteValue = objStore.deleteValue;
-            objStore.deleteValue = async function (dbObjectId) {
-                dbObjectId = dbObjectId.toLocaleLowerCase().trim();
-                await resultDeleteValue.call(objStore, dbObjectId);
-            }
-            return objStore;
+            this.indexedDb = _WoDStorages.getDb("ItemDB", Mod.dbname);
+            this.item = adjust(await this.indexedDb.createObjectStorage("item", "id"));
+            this.itemSources = adjust(await this.indexedDb.createObjectStorage("itemSources", "id"));
         }
-        static indexedDb = _WoDStorages.getDb("ItemDB", Mod.dbname);
-        static item = this.adjust(this.indexedDb.createObjectStore("item", "id"));
-        static itemSources = this.adjust(this.indexedDb.createObjectStore("itemSources", "id"));
+
 
         static getItemSourceDB() {
             return this.itemSources;

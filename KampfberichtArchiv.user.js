@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.12.0.5
+// @version        0.12.0.6
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -46,40 +46,21 @@
     class Mod {
         static dbname = "wodDB";
         static modname = "KampfberichtArchiv";
+
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
-        static ffOpenWindowMode = navigator.userAgent.toLowerCase().includes('firefox');
 
         static async startMod() {
+            // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
             if (!window.location.hostname.match(/^(.*)\.world-of-dungeons\.de$/)) {
-                await MyStorage.initMyStorage(false, true);
-                _Messenger.actAsResponder(async (code) => eval(code)); // and eval here
+                if (window.location.href.includes("messengerId=")) {
+                    await MyStorage.initMyStorage(false, "Main");
+                    _Messenger.actAsCrossSiteProxy(async (code) => eval(code)); // and eval here
+                }
                 return;
             } else {
-                if (this.ffOpenWindowMode) { // iframe it
-                    const iframeWrap = document.createElement("iframe");
-                    iframeWrap.style.width = "100%";
-                    iframeWrap.style.height = "100%";
-                    iframeWrap.style.position = "absolute";
-                    iframeWrap.style.border = "0px";
-                    iframeWrap.contentDocument.body.className = document.body.className;
-
-                    document.body.style.overflow = "hidden";
-                    document.body.style.margin = "0px";
-
-                    document.body.insertBefore(iframeWrap, document.body.children[0]);
-                    let cur;
-                    while (cur = document.head.children[0]) {
-                        iframeWrap.contentDocument.head.append(cur);
-                    }
-                    while (cur = document.body.children[1]) {
-                        iframeWrap.contentDocument.body.append(cur);
-                    }
-                }
-                await MyStorage.initMyStorage(true, true);
-                const startTime = new Date().getTime();
-                const mainDomain = await _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php");
-                console.log("Messenger installation time: " + (new Date().getTime() - startTime) / 1000 + " secs");
-                await MyStorage.location2.setValue({name: "TestLoc"});
+                await MyStorage.initMyStorage(true, ""); // TODO: initThisDomain nur als zwischenzeitlicher Fallback
+                await MyStorage.messengerPromise;
+                await MyStorage.testMain.setValue({name: "TestLoc"}); // Vorab-Test, ob der Proxy läuft
             }
             await demawiRepository.startMod();
             await _WoDWorldDb.placeSeasonElem();
@@ -2949,13 +2930,17 @@
                 return objStore;
             }
 
-            if (initThisDomain) this.indexedDb = _WoDStorages.getDb("WoDReportArchiv", Mod.dbname);
-            if (initProxyDomain) this.indexedDb2 = _WoDStorages.getDb2("WoDReportArchiv", Mod.dbname + "Main", _Messenger.createMessenger("https://world-of-dungeons.de/wod/spiel/impressum/contact.php"));
+            if (initThisDomain !== undefined) this.indexedDb = _WoDStorages.getDb("WoDReportArchiv", Mod.dbname + initThisDomain);
+
+            if (initProxyDomain) {
+                this.messengerPromise = _Messenger.getMessengerFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php");
+                this.indexedDb2 = _WoDStorages.getDb2("WoDReportArchiv", Mod.dbname + "Main", this.messengerPromise);
+            }
 
             /**
              * Meta-Daten für einen Kammpfbericht
              */
-            if (initThisDomain) this.reportArchive = checkValidReportId(this.indexedDb.createObjectStore("reportArchive", "reportId", {
+            if (initThisDomain !== undefined) this.reportArchive = checkValidReportId(await this.indexedDb.createObjectStorage("reportArchive", "reportId", {
                 //ts: "ts",
                 //locName: "loc.name",
                 //locName2: ["loc.name"],
@@ -2982,16 +2967,18 @@
              * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
              * Resultat aus WoDParser.parseKampfberichtGegenstaende
              */
-            if (initThisDomain) this.reportArchiveItems = this.indexedDb.createObjectStore("reportArchiveItems", "reportId");
+            if (initThisDomain !== undefined) this.reportArchiveItems = await this.indexedDb.createObjectStorage("reportArchiveItems", "reportId");
             /**
              * Quell-Dateien der Kampfberichte
              */
-            if (initThisDomain) this.reportArchiveSources = this.indexedDb.createObjectStore("reportArchiveSources", "reportId");
+            if (initThisDomain !== undefined) this.reportArchiveSources = await this.indexedDb.createObjectStorage("reportArchiveSources", "reportId");
             /**
              * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
              */
-            if (initThisDomain) this.location = this.indexedDb.createObjectStore("location", "name");
-            if (initProxyDomain) this.location2 = this.indexedDb2.createObjectStore("location", "name");
+            if (initThisDomain !== undefined) this.location = await this.indexedDb.createObjectStorage("location", "name");
+            if (initProxyDomain) this.location2 = await this.indexedDb2.createObjectStorage("location", "name");
+
+            if (initProxyDomain) this.testMain = await this.indexedDb2.createObjectStorage("test", "name");
         }
 
 

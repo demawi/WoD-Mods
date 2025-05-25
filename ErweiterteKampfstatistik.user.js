@@ -49,6 +49,7 @@
          */
         static async startMod(kampfbericht, kampfstatistik, dbReportSource) {
             await demawiRepository.startMod();
+            await MyStorage.init();
             let thisObject = this;
             unsafeWindow.statExecuter = async function (...args) {
                 await Mod.startMod(...args);
@@ -1734,21 +1735,24 @@
     }
 
     class MyStorage {
-        static adjust = function (objStore) {
-            let resultGetValue = objStore.getValue;
-            objStore.getValue = async function (dbObjectId) {
-                let result = await resultGetValue.call(objStore, dbObjectId);
-                if (!result) result = {reportId: dbObjectId};
-                return result;
+
+        static async init() {
+            const adjust = function (objStore) {
+                let resultGetValue = objStore.getValue;
+                objStore.getValue = async function (dbObjectId) {
+                    let result = await resultGetValue.call(objStore, dbObjectId);
+                    if (!result) result = {reportId: dbObjectId};
+                    return result;
+                }
+                let resultSetValue = objStore.setValue;
+                objStore.setValue = async function (dbObject) {
+                    await resultSetValue.call(objStore, dbObject);
+                }
+                return objStore;
             }
-            let resultSetValue = objStore.setValue;
-            objStore.setValue = async function (dbObject) {
-                await resultSetValue.call(objStore, dbObject);
-            }
-            return objStore;
+            this.indexedDb = _WoDStorages.getDb("WoDStats+", Mod.dbname);
+            this.reportStats = adjust(await this.indexedDb.createObjectStorage("reportStats", "reportId"));
         }
-        static indexedDb = _WoDStorages.getDb("WoDStats+", Mod.dbname);
-        static reportStats = this.adjust(this.indexedDb.createObjectStore("reportStats", "reportId"));
 
         /**
          * @returns {_Storages.ObjectStorage}

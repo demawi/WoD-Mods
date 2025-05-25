@@ -202,12 +202,12 @@ class demawiRepository {
                 }
             }
 
-            createObjectStore(storageId, key, indizes) {
+            createObjectStorage(storageId, key, indizes) {
                 const objectStore = new _.Storages.ObjectStorageProxy(storageId, key, indizes);
                 objectStore.indexedDb = this;
                 const _this = this;
-                this.exec(function (modname, dbname, storageId, key, indizes) {
-                    const objectStorage = _.WoDStorages.getDb(modname, dbname).createObjectStore(storageId, key, indizes);
+                this.exec(async function (modname, dbname, storageId, key, indizes) {
+                    const objectStorage = await _.WoDStorages.getDb(modname, dbname).createObjectStorage(storageId, key, indizes);
                     objectStorage.connect();
                 }, _this.modname, _this.dbname, storageId, key, indizes);
 
@@ -291,8 +291,9 @@ class demawiRepository {
 
             /**
              * Sofern nicht vorhanden wird der Object-Store erstellt.
+             * @returns {Promise<demawiRepository.Storages.ObjectStorage>}
              */
-            createObjectStore(storageId, key, indizes) {
+            createObjectStorage(storageId, key, indizes) {
                 let readonly = false;
                 if (indizes === true) {
                     indizes = null;
@@ -519,7 +520,7 @@ class demawiRepository {
                 const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
                 for (const objectStoreName of objectStoreNames) {
                     const readFrom = await this.getObjectStoreChecked(objectStoreName);
-                    const writeTo = dbTo.createObjectStore(objectStoreName, await readFrom.getPrimaryKey());
+                    const writeTo = await dbTo.createObjectStorage(objectStoreName, await readFrom.getPrimaryKey());
                     console.log("Clone '" + this.dbname + "' to '" + dbNameTo + "'... " + objectStoreName + "...");
                     await readFrom.getAll(false, async cur => {
                         await writeTo.setValue(cur);
@@ -1241,13 +1242,13 @@ class demawiRepository {
 
         static getDb(modname, dbname) {
             if (dbname) this.#indexedDb = new _.Storages.IndexedDb(modname, dbname);
-            if (!this.#indexedDb) throw new Error("Datenbank wurde noch nicht definiert!")
+            if (!this.#indexedDb) throw new Error("Datenbank wurde noch nicht definiert! '" + modname + ":" + dbname + "'")
             return this.#indexedDb;
         }
 
         static getDb2(modname, dbname, messengerPromise) {
             if (dbname) this.#indexedDb2 = new _.Storages.IndexedDbProxy(modname, dbname, messengerPromise);
-            if (!this.#indexedDb2) throw new Error("Datenbank wurde noch nicht definiert!");
+            if (!this.#indexedDb2) throw new Error("Datenbank wurde noch nicht definiert! '" + modname + ":" + dbname + "'");
             return this.#indexedDb2;
         }
 
@@ -1293,7 +1294,7 @@ class demawiRepository {
         static #getCreateObjectStore(name, key, indizes) {
             let result = this.#objectStores[name];
             if (result) return result;
-            result = this.getDb().createObjectStore(name, key, indizes);
+            result = this.getDb().createObjectStorage(name, key, indizes);
             this.#objectStores[name] = result;
             return result;
         }
@@ -1304,7 +1305,7 @@ class demawiRepository {
         static async #getObjectStoreIfExists(storageId) {
             let objectStore = this.#objectStores[storageId];
             if (objectStore === undefined) {
-                objectStore = await this.getDb().getObjectStore(storageId) || false;
+                objectStore = await this.getDb().createObjectStorage(storageId) || false;
                 this.#objectStores[storageId] = objectStore;
             }
             return objectStore;
@@ -1807,17 +1808,15 @@ class demawiRepository {
         /**
          * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
          */
-        static actAsResponder(evaluateFn, debug) {
+        static actAsCrossSiteProxy(evaluateFn, debug) {
             const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
             const myMid = new URL(window.location.href).searchParams.get("messengerId");
             const log = document.referrer ? console.log : window.top.console.log;
             const errorlogger = document.referrer ? console.error : window.top.console.error;
             const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
+            parentWindow.focus();
 
-            for (const cur of document.body.children) {
-                cur.parentElement.removeChild(cur);
-            }
-            document.body.append(document.createTextNode("Dieses Fenster dient als Kommunikationsschnittstelle zu: " + parentOrigin));
+            document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + window.location.origin + "</b><br>Es schließt sich mit dem Hauptfenster";
 
             const iterators = {};
             const respond = function (data, result) {
@@ -1878,7 +1877,7 @@ class demawiRepository {
         /**
          * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
          */
-        static async createMessenger(responderHttp) {
+        static async getMessengerFor(responderHttp) {
             if (this.messengerId === 1) { // nur beim ersten Mal
                 const _this = this;
                 window.addEventListener(
@@ -1894,26 +1893,17 @@ class demawiRepository {
                     false,
                 );
             }
-            const messengerId = this.messengerId++;
-            const responderUrl = new URL(responderHttp);
-            responderUrl.searchParams.append("messengerId", messengerId);
-            let targetWindow;
-            if (navigator.userAgent.toLowerCase().includes('firefox')) {
-                console.log("Create targetWindow as window.open")
-                targetWindow = window.open(responderUrl.toString());
-            } else {
-                console.log("Create targetWindow as iframe")
-                targetWindow = _.Libs.loadViaIFrame(responderUrl.toString()).contentWindow;
-            }
+            const targetUrl = new URL(responderHttp);
+            if (!window.top._messengers) window.top._messengers = {};
+            let messenger = window.top._messengers[targetUrl.origin];
+            if (messenger) return messenger.onReady;
 
-            const messenger = new Messenger(messengerId, targetWindow, responderUrl.origin);
+            const messengerId = this.messengerId++;
+            targetUrl.searchParams.append("messengerId", messengerId);
+            messenger = new Messenger(messengerId, targetUrl);
+            window.top._messengers[targetUrl.origin] = messenger;
             this.messengers[messengerId] = messenger;
-            let resolver;
-            const promise = new Promise((resolve, reject) => {
-                resolver = resolve;
-            });
-            messenger.onReady = resolver;
-            return promise;
+            return messenger.onReady;
         }
 
         iframe;
@@ -1924,20 +1914,27 @@ class demawiRepository {
         iterations = {};
         id = 1;
         onReady;
+        onReadyResolver;
         messengerId;
 
-        constructor(messengerId, targetWindow, targetOrigin) {
+        constructor(messengerId, targetUrl) {
             this.messengerId = messengerId;
-            this.targetWindow = targetWindow;
-            this.targetOrigin = targetOrigin;
+            this.targetUrl = targetUrl;
             this.myOrigin = window.location.origin;
+            this.targetOrigin = targetUrl.origin;
+            this.targetWindow = this.getTargetWindow(targetUrl);
+            let resolver;
+            const promise = new Promise((resolve, reject) => {
+                resolver = resolve;
+            });
+            this.onReadyResolver = resolver;
+            this.onReady = promise;
         }
 
         async onMessage(data) {
             const id = data.id;
             if (id === undefined) { // Responder meldet Bereitschaft, wir geben somit den Messenger frei.
-                if (this.onReady) this.onReady(this);
-                delete this.onReady;
+                if (this.onReadyResolver) this.onReadyResolver(this);
                 return;
             }
             if (data.type !== "iteration") {
@@ -2003,6 +2000,46 @@ class demawiRepository {
 
         #createId() {
             return this.id++;
+        }
+
+        getTargetWindow(responderUrl) {
+            let targetWindow;
+            if (navigator.userAgent.toLowerCase().includes('firefox')) {
+                if (window.opener) { // Popup: same-origin
+                    return window.opener.top._messengers[responderUrl.origin];
+                } else if (window.top === window) { // nur wenn iframe-wrap noch nicht erstellt wurde
+                    const iframeWrap = document.createElement("iframe");
+                    iframeWrap.style.width = "100%";
+                    iframeWrap.style.height = "100%";
+                    iframeWrap.style.position = "absolute";
+                    iframeWrap.style.border = "0px";
+
+                    document.body.style.overflow = "hidden";
+                    document.body.style.margin = "0px";
+
+                    document.body.insertBefore(iframeWrap, document.body.children[0]);
+                    iframeWrap.contentDocument.body.className = document.body.className;
+                    iframeWrap.src = window.location.href;
+                    let cur;
+                    while (cur = document.head.children[0]) {
+                        document.head.removeChild(cur);
+                    }
+                    while (cur = document.body.children[1]) {
+                        document.body.removeChild(cur);
+                    }
+
+                }
+                console.log("Create targetWindow as window.open")
+                targetWindow = window.open(responderUrl.toString());
+                window.top.focus();
+                window.top.addEventListener("beforeunload", function () {
+                    targetWindow.close();
+                });
+            } else {
+                console.log("Create targetWindow as iframe")
+                targetWindow = _.Libs.loadViaIFrame(responderUrl.toString()).contentWindow;
+            }
+            return targetWindow;
         }
     }
 
