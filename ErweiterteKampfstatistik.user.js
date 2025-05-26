@@ -1750,7 +1750,7 @@
                 }
                 return objStore;
             }
-            this.indexedDb = _WoDStorages.getDb("WoDStats+", Mod.dbname);
+            this.indexedDb = _WoDStorages.getWodDb("WoDStats+", Mod.dbname);
             this.reportStats = adjust(await this.indexedDb.createObjectStorage("reportStats", "reportId"));
         }
 

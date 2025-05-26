@@ -1199,7 +1199,7 @@
                 }
                 return objStore;
             }
-            this.indexedDb = _WoDStorages.getDb("ItemDB", Mod.dbname);
+            this.indexedDb = _WoDStorages.getWodDb("ItemDB", Mod.dbname);
             this.item = adjust(await this.indexedDb.createObjectStorage("item", "id"));
             this.itemSources = adjust(await this.indexedDb.createObjectStorage("itemSources", "id"));
         }

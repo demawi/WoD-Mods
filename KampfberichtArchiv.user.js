@@ -623,11 +623,10 @@
             for (var i = 1, l = tbody.children.length; i < l; i++) {
                 curTR = tbody.children[i];
                 curTR.style.borderTop = "2px solid #404040";
-                const inputs = curTR.getElementsByTagName("input");
                 let reportId;
-                for (var k = 0, kl = inputs.length; k < kl; k++) {
-                    const curInput = inputs[k];
-                    if (curInput.name.startsWith("report_id")) {
+                for (const curInput of curTR.getElementsByTagName("input")) {
+                    const name = curInput.getAttribute("_name") || curInput.name;
+                    if (name.startsWith("report_id")) {
                         // Gesetzte ID aus dem Archiv oder die direkt Kampfbereichte-ID
                         reportId = curInput.getAttribute("_reportId") || (_WoD.getMyWorld() + curInput.value);
                         break;
@@ -2202,9 +2201,13 @@
             const reportIdInput = document.createElement("input");
             reportIdInput.setAttribute("_reportId", reportMeta.reportId);
             result.append(reportIdInput);
-            reportIdInput.value = realReportId;
             reportIdInput.type = "hidden";
-            reportIdInput.name = "report_id[" + idx + "]";
+            reportIdInput.setAttribute("_name", "report_id[" + idx + "]");
+
+            const loadDirect = function () {
+                reportIdInput.name = "report_id[0]";
+                reportIdInput.value = realReportId;
+            }
 
             const isDirectLoadable = document.querySelector("input[value=\"" + realReportId + "\"]");
             const reportMetaSource = reportMeta.srcs || {};
@@ -2212,13 +2215,16 @@
             result.append(statistik);
             statistik.value = (!reportMetaSource.stats && isDirectLoadable ? this.#loadingSymbol : "") + "Statistik";
             statistik.type = "submit";
-            if (isDirectLoadable) statistik.name = "stats[" + idx + "]";
             statistik.className = reportMetaSource.stats || isDirectLoadable ? "button clickable" : "button_disabled";
             statistik.onclick = async function (e) {
                 if (reportMetaSource.stats) {
                     e.preventDefault();
                     const reportSource = await getReportSource();
                     if (reportSource && reportSource.stats) await ArchivSearch.showPage(reportSource, reportSource.stats, ArchivView.PAGE_TYPE_STAT);
+                } else if (isDirectLoadable) {
+                    loadDirect();
+                    statistik.value = "Statistik";
+                    statistik.name = "stats[0]";
                 }
             }
 
@@ -2226,13 +2232,16 @@
             result.append(gegenstaende);
             gegenstaende.value = (!reportMetaSource.items && isDirectLoadable ? this.#loadingSymbol : "") + "Gegenstände";
             gegenstaende.type = "submit";
-            if (isDirectLoadable) gegenstaende.name = "items[" + idx + "]";
             gegenstaende.className = reportMetaSource.items || isDirectLoadable ? "button clickable" : "button_disabled";
             gegenstaende.onclick = async function (e) {
                 if (reportMetaSource.items) {
                     e.preventDefault();
                     const reportSource = await getReportSource();
                     if (reportSource && reportSource.items) await ArchivSearch.showPage(reportSource, reportSource.items, ArchivView.PAGE_TYPE_ITEMS);
+                } else if (isDirectLoadable) {
+                    loadDirect();
+                    gegenstaende.value = "Gegenstände";
+                    gegenstaende.name = "items[0]";
                 }
             }
 
@@ -2240,13 +2249,16 @@
             result.append(bericht);
             bericht.value = (!reportMetaSource.levels && isDirectLoadable ? this.#loadingSymbol : "") + "Bericht";
             bericht.type = "submit";
-            if (isDirectLoadable) bericht.name = "details[" + idx + "]";
             bericht.className = reportMetaSource.levels || isDirectLoadable ? "button clickable" : "button_disabled";
             bericht.onclick = async function (e) {
                 if (reportMetaSource.levels) {
                     e.preventDefault();
                     const reportSource = await getReportSource();
                     if (reportSource && reportSource.levels) await ArchivSearch.showPage(reportSource, reportSource.levels[0], ArchivView.PAGE_TYPE_REPORT);
+                } else if (isDirectLoadable) {
+                    loadDirect();
+                    bericht.value = "Bericht";
+                    bericht.name = "details[0]";
                 }
             }
 
@@ -2933,11 +2945,11 @@
                 return objStore;
             }
 
-            if (initThisDomain !== undefined) this.indexedDb = _WoDStorages.getDb("WoDReportArchiv", Mod.dbname + initThisDomain);
+            if (initThisDomain !== undefined) this.indexedDb = _WoDStorages.getWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
 
             if (initProxyDomain) {
                 this.messengerPromise = _Messenger.getMessengerFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php");
-                this.indexedDb2 = _WoDStorages.getDb2("WoDReportArchiv", Mod.dbname + "Main", this.messengerPromise);
+                this.indexedDb2 = _WoDStorages.getWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
             }
 
             /**

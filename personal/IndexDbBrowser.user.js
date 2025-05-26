@@ -121,7 +121,7 @@
                     _this.indexDb = undefined;
                     return;
                 }
-                _this.indexDb = new _Storages.IndexedDb(demawiRepository.getModName(), newValue);
+                _this.indexDb = _Storages.IndexedDb.getDb(newValue, demawiRepository.getModName());
                 const storeNames_ = await _this.indexDb.getObjectStoreNames();
                 const storeNames = [];
                 for (let i = 0, l = storeNames_.length; i < l; i++) {

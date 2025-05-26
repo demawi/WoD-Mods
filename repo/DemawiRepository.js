@@ -179,10 +179,21 @@ class demawiRepository {
 
         static IndexedDbProxy = class IndexedDbProxy {
 
+            static #indexDbCache = {};
+
+            static getDb(dbname, modname, idbFactory) {
+                let result = this.#indexDbCache[dbname];
+                if (result) return result;
+                if (!modname) throw new Error("Datenbank muss einmalig zuvor durchd die Mod definiert werden: '" + dbname + "' Bisher angesprochen: " + JSON.stringify(this.#indexDbCache));
+                result = new IndexedDbProxy(dbname, modname, idbFactory);
+                this.#indexDbCache[dbname] = result;
+                return result;
+            }
+
             csdbExecuter; // Cross-Site Database
             objectStores = {};
 
-            constructor(modname, dbname, messengerPromise) {
+            constructor(dbname, modname, messengerPromise) {
                 this.modname = modname;
                 this.dbname = dbname;
                 const _this = this;
@@ -202,12 +213,22 @@ class demawiRepository {
                 }
             }
 
+            async execIteration(iterationFn, ...args) {
+                if (this.csdbExecuter) await this.csdbExecuter.execIteration(iterationFn, ...args);
+                else {
+                    const _this = this;
+                    this.csdbExecuterPromise.then(() => {
+                        _this.csdbExecuter.execIteration(iterationFn, ...args);
+                    })
+                }
+            }
+
             createObjectStorage(storageId, key, indizes) {
                 const objectStore = new _.Storages.ObjectStorageProxy(storageId, key, indizes);
                 objectStore.indexedDb = this;
                 const _this = this;
                 this.exec(async function (modname, dbname, storageId, key, indizes) {
-                    const objectStorage = await _.WoDStorages.getDb(modname, dbname).createObjectStorage(storageId, key, indizes);
+                    const objectStorage = await _.Storages.IndexedDb.getDb(dbname, modname).createObjectStorage(storageId, key, indizes);
                     objectStorage.connect();
                 }, _this.modname, _this.dbname, storageId, key, indizes);
 
@@ -231,23 +252,29 @@ class demawiRepository {
             }
 
             async getValue(dbObjectId) {
-                return await this.indexedDb.exec(async function (storageId, dbObjectId) {
-                    return await (await _.WoDStorages.getDb().getObjectStoreChecked(storageId)).getValue(dbObjectId);
-                }, this.storageId, dbObjectId);
+                return await this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
+                    return await (await _.Storages.IndexedDb.getDb(dbname).indexedDb.getObjectStoreChecked(storageId)).getValue(dbObjectId);
+                }, this.storageId, this.indexedDb.dbname, dbObjectId);
             }
 
             async setValue(dbObject) {
-                return await this.indexedDb.exec(async function (storageId, dbObject) {
-                    return await (await _.WoDStorages.getDb().getObjectStoreChecked(storageId)).setValue(dbObject);
-                }, this.storageId, dbObject);
+                return await this.indexedDb.exec(async function (storageId, dbname, dbObject) {
+                    return await (await _.Storages.IndexedDb.getDb(dbname).getObjectStoreChecked(storageId)).setValue(dbObject);
+                }, this.storageId, this.indexedDb.dbname, dbObject);
             }
 
             async deleteValue(dbObjectId) {
-
+                return await this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
+                    return await (await _.Storages.IndexedDb.getDb(dbname).getObjectStoreChecked(storageId)).deleteValue(dbObjectId);
+                }, this.storageId, this.indexedDb.dbname, dbObject);
             }
 
             async getAll(queryOpt, iterationFnOpt) {
+                return await this.indexedDb.execIteration(async function (storageId, dbname, queryOpt) {
+                    return await (await _.Storages.IndexedDb.getDb(dbname).getObjectStoreChecked(storageId)).getAll(queryOpt, async function (a) {
 
+                    });
+                }, iterationFnOpt, this.storageId, this.indexedDb.dbname, queryOpt);
             }
 
             async getAllKeys(queryOpt, iterationFnOpt) {
@@ -255,19 +282,31 @@ class demawiRepository {
             }
         }
 
-        static IndexedDb = class {
+        static IndexedDb = class IndexedDb {
+
+            static #indexDbCache = {};
+            static staticInstanceId = 1;
+
+            static getDb(dbname, modname, idbFactory) {
+                let result = this.#indexDbCache[dbname];
+                if (result) return result;
+                if (!modname) throw new Error("Datenbank muss einmalig zuvor durchd die Mod definiert werden: '" + dbname + "' Bisher angesprochen: " + JSON.stringify(this.#indexDbCache));
+                result = new IndexedDb(dbname, modname, idbFactory);
+                this.#indexDbCache[dbname] = result;
+                return result;
+            }
+
             modname;
             dbname;
             idbFactory;
             objectStores = [];
             objectStoresToDelete = [];
             dbConnection;
-            static staticInstanceId = 1;
             instanceId;
             requestIdx = 1; // only for debugging
-            debug = true;
+            debug = false;
 
-            constructor(modname, dbname, idbFactory) {
+            constructor(dbname, modname, idbFactory) {
                 this.modname = modname;
                 this.dbname = dbname;
                 this.idbFactory = idbFactory || indexedDB;
@@ -515,7 +554,7 @@ class demawiRepository {
              */
             async cloneTo(dbNameTo) {
                 console.log("Clone '" + this.dbname + "' to '" + dbNameTo + "'...");
-                const dbTo = new demawiRepository.Storages.IndexedDb(this.modname, dbNameTo);
+                const dbTo = demawiRepository.Storages.IndexedDb.getDb(dbNameTo, this.modname);
                 const dbConnectionFrom = await this.getConnection();
                 const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
                 for (const objectStoreName of objectStoreNames) {
@@ -876,7 +915,6 @@ class demawiRepository {
                 iteration;
                 retrieveFnName; // getAll oder getAllKeys
                 batchSize;
-                results;
                 limit;
                 alreadyFetched = 0;
                 indexKeyPath;
@@ -912,14 +950,14 @@ class demawiRepository {
 
                 async #run() {
                     this.query.limit = Math.min(this.batchSize, this.limit);
-                    this.results = await this.objectStorage[this.retrieveFnName](this.query);
-                    for (let i = 0, l = this.results.length; i < l; i++) {
-                        if (await this.iteration(this.results[i], i) === false) return true;
+                    const results = await this.objectStorage[this.retrieveFnName](this.query);
+                    for (let i = 0, l = results.length; i < l; i++) {
+                        if (await this.iteration(results[i], this.alreadyFetched + i) === false) return true;
                     }
-                    this.alreadyFetched += this.results.length;
-                    this.limit -= this.results.length;
+                    this.alreadyFetched += results.length;
+                    this.limit -= results.length;
                     // Limit erreicht oder Anzahl der Resulstate weniger als erwartet=keine weiteren Ergebnisse aus der Datenbank
-                    if (this.query.limit < 0 || this.results.length < this.batchSize) return true;
+                    if (this.query.limit < 0 || results.length < this.batchSize) return true;
 
                     if (!this.indexKeyPath) { // wird nur einmalig nach dem ersten Request durchgeführt
                         if (this.idbObjectStore === this.idbTarget) {
@@ -942,7 +980,7 @@ class demawiRepository {
                         }
                     }
                     // TODO: funktioniert nur bei "getAll". Bei "getAllKeys" könnten wir den Pointer nicht neu setzen
-                    this.query[this.pointerName] = await this.constructor.getValuesFor(this.results[this.results.length - 1], this.indexKeyPath);
+                    this.query[this.pointerName] = await this.constructor.getValuesFor(results[results.length - 1], this.indexKeyPath);
                 }
 
                 static async getValuesFor(dataStoreObject, keyPath) {
@@ -1240,14 +1278,14 @@ class demawiRepository {
         static #indexedDb2;
         static #objectStores2 = {};
 
-        static getDb(modname, dbname) {
-            if (dbname) this.#indexedDb = new _.Storages.IndexedDb(modname, dbname);
+        static getWodDb(modname, dbname) {
+            if (dbname) this.#indexedDb = _.Storages.IndexedDb.getDb(dbname, modname);
             if (!this.#indexedDb) throw new Error("Datenbank wurde noch nicht definiert! '" + modname + ":" + dbname + "'")
             return this.#indexedDb;
         }
 
-        static getDb2(modname, dbname, messengerPromise) {
-            if (dbname) this.#indexedDb2 = new _.Storages.IndexedDbProxy(modname, dbname, messengerPromise);
+        static getWodDbProxy(dbname, modname, messengerPromise) {
+            if (dbname) this.#indexedDb2 = _.Storages.IndexedDbProxy.getDb(dbname, modname, messengerPromise);
             if (!this.#indexedDb2) throw new Error("Datenbank wurde noch nicht definiert! '" + modname + ":" + dbname + "'");
             return this.#indexedDb2;
         }
@@ -1294,7 +1332,7 @@ class demawiRepository {
         static #getCreateObjectStore(name, key, indizes) {
             let result = this.#objectStores[name];
             if (result) return result;
-            result = this.getDb().createObjectStorage(name, key, indizes);
+            result = this.getWodDb().createObjectStorage(name, key, indizes);
             this.#objectStores[name] = result;
             return result;
         }
@@ -1305,7 +1343,7 @@ class demawiRepository {
         static async #getObjectStoreIfExists(storageId) {
             let objectStore = this.#objectStores[storageId];
             if (objectStore === undefined) {
-                objectStore = await this.getDb().createObjectStorage(storageId) || false;
+                objectStore = await this.getWodDb().createObjectStorage(storageId) || false;
                 this.#objectStores[storageId] = objectStore;
             }
             return objectStore;
@@ -1971,10 +2009,10 @@ class demawiRepository {
         /**
          * Die 'execFn' muss eine Funktion erzeugen, die fortlaufend aufgerufen wird um den nächsten Datensatz zu liefern.
          */
-        async sendMessageIteration(execFn, iteration) {
+        async execIteration(iteration, execFn, ...vars) {
             const id = this.#createId();
             this.iterations[id] = iteration;
-            return this.execIntern(execFn, {id: id, type: "iteration", cmd: "start"});
+            return this.execIntern(execFn, {id: id, type: "iteration", cmd: "start"}, ...vars);
         }
 
         async exec(execFn, ...vars) {
