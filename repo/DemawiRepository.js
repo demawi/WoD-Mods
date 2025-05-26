@@ -272,7 +272,7 @@ class demawiRepository {
             async getAll(queryOpt, iterationFnOpt) {
                 return await this.indexedDb.execIteration(async function (storageId, dbname, queryOpt) {
                     return await (await _.Storages.IndexedDb.getDb(dbname).getObjectStoreChecked(storageId)).getAll(queryOpt, async function (a) {
-
+                        respondIteration(a);
                     });
                 }, iterationFnOpt, this.storageId, this.indexedDb.dbname, queryOpt);
             }
@@ -918,7 +918,7 @@ class demawiRepository {
                 limit;
                 alreadyFetched = 0;
                 indexKeyPath;
-                pointerName;
+                pointerName; // keyMatchFrom oder keyMatchTo, je nachdem in welcher Richtung der ObjectStore durchgegangen wird.
 
                 constructor(objectStorage, idbObjectStore, idbTarget, query, iteration, retrieveFnName) {
                     if (retrieveFnName !== "getAll") throw new Error("Für den Batch-Search wird bisher nur 'getAll' unterstützt");
@@ -1846,7 +1846,7 @@ class demawiRepository {
         /**
          * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
          */
-        static actAsCrossSiteProxy(evaluateFn, debug) {
+        static actAsCrossSiteProxy(debug) {
             const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
             const myMid = new URL(window.location.href).searchParams.get("messengerId");
             const log = document.referrer ? console.log : window.top.console.log;
@@ -1862,6 +1862,11 @@ class demawiRepository {
                 data.mid = myMid;
                 parentWindow.postMessage(data, parentOrigin);
             }
+            const respondIteration = function(result) {
+
+            }
+
+            const evaluateFn = async (code) => eval(code);
 
             window.addEventListener( // Main-Domain
                 "message",

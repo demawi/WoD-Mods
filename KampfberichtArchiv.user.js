@@ -54,7 +54,7 @@
             if (!window.location.hostname.match(/^(.*)\.world-of-dungeons\.de$/)) {
                 if (window.location.href.includes("messengerId=")) {
                     await MyStorage.initMyStorage(false, "Main");
-                    _Messenger.actAsCrossSiteProxy(async (code) => eval(code)); // and eval here
+                    _Messenger.actAsCrossSiteProxy();
                 }
                 return;
             } else {
