@@ -41,7 +41,7 @@
     const _Libs = demawiRepository.import("Libs");
     const _Settings = demawiRepository.import("Settings");
     const _ItemParser = demawiRepository.import("ItemParser");
-    const _Messenger = demawiRepository.import("Messenger");
+    const _CSProxy = demawiRepository.import("CSProxy");
 
     class Mod {
         static dbname = "wodDB";
@@ -50,19 +50,20 @@
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
         static async startMod() {
+            if (demawiRepository.ensureIframeWrap()) return;
             // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
             if (!window.location.hostname.match(/^(.*)\.world-of-dungeons\.de$/)) {
-                if (window.location.href.includes("messengerId=")) {
+                if (window.location.href.endsWith("messenger=true")) {
                     await MyStorage.initMyStorage(false, "Main");
-                    _Messenger.actAsCrossSiteProxy();
+                    _CSProxy.actAsCSProxyResponder();
                 }
                 return;
             } else {
-                await MyStorage.initMyStorage(true, ""); // TODO: initThisDomain nur als zwischenzeitlicher Fallback
+                await MyStorage.initMyStorage(true);
                 await MyStorage.messengerPromise;
                 await MyStorage.testMain.setValue({name: "TestLoc"}); // Vorab-Test, ob der Proxy läuft
             }
-            await demawiRepository.startMod();
+            demawiRepository.startMod();
             await _WoDWorldDb.placeSeasonElem();
 
             const page = _util.getWindowPage();
@@ -168,12 +169,7 @@
 
             title.append(await _WoDWorldDb.createSeasonElem(reportMeta.world_season));
 
-            const berichtsseiteSpeichernButton = _UI.createButton(" 💾", () => {
-                util.htmlExport();
-            });
-            berichtsseiteSpeichernButton.title = "Einzelne Seite exportieren";
-            berichtsseiteSpeichernButton.classList.add("nowod");
-            title.appendChild(berichtsseiteSpeichernButton);
+
             if (document.getElementsByClassName("paginator").length > 0) {
                 const warning = document.createElement("span");
                 warning.style.fontSize = "16px";
@@ -235,6 +231,13 @@
 
             await Location.getVersions(reportMeta, reportSource);
             if (Report.isVollstaendig(reportMeta)) await AutoFavorit.recheckAutoFavoritenForReport(reportMeta);
+
+            const berichtsseiteSpeichernButton = _UI.createButton(" 💾", () => {
+                util.htmlExport();
+            });
+            berichtsseiteSpeichernButton.title = "Einzelne Seite exportieren";
+            berichtsseiteSpeichernButton.classList.add("nowod");
+            title.appendChild(berichtsseiteSpeichernButton);
         }
 
     }
@@ -361,8 +364,8 @@
         /**
          * Löscht reportArchive.success - Information und schreibt sie neu.
          */
-        static async rewriteSuccessInformation() {
-            for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
+        static async syncSuccessInformation() {
+            await MyStorage.reportArchiveSources.getAll(undefined, async function (reportSource) {
                 const report = await MyStorage.reportArchive.getValue(reportSource.reportId);
                 delete report.success;
                 console.log("Bearbeite: ", report.reportId);
@@ -375,7 +378,7 @@
                     if (_WoD.isSchlacht(doc)) report.success = _WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(doc, report.success);
                 }
                 await MyStorage.reportArchive.setValue(report);
-            }
+            });
         }
 
         static async rewriteReportArchiveItems() {
@@ -433,12 +436,34 @@
         }
 
         static async onKampfberichteSeite() {
+            //await this.syncSuccessInformation();
+
+            if (false) await MyStorage.reportArchive.getAll({}, async function (a) {
+                await MyStorage.reportArchive2.setValue(a);
+            });
+
+            let count = 0;
+            let found = {}
+            if (false) {
+                await MyStorage.reportArchive2.getAll({}, async function (a) {
+                    if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
+                    found[a.reportId] = true;
+                    count++;
+                    if (count === 100) return false;
+                });
+                console.log("BBBBBBB " + count);
+            }
+
+            //console.log("IIIIIIIIIIII", await _WoDStorages.getLootDb().getValue("erdbrauner reif des waldes"));
+            //console.log("JJJJJJJJJ", await MyStorage.itemLoot.getValue("erdbrauner reif des waldes"));
+            //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
+
             //await MyStorage.indexedDb.cloneTo("wodDB_Backup6");
             //await this.resyncSourcesToReports();
             //await this.rewriteReportArchiveItems();
 
-            let count = 0;
-            const found = {}
+            count = 0;
+            found = {}
             await MyStorage.reportArchive.getAll({
                 //index: "ts",
                 order: "next",
@@ -453,6 +478,22 @@
             });
             console.log("AAAAAAAAAA ", count);
 
+            count = 0;
+            found = {}
+            await MyStorage.reportArchive.getAll({ // no result request
+                index: "ts",
+                //order: "next",
+                keyMatchFrom: "WA15389813",
+                keyMatchFromOpen: false,
+                //debug: 2,
+            }, async a => {
+                //console.log("Result: ", a);
+                if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
+                found[a.reportId] = true;
+                count++;
+            });
+            console.log("BBBBBBB ", count);
+
             if (false) {
                 console.log("AAAAAAAAAAA", (await MyStorage.reportArchive.getAll({
                     index: "locName",
@@ -463,6 +504,7 @@
             //await this.syncReportLootToItemLoot();
             //await MyStorage.indexedDb.deleteObjectStore("teest");
             await this.checkMaintenance();
+            console.log("Checked Maintenance");
             this.title = document.getElementsByTagName("h1")[0];
 
             const wodContent = document.getElementsByClassName("content_table")[0];
@@ -1481,7 +1523,7 @@
             const all = document.getElementsByTagName("h1")[0];
             const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
             if (!itemName) return;
-            const item = await _.WoDLootDb.getValue(itemName);
+            const item = await _.WoDLootDb.getValue(itemName.toLowerCase());
             const loot = (item && item.loot) || [];
 
             const header = ["Ort", "Zeit", "Von", "Stufe", "Welt", "Gelootet"];
@@ -2924,6 +2966,17 @@
     class MyStorage {
 
         static async initMyStorage(initProxyDomain, initThisDomain) {
+            if (initThisDomain) this.indexedDb = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
+
+            if (initProxyDomain) {
+                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
+                //this.indexedDbLocal = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname);
+            }
+            await this.initThisStorage(this.indexedDb);
+        }
+
+        static async initThisStorage(indexedDb) {
             const checkValidReportId = function (objStore) {
                 if (!objStore) return;
                 let resultGetValue = objStore.getValue;
@@ -2945,21 +2998,14 @@
                 return objStore;
             }
 
-            if (initThisDomain !== undefined) this.indexedDb = _WoDStorages.getWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
-
-            if (initProxyDomain) {
-                this.messengerPromise = _Messenger.getMessengerFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php");
-                this.indexedDb2 = _WoDStorages.getWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
-            }
-
             /**
              * Meta-Daten für einen Kammpfbericht
              */
-            if (initThisDomain !== undefined) this.reportArchive = checkValidReportId(await this.indexedDb.createObjectStorage("reportArchive", "reportId", {
+            this.reportArchive = checkValidReportId(indexedDb.createObjectStorage("reportArchive", "reportId", {
                 //ts: "ts",
                 //locName: "loc.name",
                 //locName2: ["loc.name"],
-                //wgls: ["world", "gruppe_id", "loc.name", "world_season"],
+                wgls: ["world", "gruppe_id", "loc.name", "world_season"],
             }));
 
             if (false) {
@@ -2982,18 +3028,19 @@
              * Erweiterte Daten für einen Kampfbericht. Z.B. Informationen der Gegenstandsseite (Equip + Loot)
              * Resultat aus WoDParser.parseKampfberichtGegenstaende
              */
-            if (initThisDomain !== undefined) this.reportArchiveItems = await this.indexedDb.createObjectStorage("reportArchiveItems", "reportId");
+            this.reportArchiveItems = indexedDb.createObjectStorage("reportArchiveItems", "reportId");
             /**
              * Quell-Dateien der Kampfberichte
              */
-            if (initThisDomain !== undefined) this.reportArchiveSources = await this.indexedDb.createObjectStorage("reportArchiveSources", "reportId");
+            this.reportArchiveSources = indexedDb.createObjectStorage("reportArchiveSources", "reportId");
             /**
              * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
              */
-            if (initThisDomain !== undefined) this.location = await this.indexedDb.createObjectStorage("location", "name");
-            if (initProxyDomain) this.location2 = await this.indexedDb2.createObjectStorage("location", "name");
+            this.location = indexedDb.createObjectStorage("location", "name");
 
-            if (initProxyDomain) this.testMain = await this.indexedDb2.createObjectStorage("test", "name");
+            this.itemLoot = indexedDb.createObjectStorage("itemLoot", "id");
+
+            this.testMain = indexedDb.createObjectStorage("test", "name");
         }
 
 

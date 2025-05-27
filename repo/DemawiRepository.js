@@ -166,12 +166,12 @@ class demawiRepository {
 
         static MATCHER = {
             NUMBER: {
-                ANY: {},
+                ANY: ["anynumber"], // muss eindeutig auch nach Clonung identifizierbar sein
                 MIN: Number.MIN_VALUE,
                 MAX: Number.MAX_VALUE,
             },
             STRING: {
-                ANY: {},
+                ANY: ["anystring"], // muss eindeutig auch nach Clonung identifizierbar sein
                 MIN: "",
                 MAX: "\uffff",
             },
@@ -190,36 +190,36 @@ class demawiRepository {
                 return result;
             }
 
-            csdbExecuter; // Cross-Site Database
+            csProxy; // Cross-Site Database
             objectStores = {};
 
-            constructor(dbname, modname, messengerPromise) {
+            constructor(dbname, modname, proxyPromise) {
                 this.modname = modname;
                 this.dbname = dbname;
                 const _this = this;
-                this.csdbExecuterPromise = messengerPromise.then(msger => {
-                    _this.csdbExecuter = msger;
-                    delete _this.csdbExecuterPromise;
+                this.csProxyResolver = proxyPromise.then(csProxy => {
+                    _this.csProxy = csProxy;
+                    delete _this.csProxyResolver;
                 });
             }
 
             async exec(...args) {
-                if (this.csdbExecuter) await this.csdbExecuter.exec(...args);
+                if (this.csProxy) return this.csProxy.exec(...args);
                 else {
                     const _this = this;
-                    this.csdbExecuterPromise.then(() => {
-                        _this.csdbExecuter.exec(...args);
-                    })
+                    return this.csProxyResolver.then(() => {
+                        _this.csProxy.exec(...args);
+                    });
                 }
             }
 
             async execIteration(iterationFn, ...args) {
-                if (this.csdbExecuter) await this.csdbExecuter.execIteration(iterationFn, ...args);
+                if (this.csProxy) return this.csProxy.execIteration(iterationFn, ...args);
                 else {
                     const _this = this;
-                    this.csdbExecuterPromise.then(() => {
-                        _this.csdbExecuter.execIteration(iterationFn, ...args);
-                    })
+                    return this.csProxyResolver.then(() => {
+                        _this.csProxy.execIteration(iterationFn, ...args);
+                    });
                 }
             }
 
@@ -228,8 +228,7 @@ class demawiRepository {
                 objectStore.indexedDb = this;
                 const _this = this;
                 this.exec(async function (modname, dbname, storageId, key, indizes) {
-                    const objectStorage = await _.Storages.IndexedDb.getDb(dbname, modname).createObjectStorage(storageId, key, indizes);
-                    objectStorage.connect();
+                    await _.Storages.IndexedDb.getDb(dbname, modname).createObjectStorage(storageId, key, indizes);
                 }, _this.modname, _this.dbname, storageId, key, indizes);
 
                 this.objectStores[storageId] = objectStore;
@@ -252,33 +251,49 @@ class demawiRepository {
             }
 
             async getValue(dbObjectId) {
-                return await this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
-                    return await (await _.Storages.IndexedDb.getDb(dbname).indexedDb.getObjectStoreChecked(storageId)).getValue(dbObjectId);
+                return this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getValue(dbObjectId);
                 }, this.storageId, this.indexedDb.dbname, dbObjectId);
             }
 
             async setValue(dbObject) {
-                return await this.indexedDb.exec(async function (storageId, dbname, dbObject) {
-                    return await (await _.Storages.IndexedDb.getDb(dbname).getObjectStoreChecked(storageId)).setValue(dbObject);
+                return this.indexedDb.exec(async function (storageId, dbname, dbObject) {
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).setValue(dbObject);
                 }, this.storageId, this.indexedDb.dbname, dbObject);
             }
 
             async deleteValue(dbObjectId) {
-                return await this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
-                    return await (await _.Storages.IndexedDb.getDb(dbname).getObjectStoreChecked(storageId)).deleteValue(dbObjectId);
+                return this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).deleteValue(dbObjectId);
                 }, this.storageId, this.indexedDb.dbname, dbObject);
             }
 
             async getAll(queryOpt, iterationFnOpt) {
-                return await this.indexedDb.execIteration(async function (storageId, dbname, queryOpt) {
-                    return await (await _.Storages.IndexedDb.getDb(dbname).getObjectStoreChecked(storageId)).getAll(queryOpt, async function (a) {
-                        respondIteration(a);
+                if (!iterationFnOpt) {
+                    return this.indexedDb.exec(async function (storageId, dbname, queryOpt) {
+                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAll(queryOpt);
+                    }, this.storageId, this.indexedDb.dbname, queryOpt);
+                }
+                return this.indexedDb.execIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
+                    await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAll(queryOpt, async function (a) {
+                        return await respondIteration(data, a);
                     });
-                }, iterationFnOpt, this.storageId, this.indexedDb.dbname, queryOpt);
+                    respondFinished(data);
+                }, this.storageId, this.indexedDb.dbname, queryOpt);
             }
 
             async getAllKeys(queryOpt, iterationFnOpt) {
-
+                if (!iterationFnOpt) {
+                    return this.indexedDb.exec(async function (storageId, dbname, queryOpt) {
+                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAllKeys(queryOpt);
+                    }, this.storageId, this.indexedDb.dbname, queryOpt);
+                }
+                return await this.indexedDb.execIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
+                    await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAllKeys(queryOpt, async function (a) {
+                        return await respondIteration(data, a);
+                    });
+                    respondFinished(data);
+                }, this.storageId, this.indexedDb.dbname, queryOpt);
             }
         }
 
@@ -299,7 +314,7 @@ class demawiRepository {
             modname;
             dbname;
             idbFactory;
-            objectStores = [];
+            objectStores = {};
             objectStoresToDelete = [];
             dbConnection;
             instanceId;
@@ -316,16 +331,15 @@ class demawiRepository {
             /**
              * Prüft, ob der ObjectStore existiert. Wenn er dies tut, wird dieser zurückgeliefert.
              */
-            async getObjectStoreChecked(storageId) {
+            async getObjectStorageChecked(storageId) {
                 const dbConnection = await this.getConnection();
                 if (dbConnection.objectStoreNames.contains(storageId)) {
-                    /**
-                     * wird nicht den this.objectStores hinzugefügt, insofern brauchen wir auch keine weiteren Angaben über PrimaryKey und Indizes machen.
-                     */
-                    const result = new _.Storages.ObjectStorage(storageId);
-                    result.indexedDb = this;
-                    return result;
+                    return this.getObjectStore(storageId);
                 }
+            }
+
+            getObjectStore(storageId) {
+                return this.objectStores[storageId];
             }
 
             /**
@@ -338,12 +352,15 @@ class demawiRepository {
                     indizes = null;
                     readonly = true;
                 }
-                const objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
-                objectStore.indexedDb = this;
-                this.objectStores.push(objectStore);
-                if (this.dbConnection && !this.#areAllObjectStoresSynced(this.dbConnection)) {
-                    this.forceReconnect("create object store " + storageId);
-                } // kein instant-reconnect, da sich evtl. noch andere Object-Stores registrieren
+                let objectStore = this.objectStores[storageId];
+                if (!objectStore) {
+                    objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
+                    objectStore.indexedDb = this;
+                    this.objectStores[storageId] = objectStore;
+                    if (this.dbConnection && !this.#areAllObjectStoresSynced(this.dbConnection)) {
+                        this.forceReconnect("create object store " + storageId);
+                    } // kein instant-reconnect, da sich evtl. noch andere Object-Stores registrieren
+                }
                 return objectStore;
             }
 
@@ -365,8 +382,8 @@ class demawiRepository {
                 return dbConnection.objectStoreNames.contains(objectStore.storageId);
             }
 
-            closeConnection(grund) {
-                if (this.debug) console.log("Close connection", grund);
+            closeConnection(grund, event) {
+                if (this.debug) console.log("Close connection", grund, event);
                 if (this.dbConnection) {
                     this.#closeGivenConnection(this.dbConnection);
                     delete this.dbConnection;
@@ -418,7 +435,7 @@ class demawiRepository {
                     _this.dbConnection = con;
                     // Wir oder eine andere Instanz (Seite oder Mod) hat einen VersionChange getriggert, insofern invalidieren wir vorsichtshalber unsere Verbindung.
                     _this.dbConnection.onversionchange = function (event) {
-                        _this.closeConnection("onversion change");
+                        _this.closeConnection("onversion change", event);
                     };
                     delete connectProcesses[forceUpgrade];
                     return con;
@@ -484,16 +501,18 @@ class demawiRepository {
              * @param dbTransaction @type IDBTransaction
              */
             async #syncDatabase(dbConnection, dbTransaction) {
-                if (this.debug) console.log("[" + this.dbname + "]: syncDatabase...");
+                if (this.debug) console.log("[" + this.dbname + "]: syncDatabase...", this);
+                let thingsDone = 0;
                 try {
                     this.objectStoresToDelete.slice().forEach((storageId, idx) => {
                         if (dbConnection.objectStoreNames.contains(storageId)) {
+                            thingsDone++;
                             if (this.debug) console.log("Lösche Objectstore " + this.dbname + "." + storageId);
                             dbConnection.deleteObjectStore(storageId);
                         }
                         this.objectStoresToDelete.splice(idx, 1);
                     });
-                    this.objectStores.forEach(objectStoreDef => {
+                    Object.values(this.objectStores).forEach(objectStoreDef => {
                         if (objectStoreDef.readonly) return;
                         const storageId = objectStoreDef.storageId;
                         let dbStore;
@@ -502,6 +521,8 @@ class demawiRepository {
                             dbStore = dbTransaction.objectStore(storageId);
                         } else {
                             // create complete new object store (IDBObjectStore)
+                            thingsDone++;
+                            if (this.debug) console.log("Erstelle nicht vorhandenen Object-Store: ", storageId);
                             dbStore = dbConnection.createObjectStore(objectStoreDef.storageId, {
                                 keyPath: objectStoreDef.primaryKey,
                             });
@@ -509,6 +530,7 @@ class demawiRepository {
                         if (objectStoreDef.indizesToDelete) {
                             for (const indexName of objectStoreDef.indizesToDelete) {
                                 if (dbStore.indexNames.contains(indexName)) {
+                                    thingsDone++;
                                     if (this.debug) console.log("[" + this.dbname + "|" + storageId + "] Entferne Index: " + indexName);
                                     dbStore.deleteIndex(indexName);
                                 }
@@ -518,6 +540,7 @@ class demawiRepository {
                         if (objectStoreDef.indizesToEnsure) {
                             for (const [indexName, keyPath] of Object.entries(objectStoreDef.indizesToEnsure)) {
                                 if (!dbStore.indexNames.contains(indexName)) {
+                                    thingsDone++;
                                     if (this.debug) console.log("[" + this.dbname + "|" + storageId + "] Füge neuen Index hinzu: " + indexName + " => ", keyPath);
                                     dbStore.createIndex(indexName, keyPath);
                                 }
@@ -540,7 +563,7 @@ class demawiRepository {
             #areAllObjectStoresSynced(dbConnection) {
                 if (this.objectStoresToDelete.length > 0) return false;
                 const installedNames = dbConnection.objectStoreNames; // Array
-                for (const objectStore of this.objectStores) {
+                for (const objectStore of Object.values(this.objectStores)) {
                     if (objectStore.readonly) continue;
                     if (!installedNames.contains(objectStore.storageId)) return false;
                 }
@@ -549,23 +572,23 @@ class demawiRepository {
 
             /**
              * Kopiert die aktuelle Datenbank komplett in eine andere Datenbank.
-             * @param dbNameTo
+             * @param dbTo kann eine Instanz von IndexedDb/IndexedDbProxy sein oder einfach ein Name. Der Name wird für die lokale origin-Datenbank verwendet.
              * @returns {Promise<void>}
              */
-            async cloneTo(dbNameTo) {
-                console.log("Clone '" + this.dbname + "' to '" + dbNameTo + "'...");
-                const dbTo = demawiRepository.Storages.IndexedDb.getDb(dbNameTo, this.modname);
+            async cloneTo(dbTo) {
+                dbTo = typeof dbTo === "string" ? demawiRepository.Storages.IndexedDb.getDb(dbTo, this.modname) : dbTo;
+                console.log("Clone '" + this.dbname + "' to '", dbTo);
                 const dbConnectionFrom = await this.getConnection();
                 const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
                 for (const objectStoreName of objectStoreNames) {
-                    const readFrom = await this.getObjectStoreChecked(objectStoreName);
+                    const readFrom = await this.getObjectStorageChecked(objectStoreName);
                     const writeTo = await dbTo.createObjectStorage(objectStoreName, await readFrom.getPrimaryKey());
-                    console.log("Clone '" + this.dbname + "' to '" + dbNameTo + "'... " + objectStoreName + "...");
+                    console.log("Clone '" + this.dbname + "' to '" + dbTo + "'... " + objectStoreName + "...");
                     await readFrom.getAll(false, async cur => {
                         await writeTo.setValue(cur);
                     })
                 }
-                console.log("Clone " + this.dbname + " to " + dbNameTo + "... finished!");
+                console.log("Clone " + this.dbname + " to " + dbTo + "... finished!");
             }
 
             async clearDatabase() {
@@ -946,11 +969,13 @@ class demawiRepository {
                     else delete this.query.debug;
                     while (await this.#run() !== true) ;
                     this.query.debug = debug;
+                    if (this.query.debug) console.log("Batch-Query fertig!");
                 }
 
                 async #run() {
                     this.query.limit = Math.min(this.batchSize, this.limit);
                     const results = await this.objectStorage[this.retrieveFnName](this.query);
+                    if (this.query.debug) console.log("Batch-query: ", this.query, results.length);
                     for (let i = 0, l = results.length; i < l; i++) {
                         if (await this.iteration(results[i], this.alreadyFetched + i) === false) return true;
                     }
@@ -970,6 +995,7 @@ class demawiRepository {
                             for (const cur of primaryKey) {
                                 if (!indexDef.includes(cur)) indexDef.push(cur);
                             }
+                            if (this.query.debug) console.log("Batch-query: Index wurde ggf. angepasst ", this.query.index, indexDef);
                             this.indexKeyPath = indexDef;
                             this.query.index = indexDef;
                         }
@@ -1002,6 +1028,7 @@ class demawiRepository {
 
                 /**
                  * @param retrieveFnName was wird als Resultat erwartet nur die Primärschlüssel oder die Objekte selbst.
+                 * @returns {Promise<any>}
                  */
                 static async doSearch(objectStorage, query, iterationOpt, retrieveFnName) {
                     const startTime = new Date().getTime();
@@ -1024,31 +1051,31 @@ class demawiRepository {
                     // Zuerst versuchen wir das Ziel zu bekommen
                     if (query.index) target = await objectStorage.constructor.TargetOps.getQueryTarget(objectStorage, target, query);
 
-                    let result;
+                    let resultPromise;
                     if (needReconnectable && !query.noBatch) {
-                        if (query.debug) console.log("SearchType: Batch", _.util.cloneObject(query));
-                        result = new objectStorage.constructor.BatchSearch(objectStorage, idbObjectStore, target, query, iterationOpt, retrieveFnName).batchIt();
+                        if (query.debug) console.log("SearchType: Batch", target.keyPath, _.util.cloneObject(query));
+                        resultPromise = new objectStorage.constructor.BatchSearch(objectStorage, idbObjectStore, target, query, iterationOpt, retrieveFnName).batchIt();
                     } else {
                         let keyRange;
                         if (query.keyMatch || query.keyMatchFrom || query.keyMatchTo) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchFrom, query.keyMatchTo, query.keyMatchFromOpen, query.keyMatchToOpen);
                         if (iterationOpt) {
-                            if (query.debug) console.log("SearchType: openCursorIteration", keyRange, _.util.cloneObject(query));
-                            result = this.#openCursorIteration(target.openCursor(keyRange, query.order), iterationOpt, query.limit, retrieveFnName);
+                            if (query.debug) console.log("SearchType: openCursorIteration", target.keyPath, keyRange, _.util.cloneObject(query));
+                            resultPromise = this.#openCursorIteration(target.openCursor(keyRange, query.order), iterationOpt, query.limit, retrieveFnName);
                         } else if (query.order) {
-                            if (query.debug) console.log("SearchType: openCursor", keyRange, _.util.cloneObject(query));
-                            result = this.#openCursorFetch(target.openCursor(keyRange, query.order), query.limit, retrieveFnName);
+                            if (query.debug) console.log("SearchType: openCursor", target.keyPath, keyRange, _.util.cloneObject(query));
+                            resultPromise = this.#openCursorFetch(target.openCursor(keyRange, query.order), query.limit, retrieveFnName);
                         } else {
-                            if (query.debug) console.log("SearchType: " + retrieveFnName, keyRange, _.util.cloneObject(query));
-                            result = this.awaitRequest(target[retrieveFnName](keyRange, query.limit));
+                            if (query.debug) console.log("SearchType: " + retrieveFnName, target.keyPath, keyRange, _.util.cloneObject(query));
+                            resultPromise = this.awaitRequest(target[retrieveFnName](keyRange, query.limit));
                         }
                     }
                     if (query.debug === 1) {
-                        result = result.then(a => {
+                        resultPromise = resultPromise.then(a => {
                             console.log("QueryTime: ", (new Date().getTime() - startTime) / 1000 + " secs", query);
                             return a;
                         });
                     }
-                    return result;
+                    return resultPromise;
                 }
 
                 /**
@@ -1079,21 +1106,25 @@ class demawiRepository {
                             const low = keyMatchFrom && keyMatchFrom[i];
                             const high = keyMatchTo && keyMatchTo[i];
                             if (low) {
-                                if (low === _.Storages.MATCHER.NUMBER.ANY) {
+                                if (typeof low !== "object") {
+                                    lowerBound.push(low);
+                                } else if (this.#checkWildcard(low, _.Storages.MATCHER.NUMBER.ANY)) {
                                     lowerBound.push(_.Storages.MATCHER.NUMBER.MIN);
-                                } else if (low === _.Storages.MATCHER.STRING.ANY) {
+                                } else if (this.#checkWildcard(low, _.Storages.MATCHER.STRING.ANY)) {
                                     lowerBound.push(_.Storages.MATCHER.STRING.MIN);
                                 } else { // exakt match
-                                    lowerBound.push(low);
+                                    throw new Error("Wert kann nicht in eine KeyRange aufelöst werden ", low);
                                 }
                             }
                             if (high) {
-                                if (high === _.Storages.MATCHER.NUMBER.ANY) {
+                                if (typeof high !== "object") {
+                                    upperBound.push(high);
+                                } else if (this.#checkWildcard(high, _.Storages.MATCHER.NUMBER.ANY)) {
                                     upperBound.push(_.Storages.MATCHER.NUMBER.MAX);
-                                } else if (high === _.Storages.MATCHER.STRING.ANY) {
+                                } else if (this.#checkWildcard(high, _.Storages.MATCHER.STRING.ANY)) {
                                     upperBound.push(_.Storages.MATCHER.STRING.MAX);
                                 } else { // exakt match
-                                    upperBound.push(high);
+                                    throw new Error("Wert kann nicht in eine KeyRange aufelöst werden ", high);
                                 }
                             }
                         }
@@ -1101,6 +1132,10 @@ class demawiRepository {
                     } else { // no wildcards, die Arrays werden 1:1 übernommen
                         return this.#toIDBKeyRange(target, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen);
                     }
+                }
+
+                static #checkWildcard(value, againstWildcard) {
+                    return Array.isArray(value) && value[0] === againstWildcard[0];
                 }
 
                 static #toIDBKeyRange(target, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen) {
@@ -1273,21 +1308,23 @@ class demawiRepository {
      */
     static WoDStorages = class {
         static #indexedDb;
-        static #objectStores = {};
 
-        static #indexedDb2;
-        static #objectStores2 = {};
-
-        static getWodDb(modname, dbname) {
-            if (dbname) this.#indexedDb = _.Storages.IndexedDb.getDb(dbname, modname);
-            if (!this.#indexedDb) throw new Error("Datenbank wurde noch nicht definiert! '" + modname + ":" + dbname + "'")
+        /**
+         * Gibt die initial definierte WoD-Datenbank zurück.
+         */
+        static getWodDb() {
+            if (!this.#indexedDb) throw new Error("WoD-Datenbank wurde noch nicht definiert!");
             return this.#indexedDb;
         }
 
-        static getWodDbProxy(dbname, modname, messengerPromise) {
-            if (dbname) this.#indexedDb2 = _.Storages.IndexedDbProxy.getDb(dbname, modname, messengerPromise);
-            if (!this.#indexedDb2) throw new Error("Datenbank wurde noch nicht definiert! '" + modname + ":" + dbname + "'");
-            return this.#indexedDb2;
+        static initWodDb(modname, dbname) {
+            if (this.#indexedDb) throw new Error("WoDStorages wurden bereits initial definiert!");
+            return this.#indexedDb = _.Storages.IndexedDb.getDb(dbname, modname);
+        }
+
+        static initWodDbProxy(dbname, modname, messengerPromise) {
+            if (this.#indexedDb) throw new Error("WoDStorages wurden bereits initial definiert!");
+            return this.#indexedDb = _.Storages.IndexedDbProxy.getDb(dbname, modname, messengerPromise);
         }
 
         static getItemDb() {
@@ -1330,23 +1367,14 @@ class demawiRepository {
          * Liefert den Object-Store, wenn er noch nicht existiert, wird er angelegt.
          */
         static #getCreateObjectStore(name, key, indizes) {
-            let result = this.#objectStores[name];
-            if (result) return result;
-            result = this.getWodDb().createObjectStorage(name, key, indizes);
-            this.#objectStores[name] = result;
-            return result;
+            return this.getWodDb().createObjectStorage(name, key, indizes);
         }
 
         /**
          * Liefert den Object-Store nur, wenn er bereits existiert
          */
         static async #getObjectStoreIfExists(storageId) {
-            let objectStore = this.#objectStores[storageId];
-            if (objectStore === undefined) {
-                objectStore = await this.getWodDb().createObjectStorage(storageId) || false;
-                this.#objectStores[storageId] = objectStore;
-            }
-            return objectStore;
+            return await this.getWodDb().getObjectStorageChecked(storageId);
         }
 
     }
@@ -1726,8 +1754,10 @@ class demawiRepository {
                 await worldDb.setValue(world);
                 return [foundSeason, foundSeasonNr];
             } else { // Welt-Reset entdeckt
+                console.log("World-Reset entdeckt !!!!!", worldId, myheroIdsMitStufen, aktualisiereZeit);
+                return; // TODO: wieder rausnehmen
                 const newSeason = this.#createNewWorldSeason(myheroIdsMitStufen);
-                world.push(newSeason);
+                world.seasons.push(newSeason);
                 await worldDb.setValue(world);
                 return [newSeason, world.seasons.length];
             }
@@ -1841,130 +1871,145 @@ class demawiRepository {
 
     }
 
-    static Messenger = class Messenger {
+    /**
+     * Cross-Site Proxy, um origin-übergreifend auf origin-geeichte Inhalte zuzugreifen (wie z.B. indexedDB).
+     */
+    static CSProxy = class CSProxy {
 
         /**
          * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
          */
-        static actAsCrossSiteProxy(debug) {
+        static actAsCSProxyResponder() {
             const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
             const myMid = new URL(window.location.href).searchParams.get("messengerId");
             const log = document.referrer ? console.log : window.top.console.log;
             const errorlogger = document.referrer ? console.error : window.top.console.error;
             const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
+            const myOrigin = window.location.origin;
             parentWindow.focus();
 
-            document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + window.location.origin + "</b><br>Es schließt sich mit dem Hauptfenster";
+            document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + myOrigin + "</b><br>Es schließt sich mit dem Hauptfenster";
 
-            const iterators = {};
             const respond = function (data, result) {
+                if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
                 data.result = result;
-                data.mid = myMid;
                 parentWindow.postMessage(data, parentOrigin);
             }
-            const respondIteration = function(result) {
-
+            const iterators = {};
+            const respondIteration = function (data, result) {
+                respond(data, result);
+                return new Promise((resolve, reject) => {
+                    iterators[data.id] = resolve;
+                });
             }
-
-            const evaluateFn = async (code) => eval(code);
+            const finishIteration = function (data) {
+                delete iterators[data.id];
+                if (data.debug) log("CSProxy[" + myOrigin + "] beendet die Iteration: " + data.id);
+            }
+            // Code der nach Schleifenende aufgerufen wird. Sofern die Iteration vorzeitig beendet wurde ist hier nichts mehr zu tun.
+            const respondFinished = function (data) {
+                if (iterators[data.id]) {
+                    respond(data);
+                    finishIteration(data);
+                }
+            }
 
             window.addEventListener( // Main-Domain
                 "message",
                 async event => {
                     const data = event.data;
-                    log("Responder hat Daten empfangen", data);
+                    if (typeof data !== "object") return;
+                    if (!data.id) respond(data);
+                    if (data.debug) log("CSProxy[" + myOrigin + "] hat Befehl empfangen", data, data.exec);
                     if (data.type !== "iteration") {
                         const dataExec = data.exec;
                         if (dataExec) {
-                            delete data.exec;
-                            //console.log("Code2", dataExec, data);
-                            respond(data, await evaluateFn(dataExec));
+                            respond(data, await eval(dataExec));
                         }
                     } else { // type === "iteration"
-                        const cmd = data.cmd;
-                        delete data.cmd;
+                        const idx = data.idx;
+                        delete data.idx;
                         let finished = false;
-                        if (cmd === "start") {
-                            const iterator = evaluateFn(data.exec);
-                            iterators[data.id] = iterator;
-                            const result = iterator();
-                            respond(data, result);
-                            if (result === undefined) finished = true;
-                        } else if (cmd === "next") {
-                            const result = iterators[data.id]();
-                            respond(data, result);
-                            if (result === undefined) finished = true;
-                        } else if (cmd === "stop") {
-                            // no response necessary
-                            finished = true;
+                        if (!idx) { // start
+                            iterators[data.id] = () => {
+                            }; // muss vorhanden sein, damit respondFinish auch ohne Resultate abschließen kann
+                            await eval(data.exec);
+                        } else if (idx === 1) { // continue
+                            iterators[data.id]();
+                        } else if (idx === -1) { // stop
+                            iterators[data.id](false);
+                            finishIteration(data);
                         }
-                        if (finished) delete iterators[data.id]; // cleanup
                     }
                 },
                 false,
             );
 
-            log("Responder ist empfangsbereit", parentOrigin, myMid);
+            log("CSProxy[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
 
             // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
             try {
-                parentWindow.postMessage({mid: myMid}, parentOrigin);
+                parentWindow.postMessage({origin: myOrigin}, parentOrigin);
             } catch (e) {
-                errorlogger("Fehler bei der PostMessage vom Responder", e);
+                errorlogger("Fehler bei der PostMessage vom CSProxy", e);
             }
         }
 
         static messengerId = 1;
-        static messengers = {};
+        static csProxies = {};
 
         /**
          * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
          */
-        static async getMessengerFor(responderHttp) {
+        static async getProxyFor(responderHttp, debug) {
             if (this.messengerId === 1) { // nur beim ersten Mal
                 const _this = this;
-                window.addEventListener(
+                window.top.addEventListener(
                     "message",
                     async (event) => {
                         const data = event.data;
                         if (data.mid) {
-                            // console.log("Incoming message: ", data);
-                            const messenger = _this.messengers[data.mid];
-                            await messenger.onMessage(data);
+                            const messenger = _this.csProxies[data.mid];
+                            if (messenger) await messenger.onMessage(data);
+                        } else if (data.origin) {
+                            for (const messenger of Object.values(_this.csProxies)) {
+                                await messenger.onMessage(data);
+                            }
                         }
                     },
                     false,
                 );
             }
             const targetUrl = new URL(responderHttp);
+            targetUrl.searchParams.append("messenger", "true");
             if (!unsafeWindow.top._messengers) unsafeWindow.top._messengers = {};
-            let messenger = unsafeWindow.top._messengers[targetUrl.origin];
-            if (messenger) return messenger.onReady;
+            let csProxy = unsafeWindow.top._messengers[targetUrl.origin];
+            if (csProxy) return csProxy.onReady;
 
-            const messengerId = this.messengerId++;
-            targetUrl.searchParams.append("messengerId", messengerId);
-            messenger = new Messenger(messengerId, targetUrl);
-            unsafeWindow.top._messengers[targetUrl.origin] = messenger;
-            unsafeWindow.top.demawiId = "aa";
-            unsafeWindow.demawiId = "bb";
-            window.top.demawiId = "cc";
-            window.demawiId = "dd";
-            this.messengers[messengerId] = messenger;
-            return messenger.onReady;
+            let messengerId = window.top.messengerId;
+            if (!messengerId) messengerId = window.top.messengerId = 1;
+            else {
+                window.top.messengerId++;
+                messengerId = window.top.messengerId;
+            }
+            csProxy = new CSProxy(messengerId, targetUrl, debug);
+            this.csProxies[messengerId] = csProxy;
+            return csProxy.onReady;
         }
 
         iframe;
         targetWindow;
         targetOrigin;
         myOrigin;
-        resolver = {};
+        comLink = {}; // für jede Kommunikation wird ein Promise erstellt, welches erfüllt wird, wenn die Kommunkation abgeschlossen ist
         iterations = {};
         id = 1;
         onReady;
         onReadyResolver;
         messengerId;
+        debug;
 
-        constructor(messengerId, targetUrl) {
+        constructor(messengerId, targetUrl, debug) {
             this.messengerId = messengerId;
             this.targetUrl = targetUrl;
             this.myOrigin = window.location.origin;
@@ -1976,17 +2021,25 @@ class demawiRepository {
             });
             this.onReadyResolver = resolver;
             this.onReady = promise;
+            this.debug = debug;
+
+            // Falls wir das Target Window wiederverwenden triggern wir hiermit den Proxy nochmal eine Initial-Nachricht zu senden ansonsten macht er es eh von sich aus
+            this.postMessage({});
         }
 
         async onMessage(data) {
+            if (this.debug) console.log("Sender[" + this.messengerId + "] empfängt", data);
             const id = data.id;
             if (id === undefined) { // Responder meldet Bereitschaft, wir geben somit den Messenger frei.
-                if (this.onReadyResolver) this.onReadyResolver(this);
+                if (this.onReadyResolver) {
+                    if (this.debug) console.log("Sender[" + this.messengerId + "] ist sendebereit!");
+                    this.onReadyResolver(this);
+                }
                 return;
             }
             if (data.type !== "iteration") {
-                this.resolver[id](data.result);
-                delete this.resolver[id];
+                this.comLink[id](data.result);
+                delete this.comLink[id];
             } else { // type === "iteration"
                 let stop = false;
                 if (data.result === undefined) stop = true; // wenn der Datenlieferant abbricht
@@ -1995,17 +2048,18 @@ class demawiRepository {
                     this.postMessage({
                         id: id,
                         type: "iteration",
-                        cmd: "stop",
+                        idx: -1, // Abbruch
                     })
                 }
                 if (stop) {
+                    if (this.debug) console.log("Sender beendet die Iteration: " + id);
                     delete this.iterations[id];
-                    this.resolver[id]();
+                    this.comLink[id]();
                 } else {
                     this.postMessage({
                         id: id,
                         type: "iteration",
-                        cmd: "next",
+                        idx: 1, // +1
                     })
                 }
             }
@@ -2017,7 +2071,7 @@ class demawiRepository {
         async execIteration(iteration, execFn, ...vars) {
             const id = this.#createId();
             this.iterations[id] = iteration;
-            return this.execIntern(execFn, {id: id, type: "iteration", cmd: "start"}, ...vars);
+            return this.execIntern(execFn, {id: id, type: "iteration"}, ...vars);
         }
 
         async exec(execFn, ...vars) {
@@ -2031,17 +2085,19 @@ class demawiRepository {
             let args = JSON.stringify(vars);
             args = args.substring(1, args.length - 1);
             data.exec = "(" + execFn.toString() + ")(" + args + ")";
-            console.log("Messenger.exec", data.exec);
+            if (this.debug) console.log("Messenger sende nach [" + this.messengerId + "]", data, data.exec);
             let promiseResolver;
             const promise = new Promise((resolve, reject) => {
                 promiseResolver = resolve;
             });
-            this.resolver[data.id] = promiseResolver;
+            this.comLink[data.id] = promiseResolver;
             this.postMessage(data);
             return promise;
         }
 
         postMessage(data) {
+            if (this.debug) data.debug = true;
+            data.mid = this.messengerId;
             this.targetWindow.postMessage(data, this.targetOrigin);
         }
 
@@ -2049,44 +2105,31 @@ class demawiRepository {
             return this.id++;
         }
 
+        #useWindowProxy() {
+            return navigator.userAgent.toLowerCase().includes('firefox')
+        }
+
         getTargetWindow(responderUrl) {
             let targetWindow;
-            if (navigator.userAgent.toLowerCase().includes('firefox')) {
-                if (window.opener && window.opener.top._messengers) { // Popup: same-origin
-                    return window.opener.top._messengers[responderUrl.origin];
-                } else if (window.top === window) { // nur wenn iframe-wrap noch nicht erstellt wurde
-                    const iframeWrap = document.createElement("iframe");
-                    iframeWrap.style.width = "100%";
-                    iframeWrap.style.height = "100%";
-                    iframeWrap.style.position = "absolute";
-                    iframeWrap.style.border = "0px";
-
-                    document.body.style.overflow = "hidden";
-                    document.body.style.margin = "0px";
-
-                    document.body.insertBefore(iframeWrap, document.body.children[0]);
-                    iframeWrap.contentDocument.body.className = document.body.className;
-                    iframeWrap.src = window.location.href;
-                    let cur;
-                    while (cur = document.head.children[0]) {
-                        document.head.removeChild(cur);
+            if (!window.opener) {
+                if (this.#useWindowProxy()) {
+                    console.log("ProxyTarget: Create targetWindow as window.open");
+                    targetWindow = window.open(responderUrl.toString());
+                    window.top.focus();
+                    window.top.addEventListener("beforeunload", function () {
+                        targetWindow.close();
+                    });
+                } else {
+                    let iframe = window.top.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
+                    if (iframe) {
+                        console.log("ProxyTarget: Reuse iframe window found");
+                        return iframe.contentWindow;
                     }
-                    while (cur = document.body.children[1]) {
-                        document.body.removeChild(cur);
-                    }
-
+                    console.log("ProxyTarget: Create targetWindow as iframe");
+                    iframe = _.Libs.loadViaIFrame(responderUrl.toString(), window.top.document);
+                    return iframe.contentWindow;
                 }
-                console.log("Create targetWindow as window.open")
-                targetWindow = window.open(responderUrl.toString());
-                window.top.focus();
-                window.top.addEventListener("beforeunload", function () {
-                    targetWindow.close();
-                });
-            } else {
-                console.log("Create targetWindow as iframe")
-                targetWindow = _.Libs.loadViaIFrame(responderUrl.toString()).contentWindow;
             }
-            return targetWindow;
         }
     }
 
@@ -2595,7 +2638,6 @@ class demawiRepository {
             };
             if (Object.keys(kos).length > 0) result.ko = kos;
             if (xps) result.xp = xps;
-            console.log("RetrieveSuccess: ", result);
             return result;
         }
 
@@ -2774,12 +2816,11 @@ class demawiRepository {
             return false;
         }
 
-        static loadViaIFrame(url, id, name) {
-            const iframe = document.createElement("iframe");
-            if (id) iframe.id = id;
-            if (name) iframe.name = name;
+        static loadViaIFrame(url, doc) {
+            doc = doc || document;
+            const iframe = doc.createElement("iframe");
             iframe.style.display = "none";
-            document.body.append(iframe);
+            doc.body.append(iframe);
             iframe.src = url; // src muss als letztes gesetzt werden
             return iframe;
         }
@@ -4368,8 +4409,45 @@ class demawiRepository {
         return this[type];
     }
 
-    static async startMod() {
-        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")");
+    static startMod() {
+        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")", window.top === unsafeWindow);
+    }
+
+    static ensureIframeWrap() {
+        if (this.ensureIframeWrapWithTargetWindow() || (!window.opener && window.top === window)) {
+            return true;
+        }
+    }
+
+    static ensureIframeWrapWithTargetWindow() {
+        if (window.top === window) { // nur wenn iframe-wrap noch nicht erstellt wurde
+            // TODO: URL-Rewriting Logik einbauen
+            console.log("Iframe-Wrap wurde erstellt!");
+            const iframeWrap = document.createElement("iframe");
+            iframeWrap.style.width = "100%";
+            iframeWrap.style.height = "100%";
+            iframeWrap.style.position = "absolute";
+            iframeWrap.style.border = "0px";
+
+            document.body.style.overflow = "hidden";
+            document.body.style.margin = "0px";
+
+            document.body.insertBefore(iframeWrap, document.body.children[0]);
+            iframeWrap.contentDocument.body.className = document.body.className;
+            iframeWrap.src = window.location.href;
+            let cur;
+            while (cur = document.head.children[0]) {
+                document.head.removeChild(cur);
+            }
+            while (cur = document.body.children[1]) {
+                document.body.removeChild(cur);
+            }
+            iframeWrap.addEventListener("load", function () {
+                const newUrl = iframeWrap.contentWindow.location.href;
+                window.history.replaceState({}, "", newUrl);
+            })
+            return true;
+        }
     }
 
     static getModName() {

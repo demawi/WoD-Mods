@@ -136,7 +136,7 @@
                     indizesTR.style.display = "none";
                     objekteTD.innerHTML = "";
                     if (objectStoreSelected !== "") {
-                        _this.objectStore = await _this.indexDb.getObjectStoreChecked(objectStoreSelected);
+                        _this.objectStore = await _this.indexDb.getObjectStorageChecked(objectStoreSelected);
                     } else {
                         _this.objectStore = undefined;
                     }
