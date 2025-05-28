@@ -237,7 +237,7 @@ class demawiRepository {
 
             async cloneTo(dbNameTo) {
                 const dbNameFrom = this.dbname
-                await this.exec(async function(dbNameFrom, dbNameTo) {
+                await this.exec(async function (dbNameFrom, dbNameTo) {
                     _.Storages.IndexedDb.getDb(dbNameFrom, "").cloneTo(dbNameTo);
                 }, dbNameFrom, dbNameTo);
             }
@@ -340,7 +340,7 @@ class demawiRepository {
              */
             async getObjectStorageChecked(storageId) {
                 let result = this.getObjectStorage(storageId);
-                if(result) return result;
+                if (result) return result;
                 const dbConnection = await this.getConnection();
                 if (dbConnection.objectStoreNames.contains(storageId)) {
                     return this.#addObjectStorage(storageId);
@@ -955,7 +955,7 @@ class demawiRepository {
                 batchSize;
                 limit;
                 alreadyFetched = 0;
-                indexKeyPath;
+                indexKeyPath; // indexKeyPath für die 2,3... Suche
                 pointerName; // keyMatchFrom oder keyMatchTo, je nachdem in welcher Richtung der ObjectStore durchgegangen wird.
 
                 constructor(objectStorage, idbObjectStore, idbTarget, query, iteration, retrieveFnName) {
@@ -969,11 +969,6 @@ class demawiRepository {
                     this.retrieveFnName = retrieveFnName;
                     this.batchSize = query.batchSize || 100;
                     delete query.batchSize; // für die Subanfragen selbst soll keine Batch-Search verwendet werden
-                    if (!this.query.order || this.query.order.startsWith("next")) {
-                        this.pointerName = "keyMatchFrom";
-                    } else {
-                        this.pointerName = "keyMatchTo";
-                    }
                 }
 
                 async batchIt() {
@@ -1010,15 +1005,20 @@ class demawiRepository {
                             for (const cur of primaryKey) {
                                 if (!indexDef.includes(cur)) indexDef.push(cur);
                             }
-                            if (this.query.debug) console.log("Batch-query: Index wurde ggf. angepasst ", this.query.index, indexDef);
                             this.indexKeyPath = indexDef;
                             this.query.index = indexDef;
                         }
                         if (!this.query.order || this.query.order.startsWith("next")) {
                             this.query.keyMatchFromOpen = true;
+                            this.pointerName = "keyMatchFrom";
+                            if (this.query.keyMatch) this.query.keyMatchTo = this.query.keyMatch;
                         } else {
                             this.query.keyMatchToOpen = true;
+                            this.pointerName = "keyMatchTo";
+                            if (this.query.keyMatch) this.query.keyMatchFrom = this.query.keyMatch;
                         }
+                        delete this.query.keyMatch;
+                        if (this.query.debug) console.log("Batch-query Index wurde ggf. angepasst ", this.query);
                     }
                     // TODO: funktioniert nur bei "getAll". Bei "getAllKeys" könnten wir den Pointer nicht neu setzen
                     this.query[this.pointerName] = await this.constructor.getValuesFor(results[results.length - 1], this.indexKeyPath);
@@ -1886,6 +1886,27 @@ class demawiRepository {
 
     }
 
+    static Window = class Window {
+
+        static open(window, url) {
+            const openedWindow = window.open(url);
+            openedWindow.addEventListener("beforeunload", function () {
+                delete window._opened[url];
+            });
+            if (!window._opened) window._opened = {};
+            window._opened[url] = openedWindow;
+            return openedWindow;
+        }
+
+        static find(window, url) {
+            if (window._opened) {
+                for (const [curUrl, curWindow] of Object.entries(window._opened)) {
+                    if (curUrl === url) return curWindow;
+                }
+            }
+        }
+    }
+
     /**
      * Cross-Site Proxy, um origin-übergreifend auf origin-geeichte Inhalte zuzugreifen (wie z.B. indexedDB).
      */
@@ -1910,16 +1931,19 @@ class demawiRepository {
                 data.result = result;
                 parentWindow.postMessage(data, parentOrigin);
             }
+
             const iterators = {};
+            const finishIteration = function (data) {
+                delete iterators[data.id];
+                if (data.debug) log("CSProxy[" + myOrigin + "] beendet die Iteration: " + data.id);
+            }
+
+            // Code der während der Schleife für die Auslieferung des Teilresultats aufgerufen wird.
             const respondIteration = function (data, result) {
                 respond(data, result);
                 return new Promise((resolve, reject) => {
                     iterators[data.id] = resolve;
                 });
-            }
-            const finishIteration = function (data) {
-                delete iterators[data.id];
-                if (data.debug) log("CSProxy[" + myOrigin + "] beendet die Iteration: " + data.id);
             }
             // Code der nach Schleifenende aufgerufen wird. Sofern die Iteration vorzeitig beendet wurde ist hier nichts mehr zu tun.
             const respondFinished = function (data) {
@@ -1929,13 +1953,11 @@ class demawiRepository {
                 }
             }
 
-            window.addEventListener( // Main-Domain
-                "message",
-                async event => {
+            window.addEventListener("message", async event => {
                     const data = event.data;
                     if (typeof data !== "object") return;
-                    if (!data.id) respond(data);
                     if (data.debug) log("CSProxy[" + myOrigin + "] hat Befehl empfangen", data, data.exec);
+                    if (!data.id) respond(data);
                     if (data.type !== "iteration") {
                         const dataExec = data.exec;
                         if (dataExec) {
@@ -1970,45 +1992,38 @@ class demawiRepository {
             }
         }
 
-        static messengerId = 1;
-        static csProxies = {};
-
         /**
          * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
          */
         static async getProxyFor(responderHttp, debug) {
-            if (this.messengerId === 1) { // nur beim ersten Mal
-                const _this = this;
-                window.top.addEventListener(
-                    "message",
-                    async (event) => {
-                        const data = event.data;
-                        if (data.mid) {
-                            const messenger = _this.csProxies[data.mid];
-                            if (messenger) await messenger.onMessage(data);
-                        } else if (data.origin) {
-                            for (const messenger of Object.values(_this.csProxies)) {
-                                await messenger.onMessage(data);
-                            }
-                        }
-                    },
-                    false,
-                );
-            }
             const targetUrl = new URL(responderHttp);
-            targetUrl.searchParams.append("messenger", "true");
-            if (!unsafeWindow.top._messengers) unsafeWindow.top._messengers = {};
-            let csProxy = unsafeWindow.top._messengers[targetUrl.origin];
-            if (csProxy) return csProxy.onReady;
+            targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
 
-            let messengerId = window.top.messengerId;
-            if (!messengerId) messengerId = window.top.messengerId = 1;
+            const mainTopWindow = (window.opener || unsafeWindow || window).top;
+
+            let messengerId = mainTopWindow.messengerId;
+            if (!messengerId) messengerId = mainTopWindow.messengerId = 1;
             else {
-                window.top.messengerId++;
-                messengerId = window.top.messengerId;
+                mainTopWindow.messengerId++;
+                messengerId = mainTopWindow.messengerId;
             }
-            csProxy = new CSProxy(messengerId, targetUrl, debug);
-            this.csProxies[messengerId] = csProxy;
+            const csProxy = new CSProxy(messengerId, targetUrl, debug);
+            const _this = this;
+            const messageListener = async (event) => {
+                const data = event.data;
+                if (data.mid) {
+                    if (csProxy.messengerId === data.mid) {
+                        await csProxy.onMessage(data);
+                    }
+                } else if (data.origin) {
+                    await csProxy.onMessage(data);
+                }
+            };
+            mainTopWindow.addEventListener("message", messageListener, false);
+            window.addEventListener("beforeunload", function () {
+                mainTopWindow.removeEventListener("message", messageListener);
+            });
+
             return csProxy.onReady;
         }
 
@@ -2100,7 +2115,7 @@ class demawiRepository {
             let args = JSON.stringify(vars);
             args = args.substring(1, args.length - 1);
             data.exec = "(" + execFn.toString() + ")(" + args + ")";
-            if (this.debug) console.log("Messenger sende nach [" + this.messengerId + "]", data, data.exec);
+
             let promiseResolver;
             const promise = new Promise((resolve, reject) => {
                 promiseResolver = resolve;
@@ -2111,7 +2126,10 @@ class demawiRepository {
         }
 
         postMessage(data) {
-            if (this.debug) data.debug = true;
+            if (this.debug) {
+                console.log("Messenger sende nach [" + this.messengerId + "]", data, data.exec);
+                data.debug = true;
+            }
             data.mid = this.messengerId;
             this.targetWindow.postMessage(data, this.targetOrigin);
         }
@@ -2121,29 +2139,43 @@ class demawiRepository {
         }
 
         #useWindowProxy() {
-            return navigator.userAgent.toLowerCase().includes('firefox')
+            return navigator.userAgent.toLowerCase().includes('firefox');
+        }
+
+        #openWindow(window, responderUrl) {
+            const targetWindow = _.Window.open(window, responderUrl.toString());
+            window.focus();
+            window.addEventListener("beforeunload", function () {
+                targetWindow.close();
+            });
+            return targetWindow;
         }
 
         getTargetWindow(responderUrl) {
-            let targetWindow;
-            if (!window.opener) {
-                if (this.#useWindowProxy()) {
-                    console.log("ProxyTarget: Create targetWindow as window.open");
-                    targetWindow = window.open(responderUrl.toString());
-                    window.top.focus();
-                    window.top.addEventListener("beforeunload", function () {
-                        targetWindow.close();
-                    });
-                } else {
-                    let iframe = window.top.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
-                    if (iframe) {
-                        console.log("ProxyTarget: Reuse iframe window found");
-                        return iframe.contentWindow;
-                    }
-                    console.log("ProxyTarget: Create targetWindow as iframe");
-                    iframe = _.Libs.loadViaIFrame(responderUrl.toString(), window.top.document);
+            const mainWindow = (window.opener || window).top;
+
+            // Window/IFrame erst versuchen wiederzuverwenden, ansonsten vom Hauptfenster ausgehend neu erstellen
+            if (this.#useWindowProxy()) {
+                if (this.debug) console.log("ProxyTarget: Create targetWindow as window.open");
+                let targetWindow = _.Window.find(mainWindow, responderUrl.toString());
+                if(targetWindow) { // Wiederverwendung
+                    if (this.debug) console.log("ProxyTarget: Reuse window found");
+                    return targetWindow;
+                }
+                // Neu erstellen
+                if (this.debug) console.log("ProxyTarget: Create window");
+                targetWindow = this.#openWindow(mainWindow, responderUrl.toString());
+                return targetWindow;
+            } else {
+                let iframe = mainWindow.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
+                if (iframe) { // Wiederverwendung
+                    if (this.debug) console.log("ProxyTarget: Reuse iframe window found");
                     return iframe.contentWindow;
                 }
+                // Neu erstellen
+                if (this.debug) console.log("ProxyTarget: Create iframe");
+                iframe = _.Libs.loadViaIFrame(responderUrl.toString(), mainWindow.document);
+                return iframe.contentWindow;
             }
         }
     }
@@ -4429,13 +4461,13 @@ class demawiRepository {
     }
 
     static ensureIframeWrap() {
-        if (this.ensureIframeWrapWithTargetWindow() || (!window.opener && window.top === window)) {
+        if (this.ensureIframeWrapWithTargetWindow()) {
             return true;
         }
     }
 
     static ensureIframeWrapWithTargetWindow() {
-        if (window.top === window) { // nur wenn iframe-wrap noch nicht erstellt wurde
+        if (window.top === window && !window.opener) { // nur wenn iframe-wrap noch nicht erstellt wurde
             // TODO: URL-Rewriting Logik einbauen
             console.log("Iframe-Wrap wurde erstellt!");
             const iframeWrap = document.createElement("iframe");
@@ -4460,7 +4492,11 @@ class demawiRepository {
             iframeWrap.addEventListener("load", function () {
                 const newUrl = iframeWrap.contentWindow.location.href;
                 window.history.replaceState({}, "", newUrl);
-            })
+                iframeWrap.contentWindow.addEventListener("beforeunload", function () {
+                    console.clear();
+                });
+            });
+
             return true;
         }
     }

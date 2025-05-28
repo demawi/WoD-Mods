@@ -61,9 +61,9 @@
         }
 
         static async findNext() {
-            if(false) for(const curKey of await MyStorage.getItemSourceDB().getMissingEntries("ts")) {
+            if (false) for (const curKey of await MyStorage.getItemSourceDB().getMissingEntries("ts")) {
                 const cur = await MyStorage.getItemSourceDB().getValue(curKey);
-                if(!cur.ts) {
+                if (!cur.ts) {
                     cur.ts = new Date().getTime();
                     await MyStorage.getItemSourceDB().setValue(cur);
                 }
@@ -94,7 +94,20 @@
             missingSpanOverall.style.position = "fixed";
             missingSpanOverall.style.top = "0px";
             missingSpanOverall.style.right = "0px";
-            const observer = new MutationObserver(checkSiteForItems);
+            let needRecheck = false;
+            const observer = new MutationObserver(mutationList => {
+                if (mutationList) {
+                    let onlyTooltip = true;
+                    for (const mutation of mutationList) {
+                        if (!mutation.className || !mutation.className.includes("tooltip")) {
+                            onlyTooltip = false;
+                            break;
+                        }
+                    }
+                    if (onlyTooltip) return;
+                }
+                needRecheck = true;
+            });
 
             async function checkSiteForItems() {
                 observer.disconnect();
@@ -120,12 +133,16 @@
                 }
                 console.log("ItemDB.checkSiteForItems...finished!");
                 observer.observe(document.body, {
-                    attributes: false,
+                    attributes: false, // manchmal werden zwar Elemente eingeblendet, die waren dann aber vorher auch schon so da
                     childList: true,
                     subtree: true,
                 });
+                needRecheck = false;
             }
 
+            setInterval(function() {
+                if(needRecheck) checkSiteForItems();
+            }, 1000);
             await checkSiteForItems();
 
             ItemAutoLoader.start();

@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.12.0.7
+// @version        0.12.0.8
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -165,9 +165,6 @@
             const reportData = _WoD.getFullReportBaseData();
             const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
             reportMeta.world_season = await _WoD.getMyWorldSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
-
-            title.append(await _WoDWorldDb.createSeasonElem(reportMeta.world_season));
-
 
             if (document.getElementsByClassName("paginator").length > 0) {
                 const warning = document.createElement("span");
@@ -442,7 +439,7 @@
             //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
             //await MyStorage.indexedDb.cloneTo("WodDBMain_Backup");
             //await (await MyStorage.indexedDbLocal.getObjectStorageChecked("reportArchive")).getAll(false, async function(cur) {
-              //  await MyStorage.reportArchive.setValue(cur);
+            //  await MyStorage.reportArchive.setValue(cur);
             //});
 
             if (false) await MyStorage.reportArchive.getAll({}, async function (a) {
@@ -1609,9 +1606,16 @@
             this.archivView = document.createElement("div");
         }
 
-        static AUSWAHL_BEVORZUGT = 8;
+        static AUSWAHL_BEVORZUGT_TAGE = 8;
 
         static async query() {
+            const start = new Date().getTime();
+            const result = await this.#queryIntern();
+            console.log("ArchivSearch.query "+(new Date().getTime()-start)/1000+" secs");
+            return result;
+        }
+
+        static async #queryIntern() {
             const table = document.createElement("table");
             table.style.width = "100%";
             table.classList.add("content_table");
@@ -1636,7 +1640,7 @@
             let switcher = false;
             const thisObject = this;
             let primaryDate = new Date();
-            primaryDate.setDate(primaryDate.getDate() - ArchivSearch.AUSWAHL_BEVORZUGT);
+            primaryDate.setDate(primaryDate.getDate() - ArchivSearch.AUSWAHL_BEVORZUGT_TAGE);
             primaryDate = primaryDate.getTime() / 60000;
             const groupsFound = {};
             const groupsFoundPrimary = {};
@@ -1646,11 +1650,19 @@
             const dungeonsFoundPrimary = {};
             const maxResults = ArchivSearch.searchQuery.maxResults;
             let count = 0;
+            const index = ["ts"];
+            const indexSelect = [_.Storages.MATCHER.NUMBER.ANY];
+            if (false && this.searchQuery.dungeonSelection && this.searchQuery.dungeonSelection.length === 1) {
+                // Kann so aktuell nicht verwendet werden, da ansonsten die Filter-Möglichkeiten nicht mehr ordentlich gefüllt werden können.
+                index.push("loc.name");
+                index.push(this.searchQuery.dungeonSelection[0]);
+            }
             await MyStorage.getReportDBMeta().getAll({
-                index: "ts",
+                index: index,
+                keyMatch: indexSelect,
                 order: "prev",
                 //noBatch: true,
-                //debug: 1,
+                //debug: 2,
                 // limit wird nicht gesetzt, da wir selbst auf den Ergebnissen filtern
             }, async function (reportMeta, idx) {
                 if (!thisObject.isValidDate(reportMeta)) return;
@@ -1666,28 +1678,31 @@
                 dungeonsFound[reportMeta.loc.name] = locNameFull;
                 if (thisObject.isValidDate(reportMeta, primaryDate)) dungeonsFoundPrimary[reportMeta.loc.name] = locNameFull;
                 if (!thisObject.isValidDungeon(reportMeta)) return;
-                count++;
-                switcher = !switcher;
-                const tr = document.createElement("tr");
-                tr.className = switcher ? "row0" : "row1";
-                tbody.append(tr);
-                const dateTD = document.createElement("td");
-                tr.append(dateTD);
-                dateTD.innerText = _util.formatDateAndTime(reportMeta.ts * 60000);
-                dateTD.style.textAlign = "center";
-                const nameTD = document.createElement("td");
-                tr.append(nameTD);
-                nameTD.innerText = await thisObject.getFullLocationName(reportMeta);
-                const actionsTD = document.createElement("td");
-                tr.append(actionsTD);
-                actionsTD.style.textAlign = "center";
-                ArchivSearch.createReportActions(reportMeta, actionsTD, idx);
-                if (maxResults && count >= maxResults) return false;
+                if (maxResults && count < maxResults) { // wir können die Schleife hier nicht abbrechen, da wir noch die Werte für die Felder benötigen
+                    count++;
+                    switcher = !switcher;
+                    const tr = document.createElement("tr");
+                    tr.className = switcher ? "row0" : "row1";
+                    tbody.append(tr);
+                    const dateTD = document.createElement("td");
+                    tr.append(dateTD);
+                    dateTD.innerText = _util.formatDateAndTime(reportMeta.ts * 60000);
+                    dateTD.style.textAlign = "center";
+                    const nameTD = document.createElement("td");
+                    tr.append(nameTD);
+                    nameTD.innerText = await thisObject.getFullLocationName(reportMeta);
+                    const actionsTD = document.createElement("td");
+                    tr.append(actionsTD);
+                    actionsTD.style.textAlign = "center";
+                    ArchivSearch.createReportActions(reportMeta, actionsTD, idx);
+                }
             });
             dungeonTH.innerText = "Dungeon (" + count + ")";
-            this.updateDungeonSelector(dungeonsFound, dungeonsFoundPrimary);
-            this.updateGroupSelector(groupsFound, groupsFoundPrimary);
-            this.updateWorldSelector(worldsFound, worldsFoundPrimary);
+            let removedSelected = false;
+            removedSelected |= this.updateDungeonSelector(dungeonsFound, dungeonsFoundPrimary);
+            removedSelected |= this.updateGroupSelector(groupsFound, groupsFoundPrimary);
+            removedSelected |= this.updateWorldSelector(worldsFound, worldsFoundPrimary);
+            if (removedSelected) return this.query(); // need requery
             return table;
         }
 
@@ -1811,14 +1826,18 @@
         }
 
         static updateDungeonSelector(dungeonsFound, dungeonsFoundPrimary) {
+            let removeSelected = false;
             this.searchQuery.dungeonSelection.slice(0).forEach(name => {
-                if (!dungeonsFound[name]) _util.arrayRemove(this.searchQuery.dungeonSelection, name);
+                if (!dungeonsFound[name]) {
+                    removeSelected = true;
+                    _util.arrayRemove(this.searchQuery.dungeonSelection, name);
+                }
             });
             let selected = this.searchQuery.dungeonSelection.length === 0 ? "selected" : "";
             this.dungeonSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(dungeonsFoundPrimary).length > 0) {
-                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT_TAGE + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const [locName, locNameFull] of Object.entries(dungeonsFoundPrimary).sort((a, b) => a[1].localeCompare(b[1]))) {
                     const selected = this.searchQuery.dungeonSelection.includes(locName) ? "selected" : "";
                     this.dungeonSelect.innerHTML += "<option value=\"" + locName + "\" " + selected + ">" + locNameFull + "</option>";
@@ -1830,17 +1849,22 @@
                 const selected = this.searchQuery.dungeonSelection.includes(locName) ? "selected" : "";
                 this.dungeonSelect.innerHTML += "<option value=\"" + locName.replaceAll("'", "\'") + "\" " + selected + ">" + locNameFull + "</option>";
             }
+            return removeSelected;
         }
 
         static updateGroupSelector(groupsFound, groupsFoundPrimary) {
+            let removedSelected = false;
             this.searchQuery.groupSelection.slice(0).forEach(name => {
-                if (!groupsFound[name]) _util.arrayRemove(this.searchQuery.groupSelection, name);
+                if (!groupsFound[name]) {
+                    _util.arrayRemove(this.searchQuery.groupSelection, name);
+                    removedSelected = true;
+                }
             });
             let selected = this.searchQuery.groupSelection.length === 0 ? "selected" : "";
             this.groupSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(groupsFoundPrimary).length > 0) {
-                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.groupSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT_TAGE + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const dungeonName of Object.keys(groupsFoundPrimary).sort()) {
                     const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
                     this.groupSelect.innerHTML += "<option value=\"" + dungeonName + "\" " + selected + ">" + dungeonName + "</option>";
@@ -1852,17 +1876,22 @@
                 const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
                 this.groupSelect.innerHTML += "<option value=\"" + dungeonName + "\" " + selected + ">" + dungeonName + "</option>";
             }
+            return removedSelected;
         }
 
         static updateWorldSelector(worldsFound, worldsFoundPrimary) {
+            let removeSelected = false;
             this.searchQuery.worldSelection.slice(0).forEach(name => {
-                if (!worldsFound[name]) _util.arrayRemove(this.searchQuery.worldSelection, name);
+                if (!worldsFound[name]) {
+                    removeSelected = true;
+                    _util.arrayRemove(this.searchQuery.worldSelection, name);
+                }
             });
             let selected = this.searchQuery.worldSelection.length === 0 ? "selected" : "";
             this.worldSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
 
             if (Object.keys(worldsFoundPrimary).length > 0) {
-                this.worldSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                this.worldSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT_TAGE + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const worldId of Object.keys(worldsFoundPrimary).sort()) {
                     const selected = this.searchQuery.worldSelection.includes(worldId) ? "selected" : "";
                     this.worldSelect.innerHTML += "<option value='" + worldId + "' " + selected + ">" + (this.worldValues[worldId] || worldId) + "</option>";
@@ -1874,6 +1903,7 @@
                 const selected = this.searchQuery.worldSelection.includes(dungeonName) ? "selected" : "";
                 this.worldSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
             }
+            return removeSelected;
         }
 
         static worldValues = {
@@ -2913,17 +2943,17 @@
             if (versionId1.length !== versionId2.length) return false;
             let length = versionId1.length;
             if (versionId2.length > length) length = versionId2.length;
-            let last1;
-            let last2;
+            let last1 = null;
+            let last2 = null;
             let changed = false;
             for (let i = 0; i < length; i++) {
                 const value1 = this.#getIt(versionId1, i, last1);
                 const value2 = this.#getIt(versionId2, i, last2);
                 if (value1 === false || value2 === false) return false;
-                if (value1 !== undefined && value2 !== undefined && value1 !== value2) return false;
+                if (value1 !== null && value2 !== null && value1 !== value2) return false;
                 last1 = value1;
                 last2 = value2;
-                if (value1 !== undefined) {
+                if (value1 !== null) {
                     if (mergedVersionIdArray) mergedVersionIdArray.push(value1);
                 } else {
                     changed = true;
@@ -2937,12 +2967,13 @@
             return changed ? mergedVersionIdArray : true;
         }
 
+
         static #getIt(versionIdArray, idx, last) {
             if (idx >= versionIdArray.length) { // Out of bounds
-                if (last === undefined) return undefined; // return Wildcard
+                if (last === null) return null; // return Wildcard (undefined wird nach einer Serialisierung 'null')
                 return false;
             }
-            return versionIdArray[idx];
+            return versionIdArray[idx] || null;
         }
 
     }
@@ -2976,7 +3007,7 @@
             if (initThisDomain) this.indexedDb = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
 
             if (initProxyDomain) {
-                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", true);
+                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
                 this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
                 this.indexedDbLocal = _Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
                 await MyStorage.messengerPromise;
