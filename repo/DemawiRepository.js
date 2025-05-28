@@ -235,6 +235,13 @@ class demawiRepository {
                 return objectStore;
             }
 
+            async cloneTo(dbNameTo) {
+                const dbNameFrom = this.dbname
+                await this.exec(async function(dbNameFrom, dbNameTo) {
+                    _.Storages.IndexedDb.getDb(dbNameFrom, "").cloneTo(dbNameTo);
+                }, dbNameFrom, dbNameTo);
+            }
+
         }
 
         static ObjectStorageProxy = class {
@@ -252,30 +259,30 @@ class demawiRepository {
 
             async getValue(dbObjectId) {
                 return this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
-                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getValue(dbObjectId);
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getValue(dbObjectId);
                 }, this.storageId, this.indexedDb.dbname, dbObjectId);
             }
 
             async setValue(dbObject) {
                 return this.indexedDb.exec(async function (storageId, dbname, dbObject) {
-                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).setValue(dbObject);
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).setValue(dbObject);
                 }, this.storageId, this.indexedDb.dbname, dbObject);
             }
 
             async deleteValue(dbObjectId) {
                 return this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
-                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).deleteValue(dbObjectId);
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).deleteValue(dbObjectId);
                 }, this.storageId, this.indexedDb.dbname, dbObject);
             }
 
             async getAll(queryOpt, iterationFnOpt) {
                 if (!iterationFnOpt) {
                     return this.indexedDb.exec(async function (storageId, dbname, queryOpt) {
-                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAll(queryOpt);
+                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(queryOpt);
                     }, this.storageId, this.indexedDb.dbname, queryOpt);
                 }
                 return this.indexedDb.execIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
-                    await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAll(queryOpt, async function (a) {
+                    await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(queryOpt, async function (a) {
                         return await respondIteration(data, a);
                     });
                     respondFinished(data);
@@ -285,11 +292,11 @@ class demawiRepository {
             async getAllKeys(queryOpt, iterationFnOpt) {
                 if (!iterationFnOpt) {
                     return this.indexedDb.exec(async function (storageId, dbname, queryOpt) {
-                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAllKeys(queryOpt);
+                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt);
                     }, this.storageId, this.indexedDb.dbname, queryOpt);
                 }
                 return await this.indexedDb.execIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
-                    await _.Storages.IndexedDb.getDb(dbname).getObjectStore(storageId).getAllKeys(queryOpt, async function (a) {
+                    await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt, async function (a) {
                         return await respondIteration(data, a);
                     });
                     respondFinished(data);
@@ -332,14 +339,23 @@ class demawiRepository {
              * Prüft, ob der ObjectStore existiert. Wenn er dies tut, wird dieser zurückgeliefert.
              */
             async getObjectStorageChecked(storageId) {
+                let result = this.getObjectStorage(storageId);
+                if(result) return result;
                 const dbConnection = await this.getConnection();
                 if (dbConnection.objectStoreNames.contains(storageId)) {
-                    return this.getObjectStore(storageId);
+                    return this.#addObjectStorage(storageId);
                 }
             }
 
-            getObjectStore(storageId) {
+            getObjectStorage(storageId) {
                 return this.objectStores[storageId];
+            }
+
+            #addObjectStorage(storageId, key, indizes, readonly) {
+                const objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
+                objectStore.indexedDb = this;
+                this.objectStores[storageId] = objectStore;
+                return objectStore;
             }
 
             /**
@@ -354,9 +370,7 @@ class demawiRepository {
                 }
                 let objectStore = this.objectStores[storageId];
                 if (!objectStore) {
-                    objectStore = new demawiRepository.Storages.ObjectStorage(storageId, key, indizes, readonly);
-                    objectStore.indexedDb = this;
-                    this.objectStores[storageId] = objectStore;
+                    objectStore = this.#addObjectStorage(storageId, key, indizes, readonly);
                     if (this.dbConnection && !this.#areAllObjectStoresSynced(this.dbConnection)) {
                         this.forceReconnect("create object store " + storageId);
                     } // kein instant-reconnect, da sich evtl. noch andere Object-Stores registrieren
@@ -577,13 +591,14 @@ class demawiRepository {
              */
             async cloneTo(dbTo) {
                 dbTo = typeof dbTo === "string" ? demawiRepository.Storages.IndexedDb.getDb(dbTo, this.modname) : dbTo;
-                console.log("Clone '" + this.dbname + "' to '", dbTo);
+                const dbName = dbTo.storageId;
+                console.log("Clone '" + this.dbname + "' to '", dbName);
                 const dbConnectionFrom = await this.getConnection();
                 const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
                 for (const objectStoreName of objectStoreNames) {
                     const readFrom = await this.getObjectStorageChecked(objectStoreName);
                     const writeTo = await dbTo.createObjectStorage(objectStoreName, await readFrom.getPrimaryKey());
-                    console.log("Clone '" + this.dbname + "' to '" + dbTo + "'... " + objectStoreName + "...");
+                    console.log("Clone '" + this.dbname + "' to '" + dbName + "'... " + objectStoreName + "...");
                     await readFrom.getAll(false, async cur => {
                         await writeTo.setValue(cur);
                     })
@@ -1033,7 +1048,7 @@ class demawiRepository {
                 static async doSearch(objectStorage, query, iterationOpt, retrieveFnName) {
                     const startTime = new Date().getTime();
                     if (!query) {
-                        if (query !== false) console.warn("getAll ohne query-Parametern kann bei großen Datenbanken zu Problemen führen")
+                        if (query !== false && iterationOpt === undefined && retrieveFnName === "getAll") console.warn(retrieveFnName + " ohne Parameter kann bei großen Datenbanken zu Problemen führen")
                         query = {};
                     }
                     const connection = await objectStorage.indexedDb.getConnection();
@@ -4410,7 +4425,7 @@ class demawiRepository {
     }
 
     static startMod() {
-        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")", window.top === unsafeWindow);
+        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")");
     }
 
     static ensureIframeWrap() {

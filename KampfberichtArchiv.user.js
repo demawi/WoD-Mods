@@ -60,7 +60,6 @@
                 return;
             } else {
                 await MyStorage.initMyStorage(true);
-                await MyStorage.messengerPromise;
                 await MyStorage.testMain.setValue({name: "TestLoc"}); // Vorab-Test, ob der Proxy läuft
             }
             demawiRepository.startMod();
@@ -320,13 +319,14 @@
                 location.versions = [];
                 await MyStorage.location.setValue(location);
             }
-            for (const report of await MyStorage.reportArchive.getAll()) {
+            await MyStorage.reportArchive.getAll(undefined, async function (report) {
+                console.log("resyncVersions: " + report.reportId);
                 delete report.loc.v;
                 delete report.loc.v_;
                 delete report.versions;
                 await Report.getVersion(report);
                 await MyStorage.reportArchive.setValue(report);
-            }
+            });
             console.log("resyncVersions finished!");
         }
 
@@ -368,7 +368,7 @@
             await MyStorage.reportArchiveSources.getAll(undefined, async function (reportSource) {
                 const report = await MyStorage.reportArchive.getValue(reportSource.reportId);
                 delete report.success;
-                console.log("Bearbeite: ", report.reportId);
+                //console.log("Bearbeite: ", report.reportId);
                 if (reportSource.stats) {
                     const doc = _util.getDocumentFor(reportSource.stats);
                     report.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(doc);
@@ -436,7 +436,14 @@
         }
 
         static async onKampfberichteSeite() {
+            //await this.resyncSourcesToReports();
             //await this.syncSuccessInformation();
+            //await this.resyncVersions();
+            //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
+            //await MyStorage.indexedDb.cloneTo("WodDBMain_Backup");
+            //await (await MyStorage.indexedDbLocal.getObjectStorageChecked("reportArchive")).getAll(false, async function(cur) {
+              //  await MyStorage.reportArchive.setValue(cur);
+            //});
 
             if (false) await MyStorage.reportArchive.getAll({}, async function (a) {
                 await MyStorage.reportArchive2.setValue(a);
@@ -2828,7 +2835,7 @@
             const loc = report.loc;
             if (loc.v) return [loc.v];
             if (loc.schlacht) return [1];
-            if (!report || !report.success || !report.srcs.levels || !report.success.levels) return [];
+            if (!report || !report.srcs || !report.srcs.levels || !report.success || !report.success.levels) return [];
 
             let versionId;
             let isComplete;
@@ -2969,9 +2976,10 @@
             if (initThisDomain) this.indexedDb = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
 
             if (initProxyDomain) {
-                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", true);
                 this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
-                //this.indexedDbLocal = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname);
+                this.indexedDbLocal = _Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
+                await MyStorage.messengerPromise;
             }
             await this.initThisStorage(this.indexedDb);
         }

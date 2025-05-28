@@ -27,11 +27,13 @@
     const _util = demawiRepository.import("util");
     const _UI = demawiRepository.import("UI");
     const _ItemParser = demawiRepository.import("ItemParser");
+    const _CSProxy = demawiRepository.import("CSProxy");
 
     class Mod {
         static dbname = "wodDB";
 
         static async startMod() {
+            if (demawiRepository.ensureIframeWrap()) return;
             await demawiRepository.startMod();
             await MyStorage.init();
             const page = _util.getWindowPage();
@@ -1199,9 +1201,14 @@
                 }
                 return objStore;
             }
-            this.indexedDb = _WoDStorages.initWodDb("ItemDB", Mod.dbname);
+
+            this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+            this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "ItemDB", this.messengerPromise);
+            this.indexedDbLocal = _Storages.IndexedDb.getDb(Mod.dbname, "ItemDB");
+
             this.item = adjust(this.indexedDb.createObjectStorage("item", "id"));
             this.itemSources = adjust(this.indexedDb.createObjectStorage("itemSources", "id"));
+            await this.messengerPromise;
         }
 
 
