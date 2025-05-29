@@ -818,9 +818,7 @@ class demawiRepository {
                     const request = objectStore.get(dbObjectId);
                     request.onsuccess = function (event) {
                         const result = event.target.result;
-                        // cloneInto wird für FF benötigt, damit wir das Objekt in die same-origin bekommen
-                        // ansonsten ist es wohl auf die Domain der indexdb geeicht und wir können es mit dem userScript nicht wirklich nutzen
-                        resolve(cloneInto(result, {}));
+                        resolve(result);
                     };
                     request.onerror = function (event) {
                         console.log("getValue-error");
@@ -1903,6 +1901,7 @@ class demawiRepository {
         }
 
         static find(window, url) {
+            console.log("Window find ", window._opened);
             if (window._opened) {
                 for (const [curUrl, curWindow] of Object.entries(window._opened)) {
                     if (curUrl === url) return curWindow;
@@ -1921,7 +1920,6 @@ class demawiRepository {
          */
         static actAsCSProxyResponder() {
             const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
-            const myMid = new URL(window.location.href).searchParams.get("messengerId");
             const log = document.referrer ? console.log : window.top.console.log;
             const errorlogger = document.referrer ? console.error : window.top.console.error;
             const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
@@ -1931,8 +1929,11 @@ class demawiRepository {
             document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + myOrigin + "</b><br>Es schließt sich mit dem Hauptfenster";
 
             const respond = function (data, result) {
+                delete data.exec;
                 if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
+                data = cloneInto(data, {});
                 data.result = result;
+                if (data.debug) log("CSProxy[" + myOrigin + "] antwortet2", data, result);
                 parentWindow.postMessage(data, parentOrigin);
             }
 
@@ -2003,7 +2004,7 @@ class demawiRepository {
             const targetUrl = new URL(responderHttp);
             targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
 
-            const mainTopWindow = (window.opener || unsafeWindow || window).top;
+            const mainTopWindow = (window.opener || window).top;
 
             let messengerId = mainTopWindow.messengerId;
             if (!messengerId) messengerId = mainTopWindow.messengerId = 1;
@@ -2015,10 +2016,8 @@ class demawiRepository {
             const _this = this;
             const messageListener = async (event) => {
                 const data = event.data;
-                if (data.mid) {
-                    if (csProxy.messengerId === data.mid) {
-                        await csProxy.onMessage(data);
-                    }
+                if (data.mid === csProxy.messengerId) {
+                    await csProxy.onMessage(data);
                 } else if (data.origin) {
                     await csProxy.onMessage(data);
                 }
@@ -2044,6 +2043,7 @@ class demawiRepository {
         debug;
 
         constructor(messengerId, targetUrl, debug) {
+            this.debug = debug;
             this.messengerId = messengerId;
             this.targetUrl = targetUrl;
             this.myOrigin = window.location.origin;
@@ -2055,7 +2055,6 @@ class demawiRepository {
             });
             this.onReadyResolver = resolver;
             this.onReady = promise;
-            this.debug = debug;
 
             // Falls wir das Target Window wiederverwenden triggern wir hiermit den Proxy nochmal eine Initial-Nachricht zu senden ansonsten macht er es eh von sich aus
             this.postMessage({});
@@ -2131,7 +2130,7 @@ class demawiRepository {
 
         postMessage(data) {
             if (this.debug) {
-                console.log("Messenger sende nach [" + this.messengerId + "]", data, data.exec);
+                console.log("Sender[" + this.messengerId + "] sendet..", data, data.exec);
                 data.debug = true;
             }
             data.mid = this.messengerId;
@@ -2160,7 +2159,7 @@ class demawiRepository {
 
             // Window/IFrame erst versuchen wiederzuverwenden, ansonsten vom Hauptfenster ausgehend neu erstellen
             if (this.#useWindowProxy()) {
-                if (this.debug) console.log("ProxyTarget: Create targetWindow as window.open");
+                if (this.debug) console.log("ProxyTarget: Get targetWindow as window.open");
                 let targetWindow = _.Window.find(mainWindow, responderUrl.toString());
                 if (targetWindow) { // Wiederverwendung
                     if (this.debug) console.log("ProxyTarget: Reuse window found");

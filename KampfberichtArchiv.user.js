@@ -52,13 +52,14 @@
         static async startMod() {
             if (demawiRepository.ensureIframeWrap()) return;
             // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
-            if (window.location.hostname.match(/^world-of-dungeons\.de$/)) {
-                if (window.location.href.endsWith("messenger=true")) {
+            if (window.origin.endsWith("//world-of-dungeons.de")) {
+                if (window.location.href.includes("messenger=true")) {
                     await MyStorage.initMyStorage(false, "Main");
                     _CSProxy.actAsCSProxyResponder();
                 }
                 return;
             } else {
+                console.log("Start full app")
                 await MyStorage.initMyStorage(true);
                 await MyStorage.testMain.setValue({name: "TestLoc"}); // Vorab-Test, ob der Proxy läuft
             }
@@ -3007,7 +3008,7 @@
             if (initThisDomain) this.indexedDb = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
 
             if (initProxyDomain) {
-                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", true);
                 this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
                 this.indexedDbLocal = _Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
                 await MyStorage.messengerPromise;
