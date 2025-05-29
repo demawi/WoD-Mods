@@ -50,10 +50,9 @@
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
         static async startMod() {
-            if (demawiRepository.ensureIframeWrap()) return;
             // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
-            if (window.location.hostname.match(/^world-of-dungeons\.de$/)) {
-                if (window.location.href.endsWith("messenger=true")) {
+            if (!window.location.hostname.match(/^(.*)\.world-of-dungeons\.de$/)) {
+                if (window.location.href.includes("messengerId=")) {
                     await MyStorage.initMyStorage(false, "Main");
                     _CSProxy.actAsCSProxyResponder();
                 }

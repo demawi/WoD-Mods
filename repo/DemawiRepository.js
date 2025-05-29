@@ -1925,125 +1925,114 @@ class demawiRepository {
             const log = document.referrer ? console.log : window.top.console.log;
             const errorlogger = document.referrer ? console.error : window.top.console.error;
             const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
-            const myOrigin = window.location.origin;
             parentWindow.focus();
 
-            document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + myOrigin + "</b><br>Es schließt sich mit dem Hauptfenster";
+            document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + window.location.origin + "</b><br>Es schließt sich mit dem Hauptfenster";
 
+            const iterators = {};
             const respond = function (data, result) {
-                if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
                 data.result = result;
+                data.mid = myMid;
                 parentWindow.postMessage(data, parentOrigin);
             }
 
-            const iterators = {};
-            const finishIteration = function (data) {
-                delete iterators[data.id];
-                if (data.debug) log("CSProxy[" + myOrigin + "] beendet die Iteration: " + data.id);
-            }
-
-            // Code der während der Schleife für die Auslieferung des Teilresultats aufgerufen wird.
-            const respondIteration = function (data, result) {
-                respond(data, result);
-                return new Promise((resolve, reject) => {
-                    iterators[data.id] = resolve;
-                });
-            }
-            // Code der nach Schleifenende aufgerufen wird. Sofern die Iteration vorzeitig beendet wurde ist hier nichts mehr zu tun.
-            const respondFinished = function (data) {
-                if (iterators[data.id]) {
-                    respond(data);
-                    finishIteration(data);
-                }
-            }
-
-            window.addEventListener("message", async event => {
+            window.addEventListener( // Main-Domain
+                "message",
+                async event => {
                     const data = event.data;
-                    if (typeof data !== "object") return;
-                    if (data.debug) log("CSProxy[" + myOrigin + "] hat Befehl empfangen", data, data.exec);
-                    if (!data.id) respond(data);
+                    log("Responder hat Daten empfangen", data);
                     if (data.type !== "iteration") {
                         const dataExec = data.exec;
                         if (dataExec) {
+                            delete data.exec;
+                            //console.log("Code2", dataExec, data);
                             respond(data, await eval(dataExec));
                         }
                     } else { // type === "iteration"
-                        const idx = data.idx;
-                        delete data.idx;
+                        const cmd = data.cmd;
+                        delete data.cmd;
                         let finished = false;
-                        if (!idx) { // start
-                            iterators[data.id] = () => {
-                            }; // muss vorhanden sein, damit respondFinish auch ohne Resultate abschließen kann
-                            await eval(data.exec);
-                        } else if (idx === 1) { // continue
-                            iterators[data.id]();
-                        } else if (idx === -1) { // stop
-                            iterators[data.id](false);
-                            finishIteration(data);
+                        if (cmd === "start") {
+                            const iterator = eval(data.exec);
+                            iterators[data.id] = iterator;
+                            const result = iterator();
+                            respond(data, result);
+                            if (result === undefined) finished = true;
+                        } else if (cmd === "next") {
+                            const result = iterators[data.id]();
+                            respond(data, result);
+                            if (result === undefined) finished = true;
+                        } else if (cmd === "stop") {
+                            // no response necessary
+                            finished = true;
                         }
+                        if (finished) delete iterators[data.id]; // cleanup
                     }
                 },
                 false,
             );
 
-            log("CSProxy[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
+            log("Responder ist empfangsbereit", parentOrigin, myMid);
 
             // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
             try {
-                parentWindow.postMessage({origin: myOrigin}, parentOrigin);
+                parentWindow.postMessage({mid: myMid}, parentOrigin);
             } catch (e) {
-                errorlogger("Fehler bei der PostMessage vom CSProxy", e);
+                errorlogger("Fehler bei der PostMessage vom Responder", e);
             }
         }
+
+        static messengerId = 1;
+        static messengers = {};
 
         /**
          * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
          */
-        static async getProxyFor(responderHttp, debug) {
-            const targetUrl = new URL(responderHttp);
-            targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
-
-            const mainTopWindow = (window.opener || unsafeWindow || window).top;
-
-            let messengerId = mainTopWindow.messengerId;
-            if (!messengerId) messengerId = mainTopWindow.messengerId = 1;
-            else {
-                mainTopWindow.messengerId++;
-                messengerId = mainTopWindow.messengerId;
+        static async getProxyFor(responderHttp) {
+            if (this.messengerId === 1) { // nur beim ersten Mal
+                const _this = this;
+                window.addEventListener(
+                    "message",
+                    async (event) => {
+                        const data = event.data;
+                        if (data.mid) {
+                            // console.log("Incoming message: ", data);
+                            const messenger = _this.messengers[data.mid];
+                            await messenger.onMessage(data);
+                        }
+                    },
+                    false,
+                );
             }
-            const csProxy = new CSProxy(messengerId, targetUrl, debug);
-            const _this = this;
-            const messageListener = async (event) => {
-                const data = event.data;
-                if (data.mid) {
-                    if (csProxy.messengerId === data.mid) {
-                        await csProxy.onMessage(data);
-                    }
-                } else if (data.origin) {
-                    await csProxy.onMessage(data);
-                }
-            };
-            mainTopWindow.addEventListener("message", messageListener, false);
-            window.addEventListener("beforeunload", function () {
-                mainTopWindow.removeEventListener("message", messageListener);
-            });
+            const targetUrl = new URL(responderHttp);
+            if (!unsafeWindow.top._messengers) unsafeWindow.top._messengers = {};
+            let messenger = unsafeWindow.top._messengers[targetUrl.origin];
+            if (messenger) return messenger.onReady;
 
-            return csProxy.onReady;
+            const messengerId = this.messengerId++;
+            targetUrl.searchParams.append("messengerId", messengerId);
+            messenger = new CSProxy(messengerId, targetUrl);
+            unsafeWindow.top._messengers[targetUrl.origin] = messenger;
+            unsafeWindow.top.demawiId = "aa";
+            unsafeWindow.demawiId = "bb";
+            window.top.demawiId = "cc";
+            window.demawiId = "dd";
+            this.messengers[messengerId] = messenger;
+            return messenger.onReady;
         }
 
         iframe;
         targetWindow;
         targetOrigin;
         myOrigin;
-        comLink = {}; // für jede Kommunikation wird ein Promise erstellt, welches erfüllt wird, wenn die Kommunkation abgeschlossen ist
+        resolver = {};
         iterations = {};
         id = 1;
         onReady;
         onReadyResolver;
         messengerId;
-        debug;
 
-        constructor(messengerId, targetUrl, debug) {
+        constructor(messengerId, targetUrl) {
             this.messengerId = messengerId;
             this.targetUrl = targetUrl;
             this.myOrigin = window.location.origin;
@@ -2055,25 +2044,17 @@ class demawiRepository {
             });
             this.onReadyResolver = resolver;
             this.onReady = promise;
-            this.debug = debug;
-
-            // Falls wir das Target Window wiederverwenden triggern wir hiermit den Proxy nochmal eine Initial-Nachricht zu senden ansonsten macht er es eh von sich aus
-            this.postMessage({});
         }
 
         async onMessage(data) {
-            if (this.debug) console.log("Sender[" + this.messengerId + "] empfängt", data);
             const id = data.id;
             if (id === undefined) { // Responder meldet Bereitschaft, wir geben somit den Messenger frei.
-                if (this.onReadyResolver) {
-                    if (this.debug) console.log("Sender[" + this.messengerId + "] ist sendebereit!");
-                    this.onReadyResolver(this);
-                }
+                if (this.onReadyResolver) this.onReadyResolver(this);
                 return;
             }
             if (data.type !== "iteration") {
-                this.comLink[id](data.result);
-                delete this.comLink[id];
+                this.resolver[id](data.result);
+                delete this.resolver[id];
             } else { // type === "iteration"
                 let stop = false;
                 if (data.result === undefined) stop = true; // wenn der Datenlieferant abbricht
@@ -2082,18 +2063,17 @@ class demawiRepository {
                     this.postMessage({
                         id: id,
                         type: "iteration",
-                        idx: -1, // Abbruch
+                        cmd: "stop",
                     })
                 }
                 if (stop) {
-                    if (this.debug) console.log("Sender beendet die Iteration: " + id);
                     delete this.iterations[id];
-                    this.comLink[id]();
+                    this.resolver[id]();
                 } else {
                     this.postMessage({
                         id: id,
                         type: "iteration",
-                        idx: 1, // +1
+                        cmd: "next",
                     })
                 }
             }
@@ -2102,10 +2082,10 @@ class demawiRepository {
         /**
          * Die 'execFn' muss eine Funktion erzeugen, die fortlaufend aufgerufen wird um den nächsten Datensatz zu liefern.
          */
-        async execIteration(iteration, execFn, ...vars) {
+        async sendMessageIteration(execFn, iteration) {
             const id = this.#createId();
             this.iterations[id] = iteration;
-            return this.execIntern(execFn, {id: id, type: "iteration"}, ...vars);
+            return this.execIntern(execFn, {id: id, type: "iteration", cmd: "start"});
         }
 
         async exec(execFn, ...vars) {
@@ -2119,22 +2099,17 @@ class demawiRepository {
             let args = JSON.stringify(vars);
             args = args.substring(1, args.length - 1);
             data.exec = "(" + execFn.toString() + ")(" + args + ")";
-
+            console.log("Messenger.exec", data.exec);
             let promiseResolver;
             const promise = new Promise((resolve, reject) => {
                 promiseResolver = resolve;
             });
-            this.comLink[data.id] = promiseResolver;
+            this.resolver[data.id] = promiseResolver;
             this.postMessage(data);
             return promise;
         }
 
         postMessage(data) {
-            if (this.debug) {
-                console.log("Messenger sende nach [" + this.messengerId + "]", data, data.exec);
-                data.debug = true;
-            }
-            data.mid = this.messengerId;
             this.targetWindow.postMessage(data, this.targetOrigin);
         }
 
@@ -2142,45 +2117,44 @@ class demawiRepository {
             return this.id++;
         }
 
-        #useWindowProxy() {
-            return navigator.userAgent.toLowerCase().includes('firefox');
-        }
-
-        #openWindow(window, responderUrl) {
-            const targetWindow = _.Window.open(window, responderUrl.toString());
-            window.focus();
-            window.addEventListener("beforeunload", function () {
-                targetWindow.close();
-            });
-            return targetWindow;
-        }
-
         getTargetWindow(responderUrl) {
-            const mainWindow = (window.opener || window).top;
+            let targetWindow;
+            if (navigator.userAgent.toLowerCase().includes('firefox')) {
+                if (window.opener && window.opener.top._messengers) { // Popup: same-origin
+                    return window.opener.top._messengers[responderUrl.origin];
+                } else if (window.top === window) { // nur wenn iframe-wrap noch nicht erstellt wurde
+                    const iframeWrap = document.createElement("iframe");
+                    iframeWrap.style.width = "100%";
+                    iframeWrap.style.height = "100%";
+                    iframeWrap.style.position = "absolute";
+                    iframeWrap.style.border = "0px";
 
-            // Window/IFrame erst versuchen wiederzuverwenden, ansonsten vom Hauptfenster ausgehend neu erstellen
-            if (this.#useWindowProxy()) {
-                if (this.debug) console.log("ProxyTarget: Create targetWindow as window.open");
-                let targetWindow = _.Window.find(mainWindow, responderUrl.toString());
-                if (targetWindow) { // Wiederverwendung
-                    if (this.debug) console.log("ProxyTarget: Reuse window found");
-                    return targetWindow;
+                    document.body.style.overflow = "hidden";
+                    document.body.style.margin = "0px";
+
+                    document.body.insertBefore(iframeWrap, document.body.children[0]);
+                    iframeWrap.contentDocument.body.className = document.body.className;
+                    iframeWrap.src = window.location.href;
+                    let cur;
+                    while (cur = document.head.children[0]) {
+                        document.head.removeChild(cur);
+                    }
+                    while (cur = document.body.children[1]) {
+                        document.body.removeChild(cur);
+                    }
+
                 }
-                // Neu erstellen
-                if (this.debug) console.log("ProxyTarget: Create window");
-                targetWindow = this.#openWindow(mainWindow, responderUrl.toString());
-                return targetWindow;
+                console.log("Create targetWindow as window.open")
+                targetWindow = window.open(responderUrl.toString());
+                window.top.focus();
+                window.top.addEventListener("beforeunload", function () {
+                    targetWindow.close();
+                });
             } else {
-                let iframe = mainWindow.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
-                if (iframe) { // Wiederverwendung
-                    if (this.debug) console.log("ProxyTarget: Reuse iframe window found");
-                    return iframe.contentWindow;
-                }
-                // Neu erstellen
-                if (this.debug) console.log("ProxyTarget: Create iframe");
-                iframe = _.Libs.loadViaIFrame(responderUrl.toString(), mainWindow.document);
-                return iframe.contentWindow;
+                console.log("Create targetWindow as iframe")
+                targetWindow = _.Libs.loadViaIFrame(responderUrl.toString()).contentWindow;
             }
+            return targetWindow;
         }
     }
 
