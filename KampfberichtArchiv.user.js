@@ -52,7 +52,7 @@
         static async startMod() {
             if (demawiRepository.ensureIframeWrap()) return;
             // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
-            if (!window.location.hostname.match(/^(.*)\.world-of-dungeons\.de$/)) {
+            if (window.location.hostname.match(/^world-of-dungeons\.de$/)) {
                 if (window.location.href.endsWith("messenger=true")) {
                     await MyStorage.initMyStorage(false, "Main");
                     _CSProxy.actAsCSProxyResponder();
@@ -1611,7 +1611,7 @@
         static async query() {
             const start = new Date().getTime();
             const result = await this.#queryIntern();
-            console.log("ArchivSearch.query "+(new Date().getTime()-start)/1000+" secs");
+            console.log("ArchivSearch.query " + (new Date().getTime() - start) / 1000 + " secs");
             return result;
         }
 

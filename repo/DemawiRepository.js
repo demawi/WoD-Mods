@@ -1890,9 +1890,13 @@ class demawiRepository {
 
         static open(window, url) {
             const openedWindow = window.open(url);
-            openedWindow.addEventListener("beforeunload", function () {
-                delete window._opened[url];
-            });
+            try {
+                openedWindow.addEventListener("beforeunload", function () {
+                    delete window._opened[url];
+                });
+            } catch (e) {
+                // kann tendenziell bei Cross-Origin nicht unbedingt genutzt werden (firefox blockt es)
+            }
             if (!window._opened) window._opened = {};
             window._opened[url] = openedWindow;
             return openedWindow;
@@ -2158,7 +2162,7 @@ class demawiRepository {
             if (this.#useWindowProxy()) {
                 if (this.debug) console.log("ProxyTarget: Create targetWindow as window.open");
                 let targetWindow = _.Window.find(mainWindow, responderUrl.toString());
-                if(targetWindow) { // Wiederverwendung
+                if (targetWindow) { // Wiederverwendung
                     if (this.debug) console.log("ProxyTarget: Reuse window found");
                     return targetWindow;
                 }
