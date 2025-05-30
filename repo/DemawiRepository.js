@@ -1886,24 +1886,25 @@ class demawiRepository {
 
     static Window = class Window {
 
-        static open(window, url) {
-            const openedWindow = window.open(url);
+        static open(window, unsafeWindow, url) {
+            const openedWindow = window.open(url, "abc");
             try {
                 openedWindow.addEventListener("beforeunload", function () {
-                    delete window._opened[url];
+                    //delete unsafeWindow._opened[url];
                 });
             } catch (e) {
                 // kann tendenziell bei Cross-Origin nicht unbedingt genutzt werden (firefox blockt es)
             }
-            if (!window._opened) window._opened = {};
-            window._opened[url] = openedWindow;
+            if (!unsafeWindow._opened) unsafeWindow._opened = {};
+            unsafeWindow._opened[url] = openedWindow;
             return openedWindow;
         }
 
-        static find(window, url) {
-            console.log("Window find ", window._opened);
-            if (window._opened) {
-                for (const [curUrl, curWindow] of Object.entries(window._opened)) {
+        static find(window, unsafeWindow, url) {
+            console.log("Window find ", unsafeWindow._opened);
+            if (unsafeWindow._opened) {
+                let result;
+                for (const [curUrl, curWindow] of Object.entries(unsafeWindow._opened)) {
                     if (curUrl === url) return curWindow;
                 }
             }
@@ -2141,12 +2142,12 @@ class demawiRepository {
             return this.id++;
         }
 
-        #useWindowProxy() {
+        static useWindowProxy() {
             return navigator.userAgent.toLowerCase().includes('firefox');
         }
 
-        #openWindow(window, responderUrl) {
-            const targetWindow = _.Window.open(window, responderUrl.toString());
+        #openWindow(window, mainUnsafeWindow, responderUrl) {
+            const targetWindow = _.Window.open(window, mainUnsafeWindow, responderUrl.toString());
             window.focus();
             window.addEventListener("beforeunload", function () {
                 targetWindow.close();
@@ -2156,18 +2157,20 @@ class demawiRepository {
 
         getTargetWindow(responderUrl) {
             const mainWindow = (window.opener || window).top;
+            const mainUnsafeWindow = (window.opener || unsafeWindow).top;
 
             // Window/IFrame erst versuchen wiederzuverwenden, ansonsten vom Hauptfenster ausgehend neu erstellen
-            if (this.#useWindowProxy()) {
+            if (this.constructor.useWindowProxy()) {
                 if (this.debug) console.log("ProxyTarget: Get targetWindow as window.open");
-                let targetWindow = _.Window.find(mainWindow, responderUrl.toString());
+                let targetWindow = _.Window.find(mainWindow, mainUnsafeWindow, responderUrl.toString());
                 if (targetWindow) { // Wiederverwendung
                     if (this.debug) console.log("ProxyTarget: Reuse window found");
                     return targetWindow;
                 }
+                return;
                 // Neu erstellen
                 if (this.debug) console.log("ProxyTarget: Create window");
-                targetWindow = this.#openWindow(mainWindow, responderUrl.toString());
+                targetWindow = this.#openWindow(mainWindow, mainUnsafeWindow, responderUrl.toString());
                 return targetWindow;
             } else {
                 let iframe = mainWindow.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
@@ -2998,6 +3001,12 @@ class demawiRepository {
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
     static util = class {
+
+        static async wait(msecs) {
+            return new Promise((resolve, reject) => {
+                setTimeout(resolve, msecs);
+            });
+        }
 
         static isAsyncFunction(fn) {
             return fn.constructor.name === "AsyncFunction"
@@ -4469,22 +4478,47 @@ class demawiRepository {
         }
     }
 
+    /**
+     * Wartet solange bis der content wirklich da ist.
+     * document._iframeGreasemonkeyFix selbst ist ein Marker der dafür sorgt, dass das Skript nur einmalig läuft.
+     * Beim Beenden eines IFrames läuft Greasemonkey nämlich nochmal los.
+     */
+    static async iframeGreasemonkeyFix() {
+        if (!document.body.textContent || document._iframeGreasemonkeyFix) {
+            return new Promise((resolve, reject) => {
+                const interval = window.setInterval(function () {
+                    if (document.body.textContent && !document._iframeGreasemonkeyFix) {
+                        document._iframeGreasemonkeyFix = true;
+                        window.clearInterval(interval);
+                        resolve();
+                    }
+                }, 20);
+            });
+        }
+    }
+
     static ensureIframeWrapWithTargetWindow() {
         if (window.top === window && !window.opener) { // nur wenn iframe-wrap noch nicht erstellt wurde
-            // TODO: URL-Rewriting Logik einbauen
             console.log("Iframe-Wrap wurde erstellt!");
+            if(_.CSProxy.useWindowProxy()) {
+                const url = "https://world-of-dungeons.de/wod/spiel/impressum/contact.php?messenger=true";
+                unsafeWindow._opened = {
+                    [url]: unsafeWindow.open(url, "proxy:"+url),
+                };
+            }
             const iframeWrap = document.createElement("iframe");
             iframeWrap.style.width = "100%";
             iframeWrap.style.height = "100%";
             iframeWrap.style.position = "absolute";
             iframeWrap.style.border = "0px";
+            iframeWrap.style.zIndex = 100;
 
             document.body.style.overflow = "hidden";
             document.body.style.margin = "0px";
 
-            document.body.insertBefore(iframeWrap, document.body.children[0]);
-            iframeWrap.contentDocument.body.className = document.body.className;
             iframeWrap.src = window.location.href;
+            document.body.insertBefore(iframeWrap, document.body.children[0]);
+            //iframeWrap.contentDocument.body.className = document.body.className;
             let cur;
             while (cur = document.head.children[0]) {
                 document.head.removeChild(cur);
@@ -4495,11 +4529,21 @@ class demawiRepository {
             iframeWrap.addEventListener("load", function () {
                 const newUrl = iframeWrap.contentWindow.location.href;
                 window.history.replaceState({}, "", newUrl);
-                iframeWrap.contentWindow.addEventListener("beforeunload", function () {
-                    console.clear();
-                });
-            });
 
+                iframeWrap.contentWindow.addEventListener("beforeunload", function () {
+                });
+                if(_.CSProxy.useWindowProxy()) {
+                    iframeWrap.contentWindow.addEventListener("unload", function () {
+                        console.clear();
+                        setTimeout(function () {
+                            // FF-iFrame-Greasemonkey-Fix zweiter Teil, ansonsten ist noch nichtmal setInterval-funktionsfähig vorhanden
+                            iframeWrap.src = iframeWrap.contentWindow.location.href;
+                            iframeWrap.parentElement.removeChild(iframeWrap);
+                            document.body.append(iframeWrap);
+                        }, 0);
+                    });
+                }
+            });
             return true;
         }
     }

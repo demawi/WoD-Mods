@@ -4,6 +4,7 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
+// @grant          none
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
@@ -50,6 +51,7 @@
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
         static async startMod() {
+            await demawiRepository.iframeGreasemonkeyFix();
             if (demawiRepository.ensureIframeWrap()) return;
             // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
             if (window.origin.endsWith("//world-of-dungeons.de")) {
@@ -59,7 +61,6 @@
                 }
                 return;
             } else {
-                console.log("Start full app")
                 await MyStorage.initMyStorage(true);
                 await MyStorage.testMain.setValue({name: "TestLoc"}); // Vorab-Test, ob der Proxy läuft
             }
