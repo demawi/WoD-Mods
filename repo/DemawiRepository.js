@@ -6,154 +6,8 @@ class demawiRepository {
     static version = "1.0.4";
 
     /**
-     * Speichert zusätzlich Klasseninformationen von Objekten. Dafür wird ein zusätzliches "_class"-Attribut zu den Objekten gespeichert.
-     * Beim Laden werden die Objekte entsprechend wieder hergestellt.
-     */
-    static JSON2 = class {
-        static stringify(object, objectChanger) {
-            if (Array.isArray(object)) {
-                let result = "[";
-                for (let idx = 0; idx < object.length; idx++) {
-                    if (result.length > 1) result += ",";
-                    result += this.stringify(object[idx], objectChanger);
-                }
-                return result + "]";
-            } else if (typeof object === "object") {
-                if (object === null) {
-                    return JSON.stringify(object);
-                } else if (object.constructor) {
-                    if (objectChanger) object = objectChanger(object);
-                    let result = "{";
-                    for (const key in object) {
-                        const value = object[key];
-                        if (value === undefined || typeof value === "function") continue;
-                        if (result.length > 1) result += ",";
-                        result += "\"" + key + "\":" + this.stringify(value, objectChanger);
-                    }
-                    if (result.length > 1) result += ",";
-                    result += "\"_class\":" + JSON.stringify(object.constructor.name);
-                    return result + "}";
-                } else {
-                    let result = "{";
-                    for (const key in object) {
-                        const value = object[key];
-                        if (value === undefined || typeof value === "function") continue;
-                        if (result.length > 1) result += ",";
-                        result += "\"" + key + "\":" + this.stringify(value, objectChanger);
-                    }
-                    return result + "}";
-                }
-            } else {
-                return JSON.stringify(object);
-            }
-        }
-
-        /**
-         * Zunächst werden die Objekte per Standard-JSON wieder hergestellt. Danach wird
-         * toObjects aufgerufen.
-         */
-        static parse(json, objectFactory) {
-            const jsonParse = unsafeWindow.JSON.parse(json);
-            return this.toObjects(jsonParse, objectFactory || {});
-        }
-
-        /**
-         * Wertet das zusätzlichen "_class"-Attribut aus und ersetzt die Standard-Objekten mit
-         * den entsprechend instanziierten Objekten.
-         * Die 'objectFactory' bietet die Möglichkeit beim Auswerten des "_class"-Attributs, selbst
-         * die Instanziierung vorzunehmen.
-         */
-        static toObjects(object, objectFactory) {
-            if (Array.isArray(object)) {
-                for (let idx = 0; idx < object.length; idx++) {
-                    object[idx] = this.toObjects(object[idx], objectFactory);
-                }
-            } else if (typeof object === "object") {
-                if (!object) {
-                    // nothing to do
-                } else if (object._class) {
-                    if (objectFactory[object._class]) {
-                        const [newObject, finishParsing] = objectFactory[object._class](object);
-                        if (finishParsing) return newObject;
-                    }
-                    // Über die ObjektFactory wurde kein neues Objekt erzeugt...
-                    let newObject;
-                    try {
-                        newObject = eval("new " + object._class + "()");
-                    } catch (e) {
-                        newObject = unsafeWindow.eval("new " + object._class + "()");
-                    }
-                    for (const key in object) {
-                        if (key === "_class") continue;
-                        newObject[key] = this.toObjects(object[key], objectFactory);
-                    }
-                    return newObject;
-                } else {
-                    for (const key in object) {
-                        object[key] = this.toObjects(object[key], objectFactory);
-                    }
-                }
-            } else {
-                // nothing to do
-            }
-            return object;
-        }
-
-    }
-
-    /**
-     * Hilfemethoden für Down- und Uploads
-     */
-    static File = class {
-
-        static forDownload(filename, data) {
-            const blob = new Blob([data], {type: 'text/plain'});
-            const fileURL = URL.createObjectURL(blob);
-            const downloadLink = document.createElement('a');
-            downloadLink.href = fileURL;
-            downloadLink.download = filename;
-            downloadLink.click();
-            URL.revokeObjectURL(fileURL);
-        }
-
-        static createDownloadLink(filename, data) {
-            const blob = new Blob([data], {type: 'text/plain'});
-            const downloadLink = document.createElement('a');
-            downloadLink.href = window.URL.createObjectURL(blob);
-            downloadLink.download = filename;
-            downloadLink.dataset.downloadurl = ['text/plain', downloadLink.download, downloadLink.href].join(':');
-            downloadLink.draggable = true;
-            return downloadLink;
-        }
-
-        static async createUploadForRead() {
-
-            return new Promise((result, reject) => {
-                const fileInput = document.createElement("input");
-                fileInput.type = "file";
-                fileInput.onchange = function () {
-                    const file = fileInput.files[0];
-                    const reader = new FileReader();
-                    reader.onload = function () {
-                        result(reader.result);
-                    };
-                    reader.readAsText(file);
-                }
-                fileInput.click();
-            })
-            //return result;
-        }
-    }
-
-    /**
-     * WoD-DBs:
-     * Inhaber:
-     * ItemDatenbank (wodDB.items[w], wodDB.itemSources[w])
-     * KampfberichtArchiv (wodDB.reportSources[w], wodDB.reportSourcesMeta[w])
-     * ErweiterteKampfstatistik (wodDB.reportStats[w])
-     *
-     * Lesend:
-     *
+     * Indexed-DB Framework.
+     * Direkte Nutzung sowie auch Cross-Site-Proxy-Nutzung.
      */
     static Storages = class {
 
@@ -166,12 +20,12 @@ class demawiRepository {
 
         static MATCHER = {
             NUMBER: {
-                ANY: ["anynumber"], // muss eindeutig auch nach Clonung identifizierbar sein
+                ANY: ["anynumber"], // muss eindeutig auch nach Clonung identifizierbar sein, wird deshalb als Objekt abgelegt.
                 MIN: Number.MIN_VALUE,
                 MAX: Number.MAX_VALUE,
             },
             STRING: {
-                ANY: ["anystring"], // muss eindeutig auch nach Clonung identifizierbar sein
+                ANY: ["anystring"], // muss eindeutig auch nach Clonung identifizierbar sein, wird deshalb als Objekt abgelegt.
                 MIN: "",
                 MAX: "\uffff",
             },
@@ -193,11 +47,11 @@ class demawiRepository {
             csProxy; // Cross-Site Database
             objectStores = {};
 
-            constructor(dbname, modname, proxyPromise) {
+            constructor(dbname, modname, csProxyPromise) {
                 this.modname = modname;
                 this.dbname = dbname;
                 const _this = this;
-                this.csProxyResolver = proxyPromise.then(csProxy => {
+                this.csProxyResolver = csProxyPromise.then(csProxy => {
                     _this.csProxy = csProxy;
                     delete _this.csProxyResolver;
                 });
@@ -272,7 +126,13 @@ class demawiRepository {
             async deleteValue(dbObjectId) {
                 return this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
                     return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).deleteValue(dbObjectId);
-                }, this.storageId, this.indexedDb.dbname, dbObject);
+                }, this.storageId, this.indexedDb.dbname, dbObjectId);
+            }
+
+            async count() {
+                return this.indexedDb.exec(async function (storageId, dbname) {
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).count();
+                }, this.storageId, this.indexedDb.dbname);
             }
 
             async getAll(queryOpt, iterationFnOpt) {
@@ -1301,23 +1161,360 @@ class demawiRepository {
                 }
             }
         }
+    }
+
+    /**
+     * Cross-Site Proxy, um origin-übergreifend auf origin-geeichte Inhalte zuzugreifen (wie z.B. indexedDB).
+     * Hierzu zählen 3 Teile...
+     * 1) Das Wrappen der Ursprungsanwendung in ein Iframe, damit 2) nur einmalig aufgerufen werden muss. (Methode: .ensureIframeWrap)
+     * 2) Das Einbinden von zusätzlichen Iframes, um Code in einer andereren Domain auszuführen. (Methode: .actAsCSProxyResponder)
+     * 3) Die eigentliche Steuerungseinheit zur Nutzung in der Anwendung, welches den Code auf 2) injizieren kann. (Methode: .getProxyFor(responderHttp))
+     */
+    static CSProxy = class CSProxy {
+
+        static isTampermonkey() {
+            return GM.info.scriptHandler === "Tampermonkey";
+        }
 
         /**
-         * Kopiert die Objekte von einem Object-Storage zu einem anderen.
-         * Der Ziel-Storage muss dabei leer sein.
+         * Greasemonkey hat mehrere gravierende Probleme mit dem Ausführen eines User-Scriptes für ein iframe, daher wird dieses für die Nutzung ausgenommen.
          */
-        static async migrate(from, to) {
-            if ((await this.to.getAll()).length > 0) return; // nur migrieren wenn die Zieldatenbank leer ist
-            const db = await this.from.getAll();
-            for (const report of db) {
-                this.to.setValue(report);
-            }
-            console.log("Migration finished! " + db.length);
+        static cantProxy() {
+            return GM.info.scriptHandler === "Greasemonkey";
         }
+
+        /**
+         * nur wenn iframe-wrap noch nicht erstellt wurde
+         * (Same-origin) Popups sollten das iframe ihres parents nutzen.
+         */
+        static ensureIframeWrap() {
+            if (window.top === window && !window.opener) {
+                if(!document.querySelector("#iframeWrap")) this.#ensureIframeWrapDoIt();
+                return true;
+            }
+        }
+
+        static #ensureIframeWrapDoIt() {
+            console.log("Iframe-Wrap wurde erstellt!");
+            const iframeWrap = document.createElement("iframe");
+            iframeWrap.style.width = "100%";
+            iframeWrap.style.height = "100%";
+            iframeWrap.style.position = "absolute";
+            iframeWrap.style.border = "0px";
+            iframeWrap.style.zIndex = 100;
+            iframeWrap.id = "iframeWrap";
+
+            document.body.style.overflow = "hidden";
+            document.body.style.margin = "0px";
+
+            iframeWrap.src = window.location.href;
+            document.body.insertBefore(iframeWrap, document.body.children[0]);
+            //iframeWrap.contentDocument.body.className = document.body.className;
+            let cur;
+            while (cur = document.head.children[0]) {
+                document.head.removeChild(cur);
+            }
+            while (cur = document.body.children[1]) {
+                document.body.removeChild(cur);
+            }
+            iframeWrap.addEventListener("load", function () {
+                document.title = iframeWrap.contentWindow.document.title;
+                //iframeWrap.contentWindow.addEventListener("beforeunload", function () {});
+                iframeWrap.contentWindow.addEventListener("unload", function () {
+                    console.clear();
+                    setTimeout(function () {
+                        const newUrl = iframeWrap.contentWindow.location.href;
+                        window.history.replaceState({}, "", newUrl);
+                    }, 0);
+                });
+            });
+        }
+
+        /**
+         * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
+         */
+        static actAsCSProxyResponder() {
+            const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
+            const log = document.referrer ? console.log : window.top.console.log;
+            const errorlogger = document.referrer ? console.error : window.top.console.error;
+            const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
+            const myOrigin = window.location.origin;
+            parentWindow.focus();
+
+            document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + myOrigin + "</b><br>Es schließt sich mit dem Hauptfenster";
+
+            const respond = function (data, result) {
+                delete data.exec;
+                if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
+                data = cloneInto(data, {});
+                data.result = result;
+                if (data.debug) log("CSProxy[" + myOrigin + "] antwortet2", data, result);
+                parentWindow.postMessage(data, parentOrigin);
+            }
+
+            const iterators = {};
+            const finishIteration = function (data) {
+                delete iterators[data.id];
+                if (data.debug) log("CSProxy[" + myOrigin + "] beendet die Iteration: " + data.id);
+            }
+
+            // Code der während der Schleife für die Auslieferung des Teilresultats aufgerufen wird.
+            const respondIteration = function (data, result) {
+                respond(data, result);
+                return new Promise((resolve, reject) => {
+                    iterators[data.id] = resolve;
+                });
+            }
+            // Code der nach Schleifenende aufgerufen wird. Sofern die Iteration vorzeitig beendet wurde ist hier nichts mehr zu tun.
+            const respondFinished = function (data) {
+                if (iterators[data.id]) {
+                    respond(data);
+                    finishIteration(data);
+                }
+            }
+
+            // eval muss hier ausgeführt werden, damit der injizierte Code auch auf respondIteration und respondFinished zugreifen kann
+            window.addEventListener("message", async event => {
+                    const data = event.data;
+                    if (typeof data !== "object") return;
+                    if (data.debug) log("CSProxy[" + myOrigin + "] hat Befehl empfangen", data, data.exec);
+                    if (!data.id) respond(data);
+                    if (data.type !== "iteration") {
+                        const dataExec = data.exec;
+                        if (dataExec) {
+                            respond(data, await eval(dataExec));
+                        }
+                    } else { // type === "iteration"
+                        const idx = data.idx;
+                        delete data.idx;
+                        let finished = false;
+                        if (!idx) { // start
+                            iterators[data.id] = () => {
+                            }; // muss vorhanden sein, damit respondFinish auch ohne Resultate abschließen kann
+                            await eval(data.exec);
+                        } else if (idx === 1) { // continue
+                            iterators[data.id]();
+                        } else if (idx === -1) { // stop
+                            iterators[data.id](false);
+                            finishIteration(data);
+                        }
+                    }
+                },
+                false,
+            );
+
+            log("CSProxy[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
+
+            // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
+            try {
+                parentWindow.postMessage({origin: myOrigin}, parentOrigin);
+            } catch (e) {
+                errorlogger("Fehler bei der PostMessage vom CSProxy", e);
+            }
+        }
+
+        /**
+         * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
+         */
+        static async getProxyFor(responderHttp, debug) {
+            const targetUrl = new URL(responderHttp);
+            targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
+
+            const mainTopWindow = (window.opener || window).top;
+
+            let messengerId = mainTopWindow.messengerId;
+            if (!messengerId) messengerId = mainTopWindow.messengerId = 1;
+            else {
+                mainTopWindow.messengerId++;
+                messengerId = mainTopWindow.messengerId;
+            }
+            const csProxy = new CSProxy(messengerId, targetUrl, debug);
+            const _this = this;
+            const messageListener = async (event) => {
+                const data = event.data;
+                if (data.mid === csProxy.messengerId) {
+                    await csProxy.onMessage(data);
+                } else if (data.origin) {
+                    await csProxy.onMessage(data);
+                }
+            };
+            mainTopWindow.addEventListener("message", messageListener, false);
+            window.addEventListener("beforeunload", function () {
+                mainTopWindow.removeEventListener("message", messageListener);
+            });
+
+            return csProxy.onReady;
+        }
+
+        iframe;
+        targetWindow;
+        targetOrigin;
+        myOrigin;
+        comLink = {}; // für jede Kommunikation wird ein Promise erstellt, welches erfüllt wird, wenn die Kommunkation abgeschlossen ist
+        iterations = {};
+        id = 1;
+        onReady;
+        onReadyResolver;
+        messengerId;
+        debug;
+
+        constructor(messengerId, targetUrl, debug) {
+            this.debug = debug;
+            this.messengerId = messengerId;
+            this.targetUrl = targetUrl;
+            this.myOrigin = window.location.origin;
+            this.targetOrigin = targetUrl.origin;
+            this.targetWindow = this.getTargetWindow(targetUrl);
+            let resolver;
+            const promise = new Promise((resolve, reject) => {
+                resolver = resolve;
+            });
+            this.onReadyResolver = resolver;
+            this.onReady = promise;
+
+            // Falls wir das Target Window wiederverwenden triggern wir hiermit den Proxy nochmal eine Initial-Nachricht zu senden ansonsten macht er es eh von sich aus
+            this.postMessage({});
+        }
+
+        async onMessage(data) {
+            if (this.debug) console.log("Sender[" + this.messengerId + "] empfängt", data);
+            const id = data.id;
+            if (id === undefined) { // Responder meldet Bereitschaft, wir geben somit den Messenger frei.
+                if (this.onReadyResolver) {
+                    if (this.debug) console.log("Sender[" + this.messengerId + "] ist sendebereit!");
+                    this.onReadyResolver(this);
+                }
+                return;
+            }
+            if (data.type !== "iteration") {
+                this.comLink[id](data.result);
+                delete this.comLink[id];
+            } else { // type === "iteration"
+                let stop = false;
+                if (data.result === undefined) stop = true; // wenn der Datenlieferant abbricht
+                else if (await this.iterations[id](data.result) === false) { // wenn wir selbst abbrechen
+                    stop = true;
+                    this.postMessage({
+                        id: id,
+                        type: "iteration",
+                        idx: -1, // Abbruch
+                    })
+                }
+                if (stop) {
+                    if (this.debug) console.log("Sender beendet die Iteration: " + id);
+                    delete this.iterations[id];
+                    this.comLink[id]();
+                } else {
+                    this.postMessage({
+                        id: id,
+                        type: "iteration",
+                        idx: 1, // +1
+                    })
+                }
+            }
+        }
+
+        /**
+         * Die 'execFn' muss eine Funktion erzeugen, die fortlaufend aufgerufen wird um den nächsten Datensatz zu liefern.
+         */
+        async execIteration(iteration, execFn, ...vars) {
+            const id = this.#createId();
+            this.iterations[id] = iteration;
+            return this.execIntern(execFn, {id: id, type: "iteration"}, ...vars);
+        }
+
+        async exec(execFn, ...vars) {
+            return await this.execIntern(execFn, undefined, ...vars);
+        }
+
+        async execIntern(execFn, dataOpt, ...vars) {
+            const data = dataOpt || {
+                id: this.#createId(),
+            }
+            let args = JSON.stringify(vars);
+            args = args.substring(1, args.length - 1);
+            data.exec = "(" + execFn.toString() + ")(" + args + ")";
+
+            let promiseResolver;
+            const promise = new Promise((resolve, reject) => {
+                promiseResolver = resolve;
+            });
+            this.comLink[data.id] = promiseResolver;
+            this.postMessage(data);
+            return promise;
+        }
+
+        postMessage(data) {
+            if (this.debug) {
+                console.log("Sender[" + this.messengerId + "] sendet..", data, data.exec);
+                data.debug = true;
+            }
+            data.mid = this.messengerId;
+            this.targetWindow.postMessage(data, this.targetOrigin);
+        }
+
+        #createId() {
+            return this.id++;
+        }
+
+        #openWindow(window, mainUnsafeWindow, responderUrl) {
+            const targetWindow = _.Window.open(window, mainUnsafeWindow, responderUrl.toString());
+            window.focus();
+            window.addEventListener("beforeunload", function () {
+                targetWindow.close();
+            });
+            return targetWindow;
+        }
+
+        getTargetWindow(responderUrl) {
+            const mainWindow = (window.opener || window).top;
+
+            let iframe = mainWindow.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
+            if (iframe) { // Wiederverwendung
+                if (this.debug) console.log("ProxyTarget: Reuse iframe window found");
+                return iframe.contentWindow;
+            }
+            // Neu erstellen
+            if (this.debug) console.log("ProxyTarget: Create iframe");
+            iframe = _.Libs.loadViaIFrame(responderUrl.toString(), mainWindow.document);
+            return iframe.contentWindow;
+
+        }
+    }
+
+    static Settings = class {
+        static #cache = {};
+
+        static async get(settingsDef, fresh) {
+            let modCache;
+            const modName = settingsDef.modName;
+            if (fresh || !(modCache = this.#cache[modName])) {
+                modCache = this.#cache[modName] = await _.WoDStorages.getSettingsDb().getValue(modName) || {name: modName};
+                for (const [key, value] of Object.entries(settingsDef.defaultSettings || {})) {
+                    if (!(key in modCache)) modCache[key] = value;
+                }
+                await _.WoDStorages.getSettingsDb().setValue(modCache);
+            }
+            return modCache;
+        }
+
+        static async save(settingsDef) {
+            await _.WoDStorages.getSettingsDb().setValue(await this.get(settingsDef));
+        }
+
     }
 
     /**
      * Hier finden sich gemeinsam genutzte Datenbanken und Datenoperation.
+     *
+     * WoD-DBs:
+     * Inhaber:
+     * ItemDatenbank (wodDB.items[w], wodDB.itemSources[w])
+     * KampfberichtArchiv (wodDB.reportSources[w], wodDB.reportSourcesMeta[w])
+     * ErweiterteKampfstatistik (wodDB.reportStats[w])
+     *
+     * Lesend:
+     *
      */
     static WoDStorages = class {
         static #indexedDb;
@@ -1880,330 +2077,6 @@ class demawiRepository {
                         break;
                 }
             }
-        }
-
-    }
-
-    static Window = class Window {
-
-        static open(window, unsafeWindow, url) {
-            const openedWindow = window.open(url, "abc");
-            try {
-                openedWindow.addEventListener("beforeunload", function () {
-                    //delete unsafeWindow._opened[url];
-                });
-            } catch (e) {
-                // kann tendenziell bei Cross-Origin nicht unbedingt genutzt werden (firefox blockt es)
-            }
-            if (!unsafeWindow._opened) unsafeWindow._opened = {};
-            unsafeWindow._opened[url] = openedWindow;
-            return openedWindow;
-        }
-
-        static find(window, unsafeWindow, url) {
-            console.log("Window find ", unsafeWindow._opened);
-            if (unsafeWindow._opened) {
-                let result;
-                for (const [curUrl, curWindow] of Object.entries(unsafeWindow._opened)) {
-                    if (curUrl === url) return curWindow;
-                }
-            }
-        }
-    }
-
-    /**
-     * Cross-Site Proxy, um origin-übergreifend auf origin-geeichte Inhalte zuzugreifen (wie z.B. indexedDB).
-     */
-    static CSProxy = class CSProxy {
-
-        /**
-         * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
-         */
-        static actAsCSProxyResponder() {
-            const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
-            const log = document.referrer ? console.log : window.top.console.log;
-            const errorlogger = document.referrer ? console.error : window.top.console.error;
-            const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
-            const myOrigin = window.location.origin;
-            parentWindow.focus();
-
-            document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + myOrigin + "</b><br>Es schließt sich mit dem Hauptfenster";
-
-            const respond = function (data, result) {
-                delete data.exec;
-                if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
-                data = cloneInto(data, {});
-                data.result = result;
-                if (data.debug) log("CSProxy[" + myOrigin + "] antwortet2", data, result);
-                parentWindow.postMessage(data, parentOrigin);
-            }
-
-            const iterators = {};
-            const finishIteration = function (data) {
-                delete iterators[data.id];
-                if (data.debug) log("CSProxy[" + myOrigin + "] beendet die Iteration: " + data.id);
-            }
-
-            // Code der während der Schleife für die Auslieferung des Teilresultats aufgerufen wird.
-            const respondIteration = function (data, result) {
-                respond(data, result);
-                return new Promise((resolve, reject) => {
-                    iterators[data.id] = resolve;
-                });
-            }
-            // Code der nach Schleifenende aufgerufen wird. Sofern die Iteration vorzeitig beendet wurde ist hier nichts mehr zu tun.
-            const respondFinished = function (data) {
-                if (iterators[data.id]) {
-                    respond(data);
-                    finishIteration(data);
-                }
-            }
-
-            window.addEventListener("message", async event => {
-                    const data = event.data;
-                    if (typeof data !== "object") return;
-                    if (data.debug) log("CSProxy[" + myOrigin + "] hat Befehl empfangen", data, data.exec);
-                    if (!data.id) respond(data);
-                    if (data.type !== "iteration") {
-                        const dataExec = data.exec;
-                        if (dataExec) {
-                            respond(data, await eval(dataExec));
-                        }
-                    } else { // type === "iteration"
-                        const idx = data.idx;
-                        delete data.idx;
-                        let finished = false;
-                        if (!idx) { // start
-                            iterators[data.id] = () => {
-                            }; // muss vorhanden sein, damit respondFinish auch ohne Resultate abschließen kann
-                            await eval(data.exec);
-                        } else if (idx === 1) { // continue
-                            iterators[data.id]();
-                        } else if (idx === -1) { // stop
-                            iterators[data.id](false);
-                            finishIteration(data);
-                        }
-                    }
-                },
-                false,
-            );
-
-            log("CSProxy[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
-
-            // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
-            try {
-                parentWindow.postMessage({origin: myOrigin}, parentOrigin);
-            } catch (e) {
-                errorlogger("Fehler bei der PostMessage vom CSProxy", e);
-            }
-        }
-
-        /**
-         * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
-         */
-        static async getProxyFor(responderHttp, debug) {
-            const targetUrl = new URL(responderHttp);
-            targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
-
-            const mainTopWindow = (window.opener || window).top;
-
-            let messengerId = mainTopWindow.messengerId;
-            if (!messengerId) messengerId = mainTopWindow.messengerId = 1;
-            else {
-                mainTopWindow.messengerId++;
-                messengerId = mainTopWindow.messengerId;
-            }
-            const csProxy = new CSProxy(messengerId, targetUrl, debug);
-            const _this = this;
-            const messageListener = async (event) => {
-                const data = event.data;
-                if (data.mid === csProxy.messengerId) {
-                    await csProxy.onMessage(data);
-                } else if (data.origin) {
-                    await csProxy.onMessage(data);
-                }
-            };
-            mainTopWindow.addEventListener("message", messageListener, false);
-            window.addEventListener("beforeunload", function () {
-                mainTopWindow.removeEventListener("message", messageListener);
-            });
-
-            return csProxy.onReady;
-        }
-
-        iframe;
-        targetWindow;
-        targetOrigin;
-        myOrigin;
-        comLink = {}; // für jede Kommunikation wird ein Promise erstellt, welches erfüllt wird, wenn die Kommunkation abgeschlossen ist
-        iterations = {};
-        id = 1;
-        onReady;
-        onReadyResolver;
-        messengerId;
-        debug;
-
-        constructor(messengerId, targetUrl, debug) {
-            this.debug = debug;
-            this.messengerId = messengerId;
-            this.targetUrl = targetUrl;
-            this.myOrigin = window.location.origin;
-            this.targetOrigin = targetUrl.origin;
-            this.targetWindow = this.getTargetWindow(targetUrl);
-            let resolver;
-            const promise = new Promise((resolve, reject) => {
-                resolver = resolve;
-            });
-            this.onReadyResolver = resolver;
-            this.onReady = promise;
-
-            // Falls wir das Target Window wiederverwenden triggern wir hiermit den Proxy nochmal eine Initial-Nachricht zu senden ansonsten macht er es eh von sich aus
-            this.postMessage({});
-        }
-
-        async onMessage(data) {
-            if (this.debug) console.log("Sender[" + this.messengerId + "] empfängt", data);
-            const id = data.id;
-            if (id === undefined) { // Responder meldet Bereitschaft, wir geben somit den Messenger frei.
-                if (this.onReadyResolver) {
-                    if (this.debug) console.log("Sender[" + this.messengerId + "] ist sendebereit!");
-                    this.onReadyResolver(this);
-                }
-                return;
-            }
-            if (data.type !== "iteration") {
-                this.comLink[id](data.result);
-                delete this.comLink[id];
-            } else { // type === "iteration"
-                let stop = false;
-                if (data.result === undefined) stop = true; // wenn der Datenlieferant abbricht
-                else if (await this.iterations[id](data.result) === false) { // wenn wir selbst abbrechen
-                    stop = true;
-                    this.postMessage({
-                        id: id,
-                        type: "iteration",
-                        idx: -1, // Abbruch
-                    })
-                }
-                if (stop) {
-                    if (this.debug) console.log("Sender beendet die Iteration: " + id);
-                    delete this.iterations[id];
-                    this.comLink[id]();
-                } else {
-                    this.postMessage({
-                        id: id,
-                        type: "iteration",
-                        idx: 1, // +1
-                    })
-                }
-            }
-        }
-
-        /**
-         * Die 'execFn' muss eine Funktion erzeugen, die fortlaufend aufgerufen wird um den nächsten Datensatz zu liefern.
-         */
-        async execIteration(iteration, execFn, ...vars) {
-            const id = this.#createId();
-            this.iterations[id] = iteration;
-            return this.execIntern(execFn, {id: id, type: "iteration"}, ...vars);
-        }
-
-        async exec(execFn, ...vars) {
-            return await this.execIntern(execFn, undefined, ...vars);
-        }
-
-        async execIntern(execFn, dataOpt, ...vars) {
-            const data = dataOpt || {
-                id: this.#createId(),
-            }
-            let args = JSON.stringify(vars);
-            args = args.substring(1, args.length - 1);
-            data.exec = "(" + execFn.toString() + ")(" + args + ")";
-
-            let promiseResolver;
-            const promise = new Promise((resolve, reject) => {
-                promiseResolver = resolve;
-            });
-            this.comLink[data.id] = promiseResolver;
-            this.postMessage(data);
-            return promise;
-        }
-
-        postMessage(data) {
-            if (this.debug) {
-                console.log("Sender[" + this.messengerId + "] sendet..", data, data.exec);
-                data.debug = true;
-            }
-            data.mid = this.messengerId;
-            this.targetWindow.postMessage(data, this.targetOrigin);
-        }
-
-        #createId() {
-            return this.id++;
-        }
-
-        static useWindowProxy() {
-            return navigator.userAgent.toLowerCase().includes('firefox');
-        }
-
-        #openWindow(window, mainUnsafeWindow, responderUrl) {
-            const targetWindow = _.Window.open(window, mainUnsafeWindow, responderUrl.toString());
-            window.focus();
-            window.addEventListener("beforeunload", function () {
-                targetWindow.close();
-            });
-            return targetWindow;
-        }
-
-        getTargetWindow(responderUrl) {
-            const mainWindow = (window.opener || window).top;
-            const mainUnsafeWindow = (window.opener || unsafeWindow).top;
-
-            // Window/IFrame erst versuchen wiederzuverwenden, ansonsten vom Hauptfenster ausgehend neu erstellen
-            if (this.constructor.useWindowProxy()) {
-                if (this.debug) console.log("ProxyTarget: Get targetWindow as window.open");
-                let targetWindow = _.Window.find(mainWindow, mainUnsafeWindow, responderUrl.toString());
-                if (targetWindow) { // Wiederverwendung
-                    if (this.debug) console.log("ProxyTarget: Reuse window found");
-                    return targetWindow;
-                }
-                return;
-                // Neu erstellen
-                if (this.debug) console.log("ProxyTarget: Create window");
-                targetWindow = this.#openWindow(mainWindow, mainUnsafeWindow, responderUrl.toString());
-                return targetWindow;
-            } else {
-                let iframe = mainWindow.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
-                if (iframe) { // Wiederverwendung
-                    if (this.debug) console.log("ProxyTarget: Reuse iframe window found");
-                    return iframe.contentWindow;
-                }
-                // Neu erstellen
-                if (this.debug) console.log("ProxyTarget: Create iframe");
-                iframe = _.Libs.loadViaIFrame(responderUrl.toString(), mainWindow.document);
-                return iframe.contentWindow;
-            }
-        }
-    }
-
-    static Settings = class {
-        static #cache = {};
-
-        static async get(settingsDef, fresh) {
-            let modCache;
-            const modName = settingsDef.modName;
-            if (fresh || !(modCache = this.#cache[modName])) {
-                modCache = this.#cache[modName] = await _.WoDStorages.getSettingsDb().getValue(modName) || {name: modName};
-                for (const [key, value] of Object.entries(settingsDef.defaultSettings || {})) {
-                    if (!(key in modCache)) modCache[key] = value;
-                }
-                await _.WoDStorages.getSettingsDb().setValue(modCache);
-            }
-            return modCache;
-        }
-
-        static async save(settingsDef) {
-            await _.WoDStorages.getSettingsDb().setValue(await this.get(settingsDef));
         }
 
     }
@@ -2993,6 +2866,146 @@ class demawiRepository {
                 }
             }
             return table;
+        }
+
+    }
+
+    /**
+     * Hilfemethoden für Down- und Uploads
+     */
+    static File = class {
+
+        static forDownload(filename, data) {
+            const blob = new Blob([data], {type: 'text/plain'});
+            const fileURL = URL.createObjectURL(blob);
+            const downloadLink = document.createElement('a');
+            downloadLink.href = fileURL;
+            downloadLink.download = filename;
+            downloadLink.click();
+            URL.revokeObjectURL(fileURL);
+        }
+
+        static createDownloadLink(filename, data) {
+            const blob = new Blob([data], {type: 'text/plain'});
+            const downloadLink = document.createElement('a');
+            downloadLink.href = window.URL.createObjectURL(blob);
+            downloadLink.download = filename;
+            downloadLink.dataset.downloadurl = ['text/plain', downloadLink.download, downloadLink.href].join(':');
+            downloadLink.draggable = true;
+            return downloadLink;
+        }
+
+        static async createUploadForRead() {
+
+            return new Promise((result, reject) => {
+                const fileInput = document.createElement("input");
+                fileInput.type = "file";
+                fileInput.onchange = function () {
+                    const file = fileInput.files[0];
+                    const reader = new FileReader();
+                    reader.onload = function () {
+                        result(reader.result);
+                    };
+                    reader.readAsText(file);
+                }
+                fileInput.click();
+            })
+            //return result;
+        }
+    }
+
+    /**
+     * Speichert zusätzlich Klasseninformationen von Objekten. Dafür wird ein zusätzliches "_class"-Attribut zu den Objekten gespeichert.
+     * Beim Laden werden die Objekte entsprechend wieder hergestellt.
+     */
+    static JSON2 = class {
+        static stringify(object, objectChanger) {
+            if (Array.isArray(object)) {
+                let result = "[";
+                for (let idx = 0; idx < object.length; idx++) {
+                    if (result.length > 1) result += ",";
+                    result += this.stringify(object[idx], objectChanger);
+                }
+                return result + "]";
+            } else if (typeof object === "object") {
+                if (object === null) {
+                    return JSON.stringify(object);
+                } else if (object.constructor) {
+                    if (objectChanger) object = objectChanger(object);
+                    let result = "{";
+                    for (const key in object) {
+                        const value = object[key];
+                        if (value === undefined || typeof value === "function") continue;
+                        if (result.length > 1) result += ",";
+                        result += "\"" + key + "\":" + this.stringify(value, objectChanger);
+                    }
+                    if (result.length > 1) result += ",";
+                    result += "\"_class\":" + JSON.stringify(object.constructor.name);
+                    return result + "}";
+                } else {
+                    let result = "{";
+                    for (const key in object) {
+                        const value = object[key];
+                        if (value === undefined || typeof value === "function") continue;
+                        if (result.length > 1) result += ",";
+                        result += "\"" + key + "\":" + this.stringify(value, objectChanger);
+                    }
+                    return result + "}";
+                }
+            } else {
+                return JSON.stringify(object);
+            }
+        }
+
+        /**
+         * Zunächst werden die Objekte per Standard-JSON wieder hergestellt. Danach wird
+         * toObjects aufgerufen.
+         */
+        static parse(json, objectFactory) {
+            const jsonParse = unsafeWindow.JSON.parse(json);
+            return this.toObjects(jsonParse, objectFactory || {});
+        }
+
+        /**
+         * Wertet das zusätzlichen "_class"-Attribut aus und ersetzt die Standard-Objekten mit
+         * den entsprechend instanziierten Objekten.
+         * Die 'objectFactory' bietet die Möglichkeit beim Auswerten des "_class"-Attributs, selbst
+         * die Instanziierung vorzunehmen.
+         */
+        static toObjects(object, objectFactory) {
+            if (Array.isArray(object)) {
+                for (let idx = 0; idx < object.length; idx++) {
+                    object[idx] = this.toObjects(object[idx], objectFactory);
+                }
+            } else if (typeof object === "object") {
+                if (!object) {
+                    // nothing to do
+                } else if (object._class) {
+                    if (objectFactory[object._class]) {
+                        const [newObject, finishParsing] = objectFactory[object._class](object);
+                        if (finishParsing) return newObject;
+                    }
+                    // Über die ObjektFactory wurde kein neues Objekt erzeugt...
+                    let newObject;
+                    try {
+                        newObject = eval("new " + object._class + "()");
+                    } catch (e) {
+                        newObject = unsafeWindow.eval("new " + object._class + "()");
+                    }
+                    for (const key in object) {
+                        if (key === "_class") continue;
+                        newObject[key] = this.toObjects(object[key], objectFactory);
+                    }
+                    return newObject;
+                } else {
+                    for (const key in object) {
+                        object[key] = this.toObjects(object[key], objectFactory);
+                    }
+                }
+            } else {
+                // nothing to do
+            }
+            return object;
         }
 
     }
@@ -4468,84 +4481,8 @@ class demawiRepository {
         return this[type];
     }
 
-    static startMod() {
-        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")");
-    }
-
-    static ensureIframeWrap() {
-        if (this.ensureIframeWrapWithTargetWindow()) {
-            return true;
-        }
-    }
-
-    /**
-     * Wartet solange bis der content wirklich da ist.
-     * document._iframeGreasemonkeyFix selbst ist ein Marker der dafür sorgt, dass das Skript nur einmalig läuft.
-     * Beim Beenden eines IFrames läuft Greasemonkey nämlich nochmal los.
-     */
-    static async iframeGreasemonkeyFix() {
-        if (!document.body.textContent || document._iframeGreasemonkeyFix) {
-            return new Promise((resolve, reject) => {
-                const interval = window.setInterval(function () {
-                    if (document.body.textContent && !document._iframeGreasemonkeyFix) {
-                        document._iframeGreasemonkeyFix = true;
-                        window.clearInterval(interval);
-                        resolve();
-                    }
-                }, 20);
-            });
-        }
-    }
-
-    static ensureIframeWrapWithTargetWindow() {
-        if (window.top === window && !window.opener) { // nur wenn iframe-wrap noch nicht erstellt wurde
-            console.log("Iframe-Wrap wurde erstellt!");
-            if(_.CSProxy.useWindowProxy()) {
-                const url = "https://world-of-dungeons.de/wod/spiel/impressum/contact.php?messenger=true";
-                unsafeWindow._opened = {
-                    [url]: unsafeWindow.open(url, "proxy:"+url),
-                };
-            }
-            const iframeWrap = document.createElement("iframe");
-            iframeWrap.style.width = "100%";
-            iframeWrap.style.height = "100%";
-            iframeWrap.style.position = "absolute";
-            iframeWrap.style.border = "0px";
-            iframeWrap.style.zIndex = 100;
-
-            document.body.style.overflow = "hidden";
-            document.body.style.margin = "0px";
-
-            iframeWrap.src = window.location.href;
-            document.body.insertBefore(iframeWrap, document.body.children[0]);
-            //iframeWrap.contentDocument.body.className = document.body.className;
-            let cur;
-            while (cur = document.head.children[0]) {
-                document.head.removeChild(cur);
-            }
-            while (cur = document.body.children[1]) {
-                document.body.removeChild(cur);
-            }
-            iframeWrap.addEventListener("load", function () {
-                const newUrl = iframeWrap.contentWindow.location.href;
-                window.history.replaceState({}, "", newUrl);
-
-                iframeWrap.contentWindow.addEventListener("beforeunload", function () {
-                });
-                if(_.CSProxy.useWindowProxy()) {
-                    iframeWrap.contentWindow.addEventListener("unload", function () {
-                        console.clear();
-                        setTimeout(function () {
-                            // FF-iFrame-Greasemonkey-Fix zweiter Teil, ansonsten ist noch nichtmal setInterval-funktionsfähig vorhanden
-                            iframeWrap.src = iframeWrap.contentWindow.location.href;
-                            iframeWrap.parentElement.removeChild(iframeWrap);
-                            document.body.append(iframeWrap);
-                        }, 0);
-                    });
-                }
-            });
-            return true;
-        }
+    static startMod(zusatz) {
+        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")"+(zusatz?" "+zusatz:""));
     }
 
     static getModName() {

@@ -1736,7 +1736,11 @@
 
     class MyStorage {
 
+        static #inited = false;
+
         static async init() {
+            if(this.#inited) return;
+            this.#inited = true;
             const adjust = function (objStore) {
                 let resultGetValue = objStore.getValue;
                 objStore.getValue = async function (dbObjectId) {

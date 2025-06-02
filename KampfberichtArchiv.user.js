@@ -4,7 +4,6 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
-// @grant          none
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
@@ -51,8 +50,6 @@
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
         static async startMod() {
-            await demawiRepository.iframeGreasemonkeyFix();
-            if (demawiRepository.ensureIframeWrap()) return;
             // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
             if (window.origin.endsWith("//world-of-dungeons.de")) {
                 if (window.location.href.includes("messenger=true")) {
@@ -61,14 +58,14 @@
                 }
                 return;
             } else {
+                if (_CSProxy.ensureIframeWrap()) return;
                 await MyStorage.initMyStorage(true);
                 await MyStorage.testMain.setValue({name: "TestLoc"}); // Vorab-Test, ob der Proxy läuft
             }
-            demawiRepository.startMod();
+            const page = _util.getWindowPage();
+            demawiRepository.startMod("Page: '" + page + "'");
             await _WoDWorldDb.placeSeasonElem();
 
-            const page = _util.getWindowPage();
-            console.log("Page: '" + page + "'")
             switch (page) {
                 case "tombola.php":
                     await TombolaLoot.onTombolaPage();
@@ -590,7 +587,6 @@
                     dungeonStat.versions = location && location.versions ? Object.keys(location.versions).length : 0;
                 }
                 if (report.srcs) {
-                    console.log(report.srcs.space);
                     memorySpace += report.srcs.space;
                     dungeonStat.space = (dungeonStat.space || 0) + report.srcs.space;
                 }
@@ -2848,11 +2844,14 @@
                 let nix = 0;
                 for (let i = 0, l = versionId.length; i < l; i++) {
                     let cur = versionId[i];
-                    if (cur.includes("- gelöst")) geloest++;
-                    else if (cur.includes("- Interlude")) interlude++;
-                    else nix++;
-                    cur = cur.replace(" - gelöst", "");
-                    versionId[i] = cur;
+                    if(cur) {
+                        if (cur.includes("- gelöst")) geloest++;
+                        else if (cur.includes("- Interlude")) interlude++;
+                        else nix++;
+                        cur = cur.replace(" - gelöst", "");
+                        versionId[i] = cur;
+                    } else nix++;
+
                 }
                 if (nix) { // kein gelöst, kein Interlude, d.h. man hätte weiter kommen können
                     versionId.push(undefined);
@@ -3009,7 +3008,7 @@
             if (initThisDomain) this.indexedDb = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
 
             if (initProxyDomain) {
-                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", true);
+                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
                 this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
                 this.indexedDbLocal = _Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
                 await MyStorage.messengerPromise;

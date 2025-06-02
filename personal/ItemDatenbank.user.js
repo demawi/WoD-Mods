@@ -33,7 +33,7 @@
         static dbname = "wodDB";
 
         static async startMod() {
-            if (demawiRepository.ensureIframeWrap()) return;
+            if (_CSProxy.ensureIframeWrap()) return;
             await demawiRepository.startMod();
             await MyStorage.init();
             const page = _util.getWindowPage();
