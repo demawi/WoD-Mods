@@ -31,6 +31,8 @@
     const _ReportParser = demawiRepository.import("ReportParser");
     const _util = demawiRepository.import("util");
     const _Libs = demawiRepository.import("Libs");
+    const _UI = demawiRepository.import("UI");
+    const _Dices = demawiRepository.import("Dices");
 
     class Mod {
         static dbname = "wodDB";
@@ -266,30 +268,85 @@
             this.#header.classList.add("nowod");
             this.#header.innerHTML = "Erweiterte Kampfstatistiken";
             var firstClick = true;
-            const thisObject = this;
+            const _this = this;
             this.#collapsible = util.createCollapsible("20px", true, function (hide) {
-                thisObject.#content.hidden = hide;
-                if (thisObject.#foundError) {
-                    thisObject.#content.innerHTML = thisObject.getHTMLFromError(thisObject.#foundError);
+                _this.#content.hidden = hide;
+                if (_this.#foundError) {
+                    _this.#content.innerHTML = _this.getHTMLFromError(_this.#foundError);
                 } else if (firstClick) {
                     firstClick = false;
-                    if (thisObject.#warnings.length > 0) {
-                        for (const warning of thisObject.#warnings) {
+                    if (_this.#warnings.length > 0) {
+                        for (const warning of _this.#warnings) {
                             const msgElem = document.createElement("div");
-                            msgElem.innerHTML = thisObject.getHTMLFromWarning(warning);
-                            thisObject.#content.append(msgElem);
+                            msgElem.innerHTML = _this.getHTMLFromWarning(warning);
+                            _this.#content.append(msgElem);
                         }
                     }
                     const resultAnchor = document.createElement("div");
-                    thisObject.#content.appendChild(resultAnchor);
+                    _this.#content.appendChild(resultAnchor);
                     const view = new QueryModel.StatQuery("heroes", "attack", []);
                     const initialStatView = new Viewer.StatView(view, true, false);
                     new Viewer.StatTable(initialStatView, Mod.thisLevelDatas, resultAnchor);
-                    thisObject.#content.append(document.createElement("br"));
+                    _this.#content.append(_this.createWurfrechner());
+                    _this.#content.append(document.createElement("br"));
                 }
             });
             headings[0].parentNode.insertBefore(this.#header, headings[0].nextSibling);
-            headings[0].parentNode.insertBefore(thisObject.#content, this.#header.nextSibling);
+            headings[0].parentNode.insertBefore(_this.#content, this.#header.nextSibling);
+        }
+
+        static createWurfrechner() {
+            const wurfrechner = [];
+            wurfrechner.push("Wurfrechner:");
+            const eingabeAWavg = this.createNummerneingabe();
+            eingabeAWavg.placeholder = "AW-avg";
+            wurfrechner.push(eingabeAWavg);
+            const eingabeAWmin = this.createNummerneingabe();
+            eingabeAWmin.placeholder = "AW-min";
+            wurfrechner.push(eingabeAWmin);
+            const eingabeAWmax = this.createNummerneingabe();
+            eingabeAWmax.placeholder = "AW-max";
+            wurfrechner.push(eingabeAWmax);
+            wurfrechner.push(" > ");
+            const eingabePWavg = this.createNummerneingabe();
+            eingabePWavg.placeholder = "PW-avg";
+            wurfrechner.push(eingabePWavg);
+            const eingabePWmin = this.createNummerneingabe();
+            eingabePWmin.placeholder = "PW-min";
+            wurfrechner.push(eingabePWmin);
+            const eingabePWmax = this.createNummerneingabe();
+            eingabePWmax.placeholder = "PW-max";
+            wurfrechner.push(eingabePWmax);
+            const resultat = document.createElement("div");
+            wurfrechner.push(resultat);
+            const berechnen = function (ev) {
+                const elem = ev.target;
+                if (elem.value > 999) elem.value = 999;
+                let awAVG = Number(eingabeAWavg.value);
+                let pwAVG = Number(eingabePWavg.value);
+                if (!(awAVG > 0) || !(pwAVG > 0)) {
+                    resultat.innerHTML = "";
+                    return;
+                }
+                let result = _Dices.winsOver2(awAVG, Number(eingabeAWmin.value) || 0, Number(eingabeAWmax.value) || 0, pwAVG, Number(eingabePWmin.value) || 0, Number(eingabePWmax.value) || 0);
+                result = 100 * result;
+                resultat.innerHTML = "Trefferwahrscheinlichkeit: " + result + " %";
+            }
+            eingabeAWavg.addEventListener("change", berechnen);
+            eingabeAWmin.addEventListener("change", berechnen);
+            eingabeAWmax.addEventListener("change", berechnen);
+            eingabePWavg.addEventListener("change", berechnen);
+            eingabePWmin.addEventListener("change", berechnen);
+            eingabePWmax.addEventListener("change", berechnen);
+            return _UI.createTable([wurfrechner]);
+        }
+
+        static createNummerneingabe() {
+            const result = document.createElement("input");
+            result.type = "text";
+            result.size = 4;
+            result.maxLength = 3;
+            return result;
         }
 
         static getHTMLFromError(error) {
@@ -1739,7 +1796,7 @@
         static #inited = false;
 
         static async init() {
-            if(this.#inited) return;
+            if (this.#inited) return;
             this.#inited = true;
             const adjust = function (objStore) {
                 let resultGetValue = objStore.getValue;

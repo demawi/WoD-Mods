@@ -95,16 +95,19 @@
             missingSpanOverall.style.top = "0px";
             missingSpanOverall.style.right = "0px";
             let needRecheck = false;
+            const isIrrelevantElement = function (elem) {
+                return elem.className && elem.className.includes("tooltip") || elem.id && elem.id.includes("progressBar");
+            }
             const observer = new MutationObserver(mutationList => {
                 if (mutationList) {
-                    let onlyTooltip = true;
+                    let onlyIrrelevantElements = true;
                     for (const mutation of mutationList) {
-                        if (!mutation.className || !mutation.className.includes("tooltip")) {
-                            onlyTooltip = false;
+                        if (!isIrrelevantElement(mutation.target)) {
+                            onlyIrrelevantElements = false;
                             break;
                         }
                     }
-                    if (onlyTooltip) return;
+                    if (onlyIrrelevantElements) return;
                 }
                 needRecheck = true;
             });
@@ -140,8 +143,8 @@
                 needRecheck = false;
             }
 
-            setInterval(function() {
-                if(needRecheck) checkSiteForItems();
+            setInterval(function () {
+                if (needRecheck) checkSiteForItems();
             }, 1000);
             await checkSiteForItems();
 
