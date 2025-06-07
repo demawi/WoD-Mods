@@ -1189,7 +1189,7 @@ class demawiRepository {
          */
         static ensureIframeWrap() {
             if (window.top === window && !window.opener) {
-                if(!document.querySelector("#iframeWrap")) this.#ensureIframeWrapDoIt();
+                if (!document.querySelector("#iframeWrap")) this.#ensureIframeWrapDoIt();
                 return true;
             }
         }
@@ -1482,24 +1482,55 @@ class demawiRepository {
         }
     }
 
-    static Settings = class {
-        static #cache = {};
-
-        static async get(settingsDef, fresh) {
-            let modCache;
-            const modName = settingsDef.modName;
-            if (fresh || !(modCache = this.#cache[modName])) {
-                modCache = this.#cache[modName] = await _.WoDStorages.getSettingsDb().getValue(modName) || {name: modName};
-                for (const [key, value] of Object.entries(settingsDef.defaultSettings || {})) {
-                    if (!(key in modCache)) modCache[key] = value;
-                }
-                await _.WoDStorages.getSettingsDb().setValue(modCache);
-            }
-            return modCache;
+    static Settings = class Settings {
+        static async getHandler(settingsDef) {
+            const settingsHandler = new _.Settings(settingsDef);
+            await settingsHandler.load();
+            return settingsHandler;
         }
 
-        static async save(settingsDef) {
-            await _.WoDStorages.getSettingsDb().setValue(await this.get(settingsDef));
+        settingsDef;
+        data;
+
+        constructor(settingsDef) {
+            this.settingsDef = settingsDef;
+        }
+
+        get(id) {
+            this.#ensureId(id);
+            return this.data[id];
+        }
+
+        set(id, value) {
+            this.#ensureId(id);
+            this.data[id] = value;
+        }
+
+        #ensureId(id) {
+            const value = this.settingsDef.defaultSettings[id];
+            if (value === undefined || value === null) {
+                const msg = "[" + this.settingsDef.modName + "] hat Setting '" + id + "' nicht definiert!";
+                console.error(msg, this.settingsDef);
+                throw new Error(msg);
+            }
+        }
+
+        async load() {
+            const modName = this.settingsDef.modName;
+            this.data = await _.WoDStorages.getSettingsDb().getValue(modName) || {name: modName};
+            let changed = false;
+            for (const [key, value] of Object.entries(this.settingsDef.defaultSettings || {})) {
+                if (!(key in this.data)) {
+                    this.data[key] = value;
+                    changed = true;
+                }
+            }
+            // TODO: überprüfen, ob ggf. überflüssige Werte vorhanden sind!?
+            if (changed) this.save();
+        }
+
+        async save() {
+            await _.WoDStorages.getSettingsDb().setValue(this.data);
         }
 
     }
@@ -2164,6 +2195,19 @@ class demawiRepository {
             return await _.WoDWorldDb.getCurrentWorldSeasonNr(doc);
         }
 
+        /**
+         * "gear": Ausrüstung
+         * "groupcellar": Schatzkammer
+         * "groupcellar_2": Gruppenlager
+         * "cellar": Keller
+         * "": Lager
+         */
+        static getItemsView() {
+            let view = new URL(window.location.href).searchParams.get("view");
+            if (!view) view = this.getValueFromMainForm("view");
+            return view;
+        }
+
         static getAllHeroIds(node) {
             node = node || document;
             let result = {};
@@ -2725,17 +2769,17 @@ class demawiRepository {
             result.type = "text/css";
             result.href = url;
             const idx = url.indexOf("?");
-            if (idx) url = url.substring(0, idx);
+            if (idx > -1) url = url.substring(0, idx);
             this.#alreadyLoaded[url] = result;
             document.head.append(result);
         }
 
         static removeCSS(url) {
             const idx = url.indexOf("?");
-            if (idx) url = url.substring(0, idx);
+            if (idx > -1) url = url.substring(0, idx);
             const loaded = this.#alreadyLoaded[url];
             if (loaded) {
-                document.head.remove(loaded);
+                document.head.removeChild(loaded);
                 delete this.#alreadyLoaded[url];
                 return true;
             }
@@ -2914,6 +2958,127 @@ class demawiRepository {
         }
     }
 
+    static Dices = class Dices {
+
+        /**
+         * Ermittelt aus Avg,Min,Max Würfen die Basis und den Mittleren Wurf und erstellt damit die Wahrscheinlichkeit.
+         */
+        static winsOver2(avgAW, minAW, maxAW, avgPW, minPW, maxPW) {
+            const [awBasis, aw] = this.getValues(avgAW, minAW, maxAW);
+            const [pwBasis, pw] = this.getValues(avgPW, minPW, maxPW);
+            return this.winsOver(aw, awBasis, pw, pwBasis);
+        }
+
+        static winsOver(aw, basisAW, pw, basisPW) {
+            const [distr1, dices1] = this.distr(aw, basisAW);
+            const [distr2, dices2] = this.distr(pw, basisPW);
+            console.log(this.toString(dices1) + " > " + this.toString(dices2));
+            return this.greaterThan(distr1, distr2);
+        }
+
+        /**
+         * In einem Format, welches auch direkt für anydice.com verwendet werden kann.
+         */
+        static toString(dices) {
+            let result = "";
+            for (const curDices of dices) {
+                if (result.length > 0) result += " + ";
+                result += curDices[0] + "d" + curDices[1] + "-" + curDices[0];
+            }
+            return result;
+        }
+
+        /**
+         * Versucht aus übergebenen Mittel-, Minimal- und Maximalwert den Offset und den Würfelmittelwert zu bestimmen.
+         */
+        static getValues(avgAW, minAW, maxAW) {
+            avgAW = Math.round(avgAW);
+            minAW = Math.round(minAW);
+            maxAW = Math.round(maxAW);
+            const val1 = avgAW - minAW;
+            const val2 = maxAW - avgAW;
+            const basis = avgAW - Math.max(val1, val2);
+            return [basis, Math.round((avgAW - basis))];
+        }
+
+        /**
+         * Holt sich für den Mittelwert die verwendeten WoD-Würfel und erstellt darüber kombinatorisch die genaue Verteilung für die jeweiligen erwürfelbaren Zahlen.
+         * Da für WoD berechnet wird, werden hier standardmäßig XdY-X Würfel verwendet, also mit 0 als Minimum.
+         * Die Distribution selbst ist dabei eine Object-Map von Zahl -> Anzahl der Kombinationen.
+         * Als zweites Objekt im Rückgabe-Array werden die verwendeten Würfel zurückgegeben.
+         */
+        static distr(mittelwert, offset) {
+            offset = offset || 0;
+            const dices = this.getWoDDices(mittelwert);
+            console.log("Avg: " + (offset + mittelwert) + " Min: " + offset + " Max: " + (offset + dices.map(dicesX => dicesX[0] * (dicesX[1] - 1)).reduce((a, b) => a + b, 0)) + " Wurf: " + mittelwert + " Dices: " + this.toString(dices));
+            let result = {[offset]: 0};
+            for (const curDices of dices) {
+                for (let i = 0, l = curDices[0]; i < l; i++) { // W15 = 0-14, daher von 0 bis i<l
+                    result = this.#addTo(result, curDices[1]);
+                }
+            }
+            return [result, dices];
+        }
+
+        static #addTo(distr, dX) {
+            const newResult = {};
+            const addToResult = function (newValue, oldCount) {
+                const myValue = newResult[newValue] || 0;
+                newResult[newValue] = myValue + oldCount;
+            }
+            for (let i = 0; i < dX; i++) {
+                for (const [oldValue, oldCount] of Object.entries(distr)) {
+                    addToResult(Number(oldValue) + i, oldCount || 1);
+                }
+            }
+            return newResult;
+        }
+
+        /**
+         * Liefert die Würfel die für den entsprechenden Mittelwert verwendet werden.
+         */
+        static getWoDDices(mittelwert) {
+            let countNo1 = 0;
+            let wX = 0;
+            let wRest = 0;
+
+            const wXMittelwert = Math.floor(mittelwert / 6);
+            if (wXMittelwert <= 7) {
+                wX = 15;
+                countNo1 = Math.floor(mittelwert / 7);
+            } else {
+                countNo1 = 6;
+                wX = Math.floor(mittelwert / countNo1) * 2 + 1;
+            }
+            wRest = (mittelwert - countNo1 * Math.floor(wX / 2)) * 2;
+            if (wRest > 0) wRest++;
+            const dices = [];
+            if (countNo1 > 0) dices.push([countNo1, wX]);
+            if (wRest > 0) dices.push([1, wRest]);
+            return dices;
+        }
+
+        /**
+         * Liefert die Wahrscheinlichkeit, mit der 'distr1' einen höheren Wurf als 'distr2' landet.
+         */
+        static greaterThan(distr1, distr2) {
+            let wins = 0;
+            let loses = 0;
+            for (const [key1, value1] of Object.entries(distr1)) {
+                const key1Value = Number(key1);
+                let curWins = 0;
+                let curLoses = 0;
+                for (const [key2, value2] of Object.entries(distr2)) {
+                    const key2Value = Number(key2);
+                    if (key1Value > key2Value) curWins += value2;
+                    else curLoses += value2;
+                }
+                wins += value1 * curWins;
+                loses += value1 * curLoses;
+            }
+            return wins / (wins + loses);
+        }
+    }
     /**
      * Speichert zusätzlich Klasseninformationen von Objekten. Dafür wird ein zusätzliches "_class"-Attribut zu den Objekten gespeichert.
      * Beim Laden werden die Objekte entsprechend wieder hergestellt.
@@ -4482,7 +4647,7 @@ class demawiRepository {
     }
 
     static startMod(zusatz) {
-        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")"+(zusatz?" "+zusatz:""));
+        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (zusatz ? " " + zusatz : ""));
     }
 
     static getModName() {
@@ -4557,3 +4722,6 @@ Opt = function (value) {
 
 // nur zur internen Nutzung
 const _ = demawiRepository;
+unsafeWindow.demawiRepository = (function () {
+    return demawiRepository;
+})();

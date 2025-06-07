@@ -65,6 +65,7 @@
             const page = _util.getWindowPage();
             demawiRepository.startMod("Page: '" + page + "'");
             await _WoDWorldDb.placeSeasonElem();
+            await MySettings.getFresh();
 
             switch (page) {
                 case "tombola.php":
@@ -75,8 +76,7 @@
                     await TombolaLoot.onNewsPage();
                     break;
                 case "items.php":
-                    let view = new URL(window.location.href).searchParams.get("view");
-                    if (!view) view = _WoD.getValueFromMainForm("view");
+                    const view = _WoD.getItemsView();
                     if (view === "gear") await Ausruestung.start();
                     break;
                 case "dungeon.php":
@@ -192,7 +192,7 @@
                 const memberList = _WoDParser.parseKampfberichtGegenstaende();
                 const reportLoot = await MyStorage.putToLoot(reportSource.reportId, memberList);
                 await MyStorage.submitLoot(reportMeta, reportLoot);
-                if ((await MySettings.get()).lootSummary) await ItemLootSummary.einblenden(reportLoot, reportMeta);
+                if ((await MySettings.get()).get(MySettings.SETTING.LOOT_SUMMARY)) await ItemLootSummary.einblenden(reportLoot, reportMeta);
             } else if (title.textContent.trim().startsWith("Kampfbericht")) {
                 const form = _WoD.getMainForm();
                 const levelNr = _WoD.isSchlacht() ? 1 : form.current_level.value;
@@ -306,21 +306,43 @@
             console.log("Start migration finished!");
         }
 
+        static async resyncFavorites() {
+            // Erst alle löschen dann neu belegen
+            await MyStorage.reportArchive.getAll(false, async function (report) {
+                delete report.favAuto;
+                if (report.fav) {
+                    report.fav = {
+                        [AutoFavorit.TAG_MANUELL]: 1, // manuell
+                    }
+                } else {
+                    delete report.fav;
+                }
+                await MyStorage.reportArchive.setValue(report);
+            });
+            await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL);
+            await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP);
+            //this.checkMaintenance();
+        }
+
         /**
          * Location.versions müssten auch zurückgesetzt werden
          */
         static async resyncVersions() {
             console.log("resyncVersions...");
+            const locations = {};
             for (const location of await MyStorage.location.getAll()) {
+                locations[location.name] = location.versions;
                 location.versions = [];
                 await MyStorage.location.setValue(location);
             }
             await MyStorage.reportArchive.getAll(undefined, async function (report) {
                 console.log("resyncVersions: " + report.reportId);
+                let storedCompleteVersionId;
+                if (report.loc.v) storedCompleteVersionId = locations[report.loc.name][report.loc.v - 1];
                 delete report.loc.v;
                 delete report.loc.v_;
                 delete report.versions;
-                await Report.getVersion(report);
+                await Report.getVersion(report, undefined, storedCompleteVersionId);
                 await MyStorage.reportArchive.setValue(report);
             });
             console.log("resyncVersions finished!");
@@ -330,30 +352,34 @@
             const settings = await MySettings.get();
 
             // Zuerst Auto-Favoriten erst dann Löschen
-            if (settings.updateAutoFavoritAll) {
-                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL, !settings.autoFavoritAll);
-                delete settings.updateAutoFavoritAll;
-                await MySettings.save();
+            if (settings[MySettings.SETTING.AUTO_FAVORIT_ALL_CHECK]) {
+                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL, !settings.get(MySettings.SETTING.AUTO_FAVORIT_ALL));
+                settings.set(MySettings.SETTING.AUTO_FAVORIT_ALL_CHECK, false);
+                await settings.save();
             }
             if (false && settings.updateAutoFavoritAllSeason) {
                 //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL_SEASON, !settings.autoFavoritAllSeason);
                 delete settings.updateAutoFavoritAllSeason;
-                await MySettings.save();
+                await settings.save();
             }
-            if (settings.updateAutoFavoritGroup) {
-                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP, !settings.autoFavoritGroup);
-                delete settings.updateAutoFavoritGroup;
-                await MySettings.save();
+            if (settings[MySettings.SETTING.AUTO_FAVORIT_GROUP_CHECK]) {
+                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP, !settings.get(MySettings.SETTING.AUTO_FAVORIT_GROUP));
+                settings.set(MySettings.SETTING.AUTO_FAVORIT_GROUP_CHECK, false);
+                await settings.save();
             }
             if (false && settings.updateAutoFavoritGroupSeason) {
                 //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP_SEASON, !settings.autoFavoritGroupSeason);
                 delete settings.updateAutoFavoritGroupSeason;
-                await MySettings.save();
+                await settings.save();
             }
-            if (settings.autoLoeschen && !settings.autoLoeschenDate || new Date(settings.autoLoeschenDate) < new Date().setDate(new Date().getDate() - 1)) {
-                console.log("Auto Löschen wird ausgeführt!");
-                settings.autoLoeschenDate = new Date().getTime();
-                await MySettings.save();
+
+            if (settings.get(MySettings.SETTING.AUTO_LOESCHEN)) {
+                // Täglich einmal
+                if (!settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK) || new Date(settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK)) < new Date().setDate(new Date().getDate() - 1)) {
+                    console.log("Auto Löschen wird ausgeführt!");
+                    settings.set(MySettings.SETTING.AUTO_LOESCHEN_CHECK, new Date().getTime());
+                    await settings.save();
+                }
             }
         }
 
@@ -435,6 +461,17 @@
             //await this.resyncSourcesToReports();
             //await this.syncSuccessInformation();
             //await this.resyncVersions();
+            //await this.resyncFavorites();
+
+            if (false) {
+                console.log("CCCCCCCC1 ", Location.isMatching(["abc", null], ["abc", "def", "acd"], true, undefined, true));
+                console.log("CCCCCCCC2 ", Location.isMatching(["abc", "def"], ["abc", "def", "acd"], true, undefined, true));
+                console.log("CCCCCCCC3 ", Location.isMatching(["abc", "def"], ["abc", "def", null], true, undefined, true));
+                console.log("CCCCCCCC4 ", Location.isMatching(["abc", null], ["abc", "def", null], true, undefined, true));
+                console.log("CCCCCCCC5 ", Location.isMatching(["abc", "def", null, null], ["abc", "def", null, null, null, null], true, undefined, true));
+                console.log("CCCCCCCC6 ", Location.isMatching(["abc", "def", "kae", null], ["abc", "def", null], true, undefined, true));
+            }
+
             //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
             //await MyStorage.indexedDb.cloneTo("WodDBMain_Backup");
             //await (await MyStorage.indexedDbLocal.getObjectStorageChecked("reportArchive")).getAll(false, async function(cur) {
@@ -742,7 +779,7 @@
                     let updateLoeschenButton;
                     if (isArchiv) {
                         const updateFavorit = function (curReportMeta) {
-                            const istFavorit = curReportMeta.fav;
+                            const istFavorit = Report.isFavorit(curReportMeta, AutoFavorit.TAG_MANUELL);
                             if (istFavorit) {
                                 favoritButton.innerHTML = "★";
                                 favoritButton.style.color = "yellow";
@@ -753,7 +790,11 @@
                         }
                         const favoritButton = _UI.createButton("", async function () {
                             const curReportMeta = await MyStorage.reportArchive.getValue(reportId);
-                            curReportMeta.fav = !curReportMeta.fav;
+                            if (Report.isFavorit(curReportMeta, AutoFavorit.TAG_MANUELL)) {
+                                Report.deleteFavorit(curReportMeta, AutoFavorit.TAG_MANUELL);
+                            } else {
+                                Report.addFavorit(curReportMeta, AutoFavorit.TAG_MANUELL);
+                            }
                             updateFavorit(curReportMeta);
                             await MyStorage.reportArchive.setValue(curReportMeta);
                             await updateLoeschenButton(curReportMeta);
@@ -795,13 +836,12 @@
                         archiviertAktionenTD.append(deleteButton);
                         updateLoeschenButton = async function (curReportMeta) {
                             curReportMeta = curReportMeta || await MyStorage.reportArchive.getValue(reportId);
-                            const isBlocked = curReportMeta.fav || (curReportMeta.favAuto && curReportMeta.favAuto.length > 0);
+                            const isBlocked = curReportMeta.fav;
                             if (isBlocked) {
                                 deleteButton.style.visibility = "hidden";
                             } else {
                                 deleteButton.style.visibility = "";
                             }
-                            curReportMeta.fav = !curReportMeta.fav;
                         }
                         await updateLoeschenButton(reportMeta);
                     }
@@ -825,7 +865,7 @@
                         archiviertTD.style.whiteSpace = "nowrap";
                         archiviertTD.style.position = "relative";
                         for (const curTag of [AutoFavorit.TAG_ALL, AutoFavorit.TAG_GROUP, AutoFavorit.TAG_ALL_SEASON, AutoFavorit.TAG_GROUP_SEASON]) {
-                            if (reportMeta.favAuto && reportMeta.favAuto.includes(curTag)) {
+                            if (reportMeta.fav && reportMeta.fav[curTag]) {
                                 const favoritAuto = document.createElement("span");
                                 favoritAuto.innerHTML = "★";
                                 favoritAuto.title = AutoFavorit.TAG_DESC[curTag];
@@ -956,25 +996,23 @@
 
             const autoLoeschenTageLabel = document.createElement("span");
             autoLoeschenTageLabel.innerHTML = "Anzahl Tage:";
-            const autoLoeschenTage = this.createTextBox(() => {
-                    return settings.autoLoeschenTage || 14;
-                },
+            const autoLoeschenTage = this.createTextBox(() => settings[MySettings.SETTING.AUTO_LOESCHEN_TAGE],
                 async function (value) {
                     try {
                         value = Math.round(Number(value));
                     } catch (e) {
                     }
-                    settings.autoLoeschenTage = value;
+                    settings[MySettings.SETTING.AUTO_LOESCHEN_TAGE] = value;
                     await MySettings.save();
                 });
             autoLoeschenTage.size = 4;
 
             let updateVisibility;
-            const autoLoeschen = this.createCheckBox(() => settings.autoLoeschen,
+            const autoLoeschen = this.createCheckBox(() => settings[MySettings.SETTING.AUTO_LOESCHEN],
                 async function (value) {
-                    settings.autoLoeschen = value;
+                    settings[MySettings.SETTING.AUTO_LOESCHEN] = value;
                     if (!value) {
-                        delete settings.autoLoeschenDate;
+                        delete settings[MySettings.SETTING.AUTO_LOESCHEN_CHECK];
                     }
                     await MySettings.save();
                     updateVisibility();
@@ -1047,36 +1085,37 @@
             const autoLoeschenFavoritLabelAll = document.createElement("span");
             autoLoeschenFavoritLabelAll.innerHTML = "Auto-Favoriten <b>gruppenunabhängig</b> markieren:";
             autoLoeschenFavoritLabelAll.title = "Unabhängig von einer Gruppe wird jeweils ein Dungeon markiert.";
-            console.log("settings.autoFavoritAll", settings.autoFavoritAll);
-            const autoLoeschenFavoritAll = this.createCheckBox(() => settings.autoFavoritAll,
+
+            const autoLoeschenFavoritAll = this.createCheckBox(() => settings.get(MySettings.SETTING.AUTO_FAVORIT_ALL),
                 async function (value) {
-                    settings.autoFavoritAll = value;
-                    settings.updateAutoFavoritAll = true;
-                    await MySettings.save();
+                    settings.set(MySettings.SETTING.AUTO_FAVORIT_ALL, value);
+                    settings.set(MySettings.SETTING.AUTO_FAVORIT_ALL_CHECK, true);
+                    await settings.save();
                 });
             autoLoeschenFavoritAll.title = "Es wird generell nur je ein Dungeon markiert.";
-            const autoLoeschenFavoritAllSeason = this.createCheckBox(() => settings.autoFavoritAllSeason,
+
+            const autoLoeschenFavoritAllSeason = this.createCheckBox(() => settings.get(MySettings.SETTING.AUTO_FAVORIT_All_SEASON),
                 async function (value) {
-                    settings.autoFavoritAllSeason = value;
-                    settings.updateAutoFavoritAllSeason = true;
-                    await MySettings.save();
+                    settings.set(MySettings.SETTING.AUTO_FAVORIT_ALL_SEASON, value);
+                    settings.set(MySettings.SETTING.AUTO_FAVORIT_ALL_SEASON_CHECK, true);
+                    await settings.save();
                 });
             autoLoeschenFavoritAllSeason.title = "Pro Saison wird genau je ein Dungeon markiert.";
 
             const autoLoeschenFavoritLabelGroup = document.createElement("span");
             autoLoeschenFavoritLabelGroup.innerHTML = "Auto-Favoriten <b>pro Gruppe</b> markieren:";
             autoLoeschenFavoritLabelGroup.title = "Für jede Gruppe wird je ein Dungeon markiert.";
-            const autoLoeschenFavoritGroup = this.createCheckBox(() => settings.autoFavoritGroup,
+            const autoLoeschenFavoritGroup = this.createCheckBox(() => settings.get(MySettings.SETTING.AUTO_FAVORIT_GROUP),
                 async function (value) {
-                    settings.autoFavoritGroup = value;
-                    settings.updateAutoFavoritGroup = true;
-                    await MySettings.save();
+                    settings.set(MySettings.SETTING.AUTO_FAVORIT_GROUP, value);
+                    settings.set(MySettings.SETTING.AUTO_FAVORIT_GROUP_CHECK, true);
+                    await settings.save();
                 });
             autoLoeschenFavoritGroup.title = "Für jede Gruppe wird generell nur je ein Dungeon markiert.";
-            const autoLoeschenFavoritGroupSeason = this.createCheckBox(() => settings.autoFavoritGroupSeason,
+            const autoLoeschenFavoritGroupSeason = this.createCheckBox(() => settings.get(MySettings.SETTING_AUTO_FAVORIT_GROUP_SEASON),
                 async function (value) {
-                    settings.autoFavoritGroupSeason = value;
-                    settings.updateAutoFavoritGroupSeason = true;
+                    settings.set(MySettings.SETTING.SETTING_AUTO_FAVORIT_GROUP_SEASON, value);
+                    settings.set(MySettings.SETTING.SETTING_AUTO_FAVORIT_GROUP_SEASON_CHECK, true);
                     await MySettings.save();
                 });
             autoLoeschenFavoritGroupSeason.title = "Für jede Gruppe in jeder Saison wird je ein Dungeon markiert.";
@@ -1916,9 +1955,9 @@
         static isValidFavorit(report) {
             const favoritSelector = this.searchQuery.nurFavoriten;
             if (favoritSelector.length === 0) return true;
-            if (favoritSelector.includes(FilterQuery.FAVORIT_AUTO_GROUP) && !(report.favAuto && report.favAuto.includes(AutoFavorit.TAG_GROUP))) return false;
-            if (favoritSelector.includes(FilterQuery.FAVORIT_AUTO_ALL) && !(report.favAuto && report.favAuto.includes(AutoFavorit.TAG_ALL))) return false;
-            if (favoritSelector.includes(FilterQuery.FAVORIT_MANUELL) && !report.fav) return false;
+            if (favoritSelector.includes(FilterQuery.FAVORIT_AUTO_GROUP) && !(report.fav && report.fav[AutoFavorit.TAG_GROUP])) return false;
+            if (favoritSelector.includes(FilterQuery.FAVORIT_AUTO_ALL) && !(report.fav && report.fav[AutoFavorit.TAG_ALL])) return false;
+            if (favoritSelector.includes(FilterQuery.FAVORIT_MANUELL) && !(report.fav && report.fav[AutoFavorit.TAG_MANUELL])) return false;
             return true;
         }
 
@@ -1976,7 +2015,7 @@
 
         static async loadArchivView() {
             this.searchQuery = new FilterQuery();
-            const maxResults = (await MySettings.get()).maxResults;
+            const maxResults = (await MySettings.get()).get(MySettings.SETTING.MAX_RESULTS);
             if (maxResults !== undefined) {
                 this.searchQuery.maxResults = maxResults;
             } else {
@@ -1992,6 +2031,7 @@
         static async showArchiv() {
             ArchivView.anchor.removeChild(ArchivView.anchor.children[0]);
             ArchivView.anchor.append(this.archivView);
+            _Libs.removeCSS("report.css");
             if (this.scrollY) window.scroll(0, this.scrollY);
         }
 
@@ -2137,8 +2177,8 @@
                     }
                     ArchivSearch.searchQuery.maxResults = newValue;
                     const settings = await MySettings.get();
-                    settings.maxResults = newValue;
-                    await MySettings.save();
+                    settings.set(MySettings.SETTING.MAX_RESULTS, newValue);
+                    await settings.save();
                     await ArchivSearch.updateSearch();
                 } catch (e) { // reset
                     maxResultsInput.value = ArchivSearch.searchQuery.maxResults;
@@ -2178,6 +2218,7 @@
         }
 
         static async showPage(reportSource, reportSiteHTML, pageType) {
+            // Wir kommen von der Übersichtsseite
             if (ArchivView.anchor.children[0] === this.archivView) {
                 this.scrollY = window.scrollY;
             }
@@ -2433,6 +2474,24 @@
 
     class Report {
 
+        static addFavorit(report, tagName) {
+            if (!report.fav) report.fav = {};
+            report.fav[tagName] = 1;
+        }
+
+        static deleteFavorit(report, tagName) {
+            if (report.fav) {
+                delete report.fav[tagName];
+                if (Object.keys(report.fav).length === 0) {
+                    delete report.fav;
+                }
+            }
+        }
+
+        static isFavorit(report, tagName) {
+            return report.fav && report.fav[tagName];
+        }
+
         /**
          * @return 1: für Erfolg, 0: für Teilerfolg, -1: für Misserfolg
          */
@@ -2509,8 +2568,8 @@
             return fehlend;
         }
 
-        static async getVersion(report, reportSourceOpt) {
-            return (await Location.getVersions(report, reportSourceOpt)).join(" | ");
+        static async getVersion(report, reportSourceOpt, storedCompleteVersionId) {
+            return (await Location.getVersions(report, reportSourceOpt, storedCompleteVersionId)).join(" | ");
         }
 
         static async deleteSources(reportId) {
@@ -2518,7 +2577,7 @@
             const report = await MyStorage.reportArchive.getValue(reportId);
             delete report.srcs;
             await MyStorage.reportArchive.setValue(report);
-            if (report.favAuto) await AutoFavorit.recheckAutoFavoritenForReport(report);
+            if (report.fav) await AutoFavorit.recheckAutoFavoritenForReport(report);
         }
 
     }
@@ -2630,10 +2689,11 @@
 
     /**
      * Markiert entsprechende reports mit
-     * .favAuto = ["group"]
+     * .fav = ["group"]
      */
     class AutoFavorit {
 
+        static TAG_MANUELL = "m";
         static TAG_GROUP = "group";
         static TAG_ALL = "all";
         static TAG_GROUP_SEASON = "groupSeason";
@@ -2683,8 +2743,9 @@
             if (specificTagName) { // Ein bestimmter AutoFavorit soll nochmal überprüft werden. Z.B. bei einer Änderung der Einstellung.
                 await this.#checkAutoFavoritenIntern(reports, specificTagName, deactivated);
             } else { // Ein Report hat sich geändert, nur wenn AutoFavoriten aktiviert sind müssen wir hier auch checken
-                if ((await MySettings.get()).autoFavoritGroup) await this.#checkAutoFavoritenIntern(reports, AutoFavorit.TAG_GROUP);
-                if ((await MySettings.get()).autoFavoritAll) await this.#checkAutoFavoritenIntern(reports, AutoFavorit.TAG_ALL);
+                const settings = await MySettings.get();
+                if (settings.get(MySettings.SETTING.AUTO_FAVORIT_GROUP)) await this.#checkAutoFavoritenIntern(reports, AutoFavorit.TAG_GROUP);
+                if (settings.get(MySettings.SETTING.AUTO_FAVORIT_ALL)) await this.#checkAutoFavoritenIntern(reports, AutoFavorit.TAG_ALL);
             }
         }
 
@@ -2718,25 +2779,25 @@
          * @param reports
          * @param tagName autoFavorit-tagName
          * @param asyncMapperMethod (report) -> Identifier
+         * @param deactivated Lösche einfach alle Favoriten-Tags
          */
         static async #checkAutoFavoritenIntern(reports, tagName, deactivated) {
             if (deactivated) {
                 console.log("Lösche alle Favoriten Tags für '" + tagName + "'", reports.length);
                 for (const report of reports) {
-                    if (report.favAuto && report.favAuto.includes(tagName)) {
-                        _util.arrayRemove(report.favAuto, tagName);
-                        if (report.favAuto.length === 0) delete report.favAuto;
+                    if (report.fav && report.fav[tagName]) {
+                        Report.deleteFavorit(report, tagName);
                         await MyStorage.reportArchive.setValue(report);
                     }
                 }
                 return;
             }
 
-            const asyncMapperMethod = this.#domains[tagName];
+            const asyncMapKeyMethod = this.#domains[tagName];
             const favorites = {};
             const _ids = {};
             for (const report of reports) {
-                const ids = await asyncMapperMethod(report);
+                const ids = await asyncMapKeyMethod(report);
                 _ids[report.reportId] = ids;
                 if (!Report.isVollstaendigLevel(report)) continue; // nur Reports, wo alle erreichten Level gespeichert wurden
                 if (!ids) continue;
@@ -2759,14 +2820,12 @@
                     }
                 }
 
-                const istAutoFavorit = !!(report.favAuto && report.favAuto.includes(tagName));
+                const istAutoFavorit = !!(report.fav && report.fav[tagName]);
                 if (istAutoFavorit !== sollAutoFavorit) {
                     if (sollAutoFavorit) {
-                        report.favAuto = report.favAuto || [];
-                        report.favAuto.push(tagName);
+                        Report.addFavorit(report, tagName);
                     } else {
-                        _util.arrayRemove(report.favAuto, tagName);
-                        if (report.favAuto.length === 0) delete report.favAuto;
+                        Report.deleteFavorit(report, tagName);
                     }
                     await MyStorage.reportArchive.setValue(report);
                 }
@@ -2844,25 +2903,27 @@
                 let nix = 0;
                 for (let i = 0, l = versionId.length; i < l; i++) {
                     let cur = versionId[i];
-                    if(cur) {
+                    if (cur) {
                         if (cur.includes("- gelöst")) geloest++;
                         else if (cur.includes("- Interlude")) interlude++;
                         else nix++;
                         cur = cur.replace(" - gelöst", "");
                         versionId[i] = cur;
-                    } else nix++;
-
+                    } else {
+                        nix++;
+                    }
                 }
                 if (nix) { // kein gelöst, kein Interlude, d.h. man hätte weiter kommen können
                     versionId.push(undefined);
                     isComplete = false;
                 }
+                console.log("Atrea", report, versionId, isComplete);
             }
             //console.log("Created VersionId", versionId, isComplete);
             return [versionId, isComplete];
         }
 
-        static async getVersions(report, reportSourceOpt) {
+        static async getVersions(report, reportSourceOpt, storedCompleteVersionId) {
             const loc = report.loc;
             if (loc.v) return [loc.v];
             if (loc.schlacht) return [1];
@@ -2876,6 +2937,9 @@
                 if (loc.v_.cnt === versionCount) return loc.v_.vs; // es ist keine weitere Version hinzugekommen
                 versionId = loc.v_.vId;
                 isComplete = false;
+            } else if (storedCompleteVersionId) {
+                versionId = storedCompleteVersionId;
+                isComplete = true;
             } else {
                 const reportSource = reportSourceOpt || await MyStorage.reportArchiveSources.getValue(report.reportId);
                 if (!reportSource) return [];
@@ -2903,12 +2967,13 @@
         }
 
         static async getMatchingVersions(locationName, versionId) {
-            const debug = locationName === "ddDas Geheimnis von Semarkesh";
+            const debug = locationName === "aAtreanijsh";
+            const flexibleLength = locationName === "Atreanijsh";
             const location = await MyStorage.location.getValue(locationName) || {name: locationName};
             const versions = location.versions || (location.versions = []);
             const result = [];
             let needUpdate = false;
-            for (const [curMatchingIndex, curNeedUpdate] of this.#findMatchingVersions(versions, versionId, debug)) {
+            for (const [curMatchingIndex, curNeedUpdate] of this.#findMatchingVersions(versions, versionId, flexibleLength, debug)) {
                 needUpdate = needUpdate || curNeedUpdate;
                 result.push(curMatchingIndex + 1);
             }
@@ -2922,11 +2987,11 @@
             return [versions.length];
         }
 
-        static #findMatchingVersions(versions, versionId, debug) {
+        static #findMatchingVersions(versions, versionId, flexibleLength, debug) {
             const result = [];
             for (let i = 0, l = versions.length; i < l; i++) {
                 const cur = versions[i];
-                const matches = this.#isMatching(cur, versionId, undefined, debug);
+                const matches = this.isMatching(cur, versionId, flexibleLength, undefined, debug);
                 if (debug) console.log("isMatching: ", matches, cur, versionId);
                 if (matches) { // wenn die Version weiter spezifiziert definiert wurde
                     if (typeof matches === "object") {
@@ -2940,8 +3005,8 @@
             return result;
         }
 
-        static #isMatching(versionId1, versionId2, mergedVersionIdArray, debug) {
-            if (versionId1.length !== versionId2.length) return false;
+        static isMatching(versionId1, versionId2, flexibleLength, mergedVersionIdArray, debug) {
+            if (!flexibleLength && versionId1.length !== versionId2.length) return false;
             let length = versionId1.length;
             if (versionId2.length > length) length = versionId2.length;
             let last1 = null;
@@ -2950,6 +3015,7 @@
             for (let i = 0; i < length; i++) {
                 const value1 = this.#getIt(versionId1, i, last1);
                 const value2 = this.#getIt(versionId2, i, last2);
+                //console.log("Prüfe: "+i+" '"+value1+"' === '"+value2+"'")
                 if (value1 === false || value2 === false) return false;
                 if (value1 !== null && value2 !== null && value1 !== value2) return false;
                 last1 = value1;
@@ -2963,7 +3029,7 @@
             }
             if (changed && !mergedVersionIdArray) {
                 // nochmal Aufrufen um diesmal auch den Spezifikations-Array mit aufzubauen, der im Normalfall nicht angelegt wird
-                mergedVersionIdArray = this.#isMatching(versionId1, versionId2, []);
+                mergedVersionIdArray = this.isMatching(versionId1, versionId2, flexibleLength, []);
             }
             return changed ? mergedVersionIdArray : true;
         }
@@ -2980,12 +3046,26 @@
     }
 
     class MySettings {
+        static SETTING = {
+            AUTO_LOESCHEN: "autoLoeschen",
+            AUTO_LOESCHEN_TAGE: "autoLoeschenTage",
+            AUTO_LOESCHEN_CHECK: "autoLoeschenCheck",
+            AUTO_FAVORIT_ALL: "autoFavoritAll",
+            AUTO_FAVORIT_ALL_CHECK: "autoFavoritAllCheck",
+            AUTO_FAVORIT_GROUP: "autoFavoritGroup",
+            AUTO_FAVORIT_GROUP_CHECK: "autoFavoritGroupCheck",
+            MAX_RESULTS: "maxResults",
+            LOOT_SUMMARY: "lootSummary",
+        }
         static SEASONS_ACTIVATED = false;
         static #settingsDef = {
             modName: Mod.modname,
             defaultSettings: {
                 autoLoeschen: false,
                 autoLoeschenTage: 14,
+                autoFavoritAllCheck: false,
+                autoFavoritGroupCheck: false,
+                autoLoeschenCheck: new Date().getTime(),
                 autoFavoritAll: true,
                 autoFavoritGroup: true,
                 maxResults: 100,
@@ -2993,13 +3073,16 @@
             },
         }
 
-        static async get(fresh) {
-            return await _Settings.get(this.#settingsDef, fresh);
+        static #settingsHandler;
+
+        static async get() {
+            return this.#settingsHandler;
         }
 
-        static async save() {
-            await _Settings.save(this.#settingsDef);
+        static async getFresh() {
+            return this.#settingsHandler = await _Settings.getHandler(this.#settingsDef);
         }
+
     }
 
     class MyStorage {
