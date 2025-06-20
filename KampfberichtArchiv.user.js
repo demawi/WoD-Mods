@@ -18,6 +18,7 @@
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js
 // @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
+// @require	       https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js#sha512=2ImtlRlf2VVmiGZsjm9bEyhjGW4dU7B6TNwh/hx/iSByxNENtj3WVE6o/9Lj4TJeVXPi4bnOIMXFIJJAeufa0A==
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
@@ -29,19 +30,22 @@
 (function () {
     'use strict';
 
-    const _Storages = demawiRepository.import("Storages");
-    const _WoDStorages = demawiRepository.import("WoDStorages");
-    const _WoD = demawiRepository.import("WoD");
-    const _WoDWorldDb = demawiRepository.import("WoDWorldDb");
-    const _WoDParser = demawiRepository.import("WoDParser");
-    const _WoDLootDb = demawiRepository.import("WoDLootDb");
-    const _util = demawiRepository.import("util");
-    const _UI = demawiRepository.import("UI");
-    const _File = demawiRepository.import("File");
-    const _Libs = demawiRepository.import("Libs");
-    const _Settings = demawiRepository.import("Settings");
-    const _ItemParser = demawiRepository.import("ItemParser");
-    const _CSProxy = demawiRepository.import("CSProxy");
+    const _ = {
+        Storages: demawiRepository.import("Storages"),
+        WoDStorages: demawiRepository.import("WoDStorages"),
+        WoD: demawiRepository.import("WoD"),
+        WoDWorldDb: demawiRepository.import("WoDWorldDb"),
+        WoDParser: demawiRepository.import("WoDParser"),
+        WoDLootDb: demawiRepository.import("WoDLootDb"),
+        WoDSkillsDb: demawiRepository.import("WoDSkillsDb"),
+        util: demawiRepository.import("util"),
+        UI: demawiRepository.import("UI"),
+        File: demawiRepository.import("File"),
+        Libs: demawiRepository.import("Libs"),
+        Settings: demawiRepository.import("Settings"),
+        ItemParser: demawiRepository.import("ItemParser"),
+        CSProxy: demawiRepository.import("CSProxy"),
+    }
 
     class Mod {
         static dbname = "wodDB";
@@ -50,21 +54,19 @@
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
         static async startMod() {
-            // Seite der Main-Domain, wird ggf. als Cross-Site-Proxy verwendet
-            if (window.origin.endsWith("//world-of-dungeons.de")) {
-                if (window.location.href.includes("messenger=true")) {
-                    await MyStorage.initMyStorage(false, "Main");
-                    _CSProxy.actAsCSProxyResponder();
-                }
+            const actAsProxy = _.CSProxy.check();
+            if (actAsProxy === undefined) {
+                return;
+            } else if (actAsProxy) {
+                await MyStorage.initMyStorage(false, "Main");
                 return;
             } else {
-                if (_CSProxy.ensureIframeWrap()) return;
                 await MyStorage.initMyStorage(true);
-                await MyStorage.testMain.setValue({name: "TestLoc"}); // Vorab-Test, ob der Proxy läuft
             }
-            const page = _util.getWindowPage();
+
+            const page = _.util.getWindowPage();
             demawiRepository.startMod("Page: '" + page + "'");
-            await _WoDWorldDb.placeSeasonElem();
+            await _.WoDWorldDb.placeSeasonElem();
             await MySettings.getFresh();
 
             switch (page) {
@@ -76,20 +78,24 @@
                     await TombolaLoot.onNewsPage();
                     break;
                 case "items.php":
-                    const view = _WoD.getItemsView();
+                    const view = _.WoD.getItemsView();
                     if (view === "gear") await Ausruestung.start();
                     break;
                 case "dungeon.php":
                     await DungeonAuswahl.start();
                     break;
+                case "new_quest.php":
+                case "quests.php":
+                    await QuestAuswahl.start();
+                    break;
                 case "heroes.php":
-                    await _WoDWorldDb.onMeineHeldenAnsicht();
+                    await _.WoDWorldDb.onMeineHeldenAnsicht();
                     break;
                 case "move.php":
                     await this.onMovePage();
                     break;
                 case "item.php":
-                    await _ItemParser.onItemPage();
+                    await _.ItemParser.onItemPage();
                     await ItemFunde.start();
                     break;
                 case "combat_report.php": // Schlacht
@@ -100,6 +106,9 @@
                     } else {
                         await this.onReportSite();
                     }
+                    break;
+                case "skill.php":
+                    await _.WoDSkillsDb.onSkillPage();
                     break;
             }
         }
@@ -122,13 +131,13 @@
                             const boldElements = aElem.parentElement.getElementsByTagName("b");
                             const locName = boldElements[0].textContent + " vs. " + boldElements[1].textContent;
                             const searchParams = new URL(aElem.href).searchParams;
-                            const reportId = _WoD.getMyWorld() + searchParams.get("report") + "S";
+                            const reportId = _.WoD.getMyWorld() + searchParams.get("report") + "S";
                             let tsMsecs = undefined;
                             for (const h2 of roundX.getElementsByTagName("h2")) {
                                 const text = h2.textContent;
                                 if (text.startsWith("Runde")) {
                                     const timeString = text.substring(text.indexOf("(") + 1, text.indexOf(")"));
-                                    tsMsecs = _WoD.getTimestampFromString(timeString);
+                                    tsMsecs = _.WoD.getTimestampFromString(timeString);
                                 }
                             }
                             const win = boldElements[2].textContent === "Angreifer";
@@ -144,7 +153,7 @@
                             };
                             report.loc.schlacht = schlachtName;
                             report.ts = tsMsecs / 60000;
-                            report.world = _WoD.getMyWorld();
+                            report.world = _.WoD.getMyWorld();
                             report.gruppe = groupName;
                             report.gruppe_id = groupId;
                             console.log("Save report: ", report);
@@ -161,9 +170,9 @@
         static async onReportSite() {
             const title = document.getElementsByTagName("h1")[0];
 
-            const reportData = _WoD.getFullReportBaseData();
+            const reportData = _.WoD.getFullReportBaseData();
             const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
-            reportMeta.world_season = await _WoD.getMyWorldSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
+            reportMeta.world_season = await _.WoD.getMyWorldSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
 
             if (document.getElementsByClassName("paginator").length > 0) {
                 const warning = document.createElement("span");
@@ -174,6 +183,10 @@
             }
 
             if (reportData.loc.schlacht && reportData.loc.schlacht !== "Unbekannte Schlacht") reportMeta.loc.schlacht = reportData.loc.schlacht; // kommt evtl. nachträglich erst herein
+            else {
+                const questName = Location.getQuestFor(reportData.loc.name);
+                if (questName) reportMeta.loc.quest = questName;
+            }
             if (!reportMeta.stufe) reportMeta.stufe = reportData.stufe; // Stufe nur setzen, wenn noch nicht vorhanden.
             if (!reportMeta.srcs) reportMeta.srcs = {};
             const reportSource = await MyStorage.getSourceReport(reportData.reportId) || {
@@ -185,17 +198,17 @@
             if (title.textContent.trim().startsWith("Kampfstatistik")) {
                 reportSource.stats = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.stats = true;
-                reportMeta.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(document, reportMeta.success);
+                reportMeta.success = _.WoDParser.retrieveSuccessInformationOnStatisticPage(document, reportMeta.success);
             } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
                 reportSource.items = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.items = true;
-                const memberList = _WoDParser.parseKampfberichtGegenstaende();
+                const memberList = _.WoDParser.parseKampfberichtGegenstaende();
                 const reportLoot = await MyStorage.putToLoot(reportSource.reportId, memberList);
                 await MyStorage.submitLoot(reportMeta, reportLoot);
                 if ((await MySettings.get()).get(MySettings.SETTING.LOOT_SUMMARY)) await ItemLootSummary.einblenden(reportLoot, reportMeta);
             } else if (title.textContent.trim().startsWith("Kampfbericht")) {
-                const form = _WoD.getMainForm();
-                const levelNr = _WoD.isSchlacht() ? 1 : form.current_level.value;
+                const form = _.WoD.getMainForm();
+                const levelNr = _.WoD.isSchlacht() ? 1 : form.current_level.value;
                 let navigationLevels = document.getElementsByClassName("navigation levels")[0];
                 if (navigationLevels) {
                     let successReport = reportMeta.success;
@@ -211,15 +224,15 @@
                 reportSource.levels[levelNr - 1] = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.levels[levelNr - 1] = true;
 
-                const heldenListe = _WoDParser.getHeldenstufenOnKampfbericht();
+                const heldenListe = _.WoDParser.getHeldenstufenOnKampfbericht();
                 if (heldenListe) { // da wir hier jetzt auch die Stufe der Helden haben, bringen wir auch von hier den Loot ein.
                     const reportLoot = await MyStorage.putToLoot(reportMeta.reportId, heldenListe);
                     await MyStorage.submitLoot(reportMeta, reportLoot);
                 }
-                if (_WoD.isSchlacht()) reportMeta.success = _WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(document, reportMeta.success);
+                if (_.WoD.isSchlacht()) reportMeta.success = _.WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(document, reportMeta.success);
                 ReportView.changeView(reportMeta);
             }
-            reportMeta.srcs.space = _util.getSpace(reportSource);
+            reportMeta.srcs.space = _.util.getSpace(reportSource);
             delete reportMeta.loc.v_; // eine evtl. vorherige vorläufige VersionsId löschen
             await MyStorage.reportArchive.setValue(reportMeta);
             await MyStorage.reportArchiveSources.setValue(reportSource);
@@ -227,7 +240,7 @@
             await Location.getVersions(reportMeta, reportSource);
             if (Report.isVollstaendig(reportMeta)) await AutoFavorit.recheckAutoFavoritenForReport(reportMeta);
 
-            const berichtsseiteSpeichernButton = _UI.createButton(" 💾", () => {
+            const berichtsseiteSpeichernButton = _.UI.createButton(" 💾", () => {
                 util.htmlExport();
             });
             berichtsseiteSpeichernButton.title = "Einzelne Seite exportieren";
@@ -254,8 +267,8 @@
         constructor() {
             this.dateMax;
             this.dateMin;
-            this.worldSelection = [_WoD.getMyWorld()];
-            this.groupSelection = [_WoD.getMyGroupName()];
+            this.worldSelection = [_.WoD.getMyWorld()];
+            this.groupSelection = [_.WoD.getMyGroupName()];
             this.dungeonSelection = [];
         }
     }
@@ -392,12 +405,12 @@
                 delete report.success;
                 //console.log("Bearbeite: ", report.reportId);
                 if (reportSource.stats) {
-                    const doc = _util.getDocumentFor(reportSource.stats);
-                    report.success = _WoDParser.retrieveSuccessInformationOnStatisticPage(doc);
+                    const doc = _.util.getDocumentFor(reportSource.stats);
+                    report.success = _.WoDParser.retrieveSuccessInformationOnStatisticPage(doc);
                 }
                 if (reportSource.levels && reportSource.levels[0]) {
-                    const doc = _util.getDocumentFor(reportSource.levels[0]);
-                    if (_WoD.isSchlacht(doc)) report.success = _WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(doc, report.success);
+                    const doc = _.util.getDocumentFor(reportSource.levels[0]);
+                    if (_.WoD.isSchlacht(doc)) report.success = _.WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(doc, report.success);
                 }
                 await MyStorage.reportArchive.setValue(report);
             });
@@ -406,13 +419,13 @@
         static async rewriteReportArchiveItems() {
             for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
                 if (reportSource.items) {
-                    const doc = _util.getDocumentFor(reportSource.items);
-                    const memberList = _WoDParser.parseKampfberichtGegenstaende(doc);
+                    const doc = _.util.getDocumentFor(reportSource.items);
+                    const memberList = _.WoDParser.parseKampfberichtGegenstaende(doc);
                     await MyStorage.putToLoot(reportSource.reportId, memberList);
                 }
                 if (reportSource.levels && reportSource.levels[0]) {
-                    const doc = _util.getDocumentFor(reportSource.levels[0]);
-                    const helden = _WoDParser.getHeldenstufenOnKampfbericht(doc);
+                    const doc = _.util.getDocumentFor(reportSource.levels[0]);
+                    const helden = _.WoDParser.getHeldenstufenOnKampfbericht(doc);
                     if (helden) await MyStorage.putToLoot(reportSource.reportId, helden);
                 }
             }
@@ -473,13 +486,29 @@
             }
 
             //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
-            //await MyStorage.indexedDb.cloneTo("WodDBMain_Backup");
+            //await MyStorage.indexedDb.cloneTo("WodDBMain_Backup2");
             //await (await MyStorage.indexedDbLocal.getObjectStorageChecked("reportArchive")).getAll(false, async function(cur) {
             //  await MyStorage.reportArchive.setValue(cur);
             //});
 
-            if (false) await MyStorage.reportArchive.getAll({}, async function (a) {
-                await MyStorage.reportArchive2.setValue(a);
+            if (false) await MyStorage.skill.getAll({}, async function (skill) {
+                await MyStorage.skillSources.getValue(skill.name);
+            });
+
+            if (false) await MyStorage.reportArchive.getAll({}, async function (report) {
+                const questName = Location.getQuestFor(report.loc.name);
+                if (questName) {
+                    report.loc.quest = questName;
+                    await MyStorage.reportArchive.setValue(report);
+                }
+            });
+            if (false) await MyStorage.item.getAll({}, async function (cur) {
+                const slots = cur.data.edelslots;
+                if (slots) {
+                    cur.data.slots = slots;
+                    delete cur.data.edelslots;
+                    await MyStorage.item.setValue(cur);
+                }
             });
 
             let count = 0;
@@ -494,7 +523,7 @@
                 console.log("BBBBBBB " + count);
             }
 
-            //console.log("IIIIIIIIIIII", await _WoDStorages.getLootDb().getValue("erdbrauner reif des waldes"));
+            //console.log("IIIIIIIIIIII", await _.WoDStorages.getLootDb().getValue("erdbrauner reif des waldes"));
             //console.log("JJJJJJJJJ", await MyStorage.itemLoot.getValue("erdbrauner reif des waldes"));
             //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
 
@@ -502,37 +531,39 @@
             //await this.resyncSourcesToReports();
             //await this.rewriteReportArchiveItems();
 
-            count = 0;
-            found = {}
-            await MyStorage.reportArchive.getAll({
-                //index: "ts",
-                order: "next",
-                keyMatchFrom: "WA15389813",
-                keyMatchFromOpen: false,
-                //debug: 2,
-            }, async a => {
-                //console.log("Result: ", a);
-                if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
-                found[a.reportId] = true;
-                count++;
-            });
-            console.log("AAAAAAAAAA ", count);
+            if (false) {
+                count = 0;
+                found = {}
+                await MyStorage.reportArchive.getAll({
+                    //index: "ts",
+                    order: "next",
+                    keyMatchFrom: "WA15389813",
+                    keyMatchFromOpen: false,
+                    //debug: 2,
+                }, async a => {
+                    //console.log("Result: ", a);
+                    if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
+                    found[a.reportId] = true;
+                    count++;
+                });
+                console.log("AAAAAAAAAA ", count);
 
-            count = 0;
-            found = {}
-            await MyStorage.reportArchive.getAll({ // no result request
-                index: "ts",
-                //order: "next",
-                keyMatchFrom: "WA15389813",
-                keyMatchFromOpen: false,
-                //debug: 2,
-            }, async a => {
-                //console.log("Result: ", a);
-                if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
-                found[a.reportId] = true;
-                count++;
-            });
-            console.log("BBBBBBB ", count);
+                count = 0;
+                found = {}
+                await MyStorage.reportArchive.getAll({ // no result request
+                    index: "ts",
+                    //order: "next",
+                    keyMatchFrom: "WA15389813",
+                    keyMatchFromOpen: false,
+                    //debug: 2,
+                }, async a => {
+                    //console.log("Result: ", a);
+                    if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
+                    found[a.reportId] = true;
+                    count++;
+                });
+                console.log("BBBBBBB ", count);
+            }
 
             if (false) {
                 console.log("AAAAAAAAAAA", (await MyStorage.reportArchive.getAll({
@@ -541,8 +572,6 @@
                 })).length);
             }
 
-            //await this.syncReportLootToItemLoot();
-            //await MyStorage.indexedDb.deleteObjectStore("teest");
             await this.checkMaintenance();
             console.log("Checked Maintenance");
             this.title = document.getElementsByTagName("h1")[0];
@@ -558,7 +587,7 @@
 
             const buttons = {};
 
-            buttons.archivButton = _UI.createButton(" 📦", async function () {
+            buttons.archivButton = _.UI.createButton(" 📦", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Archiv";
                 await ArchivSearch.showArchiv(thisObject.anchor);
                 thisObject.title.appendChild(buttons.wodContentButton);
@@ -566,7 +595,7 @@
                 thisObject.title.appendChild(buttons.settingButton);
             });
             buttons.archivButton.title = "Archiv anzeigen";
-            buttons.statisticsButton = _UI.createButton(" 📊", async function () {
+            buttons.statisticsButton = _.UI.createButton(" 📊", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Statistiken";
                 await ArchivView.showStatistics();
                 thisObject.title.appendChild(buttons.wodContentButton);
@@ -574,16 +603,16 @@
                 thisObject.title.appendChild(buttons.settingButton);
             });
             buttons.statisticsButton.title = "Statistik anzeigen";
-            buttons.wodContentButton = _UI.createButton(" ↩", async function () {
+            buttons.wodContentButton = _.UI.createButton(" ↩", async function () {
                 thisObject.title.innerHTML = "Kampfberichte";
-                const seasonNr = await _WoD.getMyWorldSeasonNr();
+                const seasonNr = await _.WoD.getMyWorldSeasonNr();
                 await ArchivView.showWodOverview();
                 thisObject.title.appendChild(buttons.archivButton);
                 thisObject.title.appendChild(buttons.statisticsButton);
                 thisObject.title.appendChild(buttons.settingButton);
             });
             buttons.wodContentButton.title = "Zurück zu den Kampfberichten";
-            buttons.settingButton = _UI.createButton(" ⚙", async function () {
+            buttons.settingButton = _.UI.createButton(" ⚙", async function () {
                 thisObject.title.innerHTML = "Kampfberichte - Archiv-Einstellungen";
                 await ArchivView.showSettings();
                 thisObject.title.appendChild(buttons.wodContentButton);
@@ -601,7 +630,7 @@
 
             ArchivSearch.preInit();
             await this.completeDungeonInformations(false, this.wodContent);
-            _Libs.useJQueryUI().then(a => ArchivSearch.loadArchivView());
+            _.Libs.useJQueryUI().then(a => ArchivSearch.loadArchivView());
         }
 
         static async showWodOverview() {
@@ -646,18 +675,18 @@
                     dungeonStat.part = part;
                 }
             }
-            statTable.append(_UI.createContentTable([
-                ["Anzahl Meta-Daten", await MyStorage.reportArchive.count()],
+            statTable.append(_.UI.createContentTable([
+                ["Anzahl Berichte", await MyStorage.reportArchive.count()],
                 ["Anzahl Quell-Berichte", await MyStorage.reportArchiveSources.count()],
-                ["Belegter Speicher durch Quell-Berichte", _util.fromBytesToMB(memorySpace)],
+                ["Belegter Speicher durch Quell-Berichte", _.util.fromBytesToMB(memorySpace)],
             ]));
 
             const dungeonTableModell = [];
             for (const dungeonName of Object.keys(dungeonStats).sort()) {
                 const dungeonStat = dungeonStats[dungeonName];
-                dungeonTableModell.push([dungeonName, dungeonStat.versions, (dungeonStat.full || 0) + (dungeonStat.part || 0) + (dungeonStat.wipe || 0), dungeonStat.full || 0, dungeonStat.part || 0, dungeonStat.wipe || 0, _util.fromBytesToMB(dungeonStat.space)]);
+                dungeonTableModell.push([dungeonName, dungeonStat.versions, (dungeonStat.full || 0) + (dungeonStat.part || 0) + (dungeonStat.wipe || 0), dungeonStat.full || 0, dungeonStat.part || 0, dungeonStat.wipe || 0, _.util.fromBytesToMB(dungeonStat.space)]);
             }
-            statTable.append(_UI.createContentTable(dungeonTableModell, ["Dungeon", "Versionen", "Gesamt", "Erfolg", "Teilerfolg", "Misserfolg", "Speicher"]));
+            statTable.append(_.UI.createContentTable(dungeonTableModell, ["Dungeon", "Versionen", "Gesamt", "Erfolg", "Teilerfolg", "Misserfolg", "Speicher"]));
             this.anchor.append(statTable);
         }
 
@@ -709,7 +738,7 @@
                     const name = curInput.getAttribute("_name") || curInput.name;
                     if (name.startsWith("report_id")) {
                         // Gesetzte ID aus dem Archiv oder die direkt Kampfbereichte-ID
-                        reportId = curInput.getAttribute("_reportId") || (_WoD.getMyWorld() + curInput.value);
+                        reportId = curInput.getAttribute("_reportId") || (_.WoD.getMyWorld() + curInput.value);
                         break;
                     }
                 }
@@ -721,10 +750,10 @@
                         loc: {
                             name: curTR.children[1].textContent.trim(),
                         },
-                        ts: _WoD.getTimestampFromString(curTR.children[0].textContent.trim()) / 60000,
-                        gruppe: _WoD.getMyGroupName(),
-                        gruppe_id: _WoD.getMyGroupId(),
-                        world: _WoD.getMyWorld(),
+                        ts: _.WoD.getTimestampFromString(curTR.children[0].textContent.trim()) / 60000,
+                        gruppe: _.WoD.getMyGroupName(),
+                        gruppe_id: _.WoD.getMyGroupId(),
+                        world: _.WoD.getMyWorld(),
                     }
                     await MyStorage.reportArchive.setValue(reportMeta);
                 }
@@ -788,7 +817,7 @@
                                 favoritButton.style.color = "white";
                             }
                         }
-                        const favoritButton = _UI.createButton("", async function () {
+                        const favoritButton = _.UI.createButton("", async function () {
                             const curReportMeta = await MyStorage.reportArchive.getValue(reportId);
                             if (Report.isFavorit(curReportMeta, AutoFavorit.TAG_MANUELL)) {
                                 Report.deleteFavorit(curReportMeta, AutoFavorit.TAG_MANUELL);
@@ -808,7 +837,7 @@
                     }
 
                     if (isArchiv) {
-                        const saveButton = _UI.createButton("💾", async function () {
+                        const saveButton = _.UI.createButton("💾", async function () {
                             await util.htmlExportFullReportAsZip(reportId);
                         });
                         saveButton.style.position = "relative";
@@ -820,9 +849,9 @@
 
                     if (isArchiv) {
                         const reportToString = async function (report) {
-                            return "- " + await getFullLocName(report) + "\n        [" + report.gruppe + "; " + _util.formatDateAndTime(new Date(report.ts * 60000)) + "]";
+                            return "- " + await getFullLocName(report) + "\n        [" + report.gruppe + "; " + _.util.formatDateAndTime(new Date(report.ts * 60000)) + "]";
                         }
-                        const deleteButton = _UI.createButton("🌋", async function () {
+                        const deleteButton = _.UI.createButton("🌋", async function () {
                             const confirmation = confirm("Es wird folgender Datensatz gelöscht: \n" + await reportToString(reportMeta));
                             if (confirmation) {
                                 await Report.deleteSources(reportMeta.reportId);
@@ -854,7 +883,7 @@
                     archiviertTD.innerHTML += "<span style='white-space: nowrap'>Fehlt komplett</span>";
                 } else {
                     if (reportMeta.srcs && reportMeta.srcs.space) {
-                        archiviertSpeicherTD.innerHTML = _util.fromBytesToMB(reportMeta.srcs.space);
+                        archiviertSpeicherTD.innerHTML = _.util.fromBytesToMB(reportMeta.srcs.space);
                     }
                     const fehlend = Report.getMissingReportSites(reportMeta);
                     if (fehlend.length === 0) {
@@ -952,7 +981,7 @@
                 tbody.children[0].append(ueberschriftSpeicher);
             }
 
-            ueberschriftSpeicher.innerHTML = "Speicher<br>" + "<span style='white-space: nowrap; font-size:12px;'>" + _util.fromBytesToMB(space) + "</span>";
+            ueberschriftSpeicher.innerHTML = "Speicher<br>" + "<span style='white-space: nowrap; font-size:12px;'>" + _.util.fromBytesToMB(space) + "</span>";
             ueberschriftZiel.innerHTML = "Erfolg<br>" + "<span style='white-space: nowrap; font-size:12px;'>(" + successWin + " / " + successTie + " / " + successLose + ")</span>";
         }
 
@@ -1030,7 +1059,7 @@
             tableContent.push(["Automatisches Löschen:", autoLoeschen]);
             tableContent.push([autoLoeschenTageLabel, autoLoeschenTage]);
 
-            const result = _UI.createTable(tableContent)
+            const result = _.UI.createTable(tableContent)
             settingTable.append(result);
         }
 
@@ -1046,7 +1075,7 @@
 
             tableContent.push(["Zusammenfassung Gegenstandsseite: ", lootSummaryCheckbox]);
 
-            const autoFavoritTable = _UI.createTable(tableContent);
+            const autoFavoritTable = _.UI.createTable(tableContent);
             settingTable.append(autoFavoritTable);
         }
 
@@ -1061,19 +1090,19 @@
             anlegenNeueGruppenSaison.onclick = async function () {
                 const confirmation = window.confirm("Wollen sie wirklich eine neue WeltSaisonNr vergeben?\n\nDanach bitte die Helden-Ansicht aufrufen, damit alle Helden für die neue Saison registriert werden");
                 if (confirmation) {
-                    await _WoDWorldDb.forceNewSeason();
+                    await _.WoDWorldDb.forceNewSeason();
                     await ArchivView.showSettings();
                 }
             }
 
             let text = "";
-            const worldSeasonNr = await await _WoDWorldDb.getCurrentWorldSeasonNr();
+            const worldSeasonNr = await await _.WoDWorldDb.getCurrentWorldSeasonNr();
             if (worldSeasonNr) text = "#" + worldSeasonNr;
             else text = "Bitte nochmal die Heldenansicht aufrufen!";
 
             tableContent.push(["Aktuelle Weltsaison: " + text, worldSeasonNr ? anlegenNeueGruppenSaison : ""]);
 
-            const autoFavoritTable = _UI.createTable(tableContent);
+            const autoFavoritTable = _.UI.createTable(tableContent);
             settingTable.append(autoFavoritTable);
         }
 
@@ -1132,7 +1161,7 @@
 
             tableContent.push([autoLoeschenFavoritLabelAll, getFavoritCheckBox(autoLoeschenFavoritAll, AutoFavorit.TAG_ALL), MySettings.SEASONS_ACTIVATED ? getFavoritCheckBox(autoLoeschenFavoritAllSeason, AutoFavorit.TAG_ALL_SEASON) : ""]);
             tableContent.push([autoLoeschenFavoritLabelGroup, getFavoritCheckBox(autoLoeschenFavoritGroup, AutoFavorit.TAG_GROUP), MySettings.SEASONS_ACTIVATED ? getFavoritCheckBox(autoLoeschenFavoritGroupSeason, AutoFavorit.TAG_GROUP_SEASON) : ""]);
-            const autoFavoritTable = _UI.createTable(tableContent, MySettings.SEASONS_ACTIVATED ? ["", "Saisonübergreifend", "pro Saison"] : "");
+            const autoFavoritTable = _.UI.createTable(tableContent, MySettings.SEASONS_ACTIVATED ? ["", "Saisonübergreifend", "pro Saison"] : "");
             settingTable.append(autoFavoritTable);
         }
 
@@ -1219,7 +1248,7 @@
 
             let [eingesammeltData, eingesammeltCount, eingesammeltEindeutig] = await this.getItemLootAndDropTable(reportMeta, eingesammeltPre, true);
             let curColor = eingesammeltEindeutig > 0 ? "background-color:rgb(62, 156, 62, 0.5);" : "";
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(eingesammeltData, [{
+            summaryContainer.append(this.flowLayout(_.UI.createContentTable(eingesammeltData, [{
                 data: "",
                 style: curColor,
             }, {data: "#", style: curColor},
@@ -1231,7 +1260,7 @@
 
             let [verlorenData, verlorenCount, verlorenCountEindeutig] = await this.getItemLootAndDropTable(reportMeta, verlorenPre, false);
             curColor = verlorenCount > 0 ? "background-color:rgb(194, 194, 41, 0.5);" : "";
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(verlorenData, [{
+            summaryContainer.append(this.flowLayout(_.UI.createContentTable(verlorenData, [{
                 data: "",
                 style: curColor,
             }, {data: "#", style: curColor},
@@ -1243,7 +1272,7 @@
 
             let [data, count] = this.getItemDamageTable(beschaedigtPre);
             curColor = count > 0 ? "background-color:rgb(203, 47, 47, 0.5);" : "";
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, [{
+            summaryContainer.append(this.flowLayout(_.UI.createContentTable(data, [{
                 data: "Held",
                 style: curColor,
             }, {data: "HP", style: curColor}, {
@@ -1253,7 +1282,7 @@
 
             [data, count] = this.getItemUsedTable(vgsPre);
             curColor = count > 0 ? "background-color:rgb(255, 255, 255, 0.5);" : "";
-            summaryContainer.append(this.flowLayout(_UI.createContentTable(data, [{data: "Held", style: curColor}, {
+            summaryContainer.append(this.flowLayout(_.UI.createContentTable(data, [{data: "Held", style: curColor}, {
                 data: "Anw.",
                 title: "Übrig/Mitgenommen (Verbraucht)",
                 style: "cursor: help;" + curColor,
@@ -1268,7 +1297,7 @@
                 const searchFor = "&id=" + instanceId;
                 finding = document.querySelector(".content_table a[href*=\"" + searchFor + "\"]");
             } else {
-                const searchFor = "/item/" + _util.fixedEncodeURIComponent(itemName).replaceAll("%20", "+");
+                const searchFor = "/item/" + _.util.fixedEncodeURIComponent(itemName).replaceAll("%20", "+");
                 finding = document.querySelector(".content_table a[href*=\"" + searchFor + "\"]:not([href*=\"&id=\"])");
             }
             if (!finding) {
@@ -1401,8 +1430,8 @@
 
         static async createMarkers(itemName, reportMeta) {
             const elem = document.createElement("span");
-            const dungeonUnique = await _WoDLootDb.isDungeonUnique(itemName);
-            const lootedBeforeInWorldSeason = await _WoDLootDb.getLootedBefore(itemName, reportMeta.ts, reportMeta.world, reportMeta.world_season); // aktuell nicht auf die gruppe beschränkt
+            const dungeonUnique = await _.WoDLootDb.isDungeonUnique(itemName);
+            const lootedBeforeInWorldSeason = await _.WoDLootDb.getLootedBefore(itemName, reportMeta.ts, reportMeta.world, reportMeta.world_season); // aktuell nicht auf die gruppe beschränkt
             if (dungeonUnique) elem.append(this.createMarker("✨", "Wurde bisher nur in diesem Dungeon gedroppt")); // 🌟
             if (lootedBeforeInWorldSeason === 0) elem.append(this.createMarker("🥇", "Wurde zuvor in dieser Saison auf dieser Welt noch nicht gelootet"));
             return [elem, lootedBeforeInWorldSeason];
@@ -1421,7 +1450,7 @@
 
     class Ausruestung {
         static async start() {
-            const naechsterDungeonName = _WoDParser.getNaechsterDungeonName();
+            const naechsterDungeonName = _.WoDParser.getNaechsterDungeonName();
             if (!naechsterDungeonName) return;
             // const ausruestungsTabelleKomplett = document.querySelectorAll("table:has(table #ausruestungstabelle_0):not(table:has(table table #ausruestungstabelle_0))")[0];
             const ausruestungsTabelle = document.querySelector("#ausruestungstabelle_2").parentElement.parentElement;
@@ -1438,7 +1467,7 @@
             })
 
             if (!items) return;
-            const myHeroId = _WoD.getMyHeroId();
+            const myHeroId = _.WoD.getMyHeroId();
             const myItems = items.members[myHeroId];
             if (!myItems) return;
             const vgInfos = {};
@@ -1462,7 +1491,7 @@
                 }
             }
             if (genutzteGegenstaende.length === 0) genutzteGegenstaende.push([undefined, "Es wurde nichts verbraucht"]);
-            const table = _UI.createContentTable(genutzteGegenstaende, ["#", "Beim letzten Besuch in diesem Dungeons verbraucht"]);
+            const table = _.UI.createContentTable(genutzteGegenstaende, ["#", "Beim letzten Besuch in diesem Dungeons verbraucht"]);
             table.classList.add("nowod");
             //ausruestungsTabelleKomplett.parentElement.insertBefore(table, ausruestungsTabelleKomplett);
             ausruestungsTabelle.append(table);
@@ -1473,31 +1502,33 @@
 
     class DungeonAuswahl {
         static async start() {
-            const start = new Date().getTime();
             const dungeonTRs = document.querySelectorAll(".content_table > tbody > tr:not([id*=\"desc\"])");
-            const gruppeId = _WoD.getMyGroupId();
-            const world = _WoD.getMyWorld();
-            const worldSeasonNr = await _WoD.getMyWorldSeasonNr();
+            const gruppeId = _.WoD.getMyGroupId();
+            const world = _.WoD.getMyWorld();
+            const worldSeasonNr = await _.WoD.getMyWorldSeasonNr();
             for (const tr of dungeonTRs) {
                 const dungeonName = tr.children[0].textContent.trim();
                 const [misserfolg, teilerfolg, erfolg] = await this.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName, worldSeasonNr);
                 tr.style.backgroundColor = erfolg ? ArchivView.COLOR_GREEN : (teilerfolg ? ArchivView.COLOR_YELLOW : (misserfolg ? ArchivView.COLOR_RED : ""));
                 await this.addDungeonStats(tr.children[1], dungeonName);
+                const dungeonId = tr.querySelector("div[id^='CombatDungeonConfigSelector']").id.split("|")[1]
+                //console.log("Zuweisung: " + dungeonName + " => " + dungeonId);
+                await Location.reportLocationId(dungeonName, dungeonId);
             }
         }
 
         static async addDungeonStats(elem, dungeonName) {
             const thisObject = this;
 
-            _WoD.addTooltip(elem, async function () {
-                const world = _WoD.getMyWorld();
-                const worldSeasonNr = await _WoD.getMyWorldSeasonNr();
-                const gruppeId = _WoD.getMyGroupId();
+            _.WoD.addTooltip(elem, async function () {
+                const world = _.WoD.getMyWorld();
+                const worldSeasonNr = await _.WoD.getMyWorldSeasonNr();
+                const gruppeId = _.WoD.getMyGroupId();
                 let title = await thisObject.getErfolgstext("Gruppenerfolge (aktuelle Saison)", thisObject.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName, worldSeasonNr));
                 const gruppenErfolg = await thisObject.getErfolgstext("Gruppenerfolge (Gesamt)", thisObject.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName));
                 title += "<br>" + gruppenErfolg;
                 let lootedDungeonUniquesText = "";
-                const lootedDungeonUniques = Object.entries(await _WoDLootDb.getLootedDungeonUniques(dungeonName, world, worldSeasonNr, gruppeId));
+                const lootedDungeonUniques = Object.entries(await _.WoDLootDb.getLootedDungeonUniques(dungeonName, world, worldSeasonNr, gruppeId));
                 for (const [itemName, count] of lootedDungeonUniques) {
                     lootedDungeonUniquesText += "<br>" + itemName + ": " + (count > 0 ? "✅ " + count : "❌");
                 }
@@ -1515,7 +1546,7 @@
             let result = [0, 0, 0];
             for (const report of await MyStorage.reportArchive.getAll({
                 index: ["world", "gruppe_id", "loc.name", "world_season"], // index: "wgls",
-                keyMatch: [world, gruppeId, dungeonName, worldSeasonNrOpt ? worldSeasonNrOpt : _Storages.MATCHER.NUMBER.ANY],
+                keyMatch: [world, gruppeId, dungeonName, worldSeasonNrOpt ? worldSeasonNrOpt : _.Storages.MATCHER.NUMBER.ANY],
             })) {
                 const cur = Report.getSuccessLevel(report);
                 if (cur !== undefined) {
@@ -1527,15 +1558,38 @@
 
     }
 
+    class QuestAuswahl {
+
+        static async start() {
+            for (const dungeonSelector of document.querySelectorAll("div[id^='CombatDungeonConfigSelector']")) {
+                const dungeonId = Number(dungeonSelector.id.split("|")[1]);
+                let dungeonName;
+                let elem = document.querySelector(".content_table tr:has(div[id='" + dungeonSelector.id + "']) h3");
+                if (elem) {
+                    dungeonName = elem.textContent.match(/^\d*\. (.*)$/)[1].trim();
+                } else {
+                    elem = document.querySelector("#main_content:has(div[id='" + dungeonSelector.id + "']) h2");
+                    if (elem) dungeonName = elem.textContent.substring(8).trim();
+                }
+                if (dungeonName) {
+                    const questName = document.querySelector("h1").textContent.substring(6).trim();
+                    console.log("Elem: '" + questName + ": " + dungeonName + "' => " + dungeonId, dungeonSelector, elem);
+                    await Location.reportLocationId(dungeonName, dungeonId, questName);
+                }
+            }
+        }
+
+    }
+
     class TombolaLoot {
         static async onNewsPage() {
             for (const cur of document.querySelectorAll(".tombola_winner tr")) {
                 const itemA = cur.querySelector("a[href*=\"/item.php?\"]");
                 if (itemA) {
-                    const tsMsecs = _WoD.getTimestampFromString(cur.children[0].textContent);
+                    const tsMsecs = _.WoD.getTimestampFromString(cur.children[0].textContent);
                     const itemName = itemA.textContent.trim();
                     await this.putToLoot(itemA, tsMsecs);
-                    await _WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
+                    await _.WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
                 }
             }
         }
@@ -1543,13 +1597,13 @@
         static async onTombolaPage() {
             const itemA = document.querySelector(".content_block a");
             if (itemA) {
-                await this.putToLoot(itemA, new Date().getTime(), _WoD.getMyStufe());
+                await this.putToLoot(itemA, new Date().getTime(), _.WoD.getMyStufe());
             }
         }
 
         static async putToLoot(itemA, tsMsecs, stufe) {
             const itemName = itemA.textContent.trim();
-            await _WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
+            await _.WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
         }
     }
 
@@ -1595,15 +1649,15 @@
                 return b[1] - a[1];
             });
             for (const value of content) {
-                value[1] = _util.formatDateAndTime(new Date(value[1]));
+                value[1] = _.util.formatDateAndTime(new Date(value[1]));
             }
-            const table = _UI.createContentTable(content, header);
+            const table = _.UI.createContentTable(content, header);
             table.classList.add("nowod");
             table.style.marginLeft = "15px";
             const lootUeberschrift = document.createElement("h3");
             lootUeberschrift.classList.add("nowod");
             lootUeberschrift.style.marginLeft = "15px";
-            lootUeberschrift.innerHTML = "Sichtungen <span style='font-size:10px'>(maximal " + _WoDLootDb.MAX_LOOT_ENTRIES + ")</span>";
+            lootUeberschrift.innerHTML = "Sichtungen <span style='font-size:10px'>(maximal " + _.WoDLootDb.MAX_LOOT_ENTRIES + ")</span>";
             hints.parentElement.insertBefore(lootUeberschrift, hints);
             hints.parentElement.insertBefore(table, hints);
             if (entries.length > 0) {
@@ -1618,7 +1672,7 @@
                 }
                 if (stufen.length > 0) aggregateInfos.push(["Stufe (min-max):", stufeMin + "-" + stufeMax]);
                 aggregateInfos.push(["Unterschiedliche Orte:", Object.entries(item.locs).length]);
-                const aggregateTable = _UI.createContentTable(aggregateInfos);
+                const aggregateTable = _.UI.createContentTable(aggregateInfos);
                 aggregateTable.classList.add("nowod");
                 aggregateTable.style.marginLeft = "15px";
                 hints.parentElement.insertBefore(aggregateTable, table);
@@ -1646,10 +1700,7 @@
         static AUSWAHL_BEVORZUGT_TAGE = 8;
 
         static async query() {
-            const start = new Date().getTime();
-            const result = await this.#queryIntern();
-            console.log("ArchivSearch.query " + (new Date().getTime() - start) / 1000 + " secs");
-            return result;
+            return await this.#queryIntern();
         }
 
         static async #queryIntern() {
@@ -1723,7 +1774,7 @@
                     tbody.append(tr);
                     const dateTD = document.createElement("td");
                     tr.append(dateTD);
-                    dateTD.innerText = _util.formatDateAndTime(reportMeta.ts * 60000);
+                    dateTD.innerText = _.util.formatDateAndTime(reportMeta.ts * 60000);
                     dateTD.style.textAlign = "center";
                     const nameTD = document.createElement("td");
                     tr.append(nameTD);
@@ -1743,117 +1794,13 @@
             return table;
         }
 
-        static quests = {
-            "Rhanines Auftrag": [
-                "Ein Tumult im Dorf",
-                "Auf dem Weg zum Bauernhof",
-                "Der Bauernhof",
-                "Der Weg in den Wald",
-                "Zur Kultstätte",
-            ],
-            "Ein Anfang": [
-                "Das Wirtshaus am Wegesrand",
-                "Der zweite Besuch im Wirtshaus",
-                "Ein Picknick im Wald",
-                "Die Höhle unter dem Wirtshaus",
-                "Eine Siegesfeier im Wald",
-                "Auf der Jagd",
-                "Die Waldgnome",
-                "Das Grab der Gnolle",
-                "Die Karte der Orks",
-                "Im Hauptquartier der Orks",
-            ],
-            "Ein einfacher Botengang": [
-                "Auf nach Tiefenfels",
-                "Der verwunschene Wald",
-                "Durch den alten Wehrgang",
-                "Die Gruft im verwunschenen Wald",
-                "Weiter durch den Wald",
-                "In den klagenden Sümpfen",
-                "Der Turm",
-                "Das Rattennest",
-            ],
-            "Die Pläne des Technikus": [
-                "Auf nach Rabenfurth",
-                "Verfolgung der Rattenmenschen",
-                "Die Rattengrube",
-                "Weiter nach Rabenfurth",
-                "Durch den Wald",
-                "Die Flasche",
-                "Eine Bergtour",
-                "Ein alter Turm auf dem Berg",
-                "Und weiter in den Wald der Wichtel",
-                "Der Abstieg",
-                "Die letzte Etappe",
-            ],
-            "Die Schlacht bei Kargash Peak": [
-                "Der Weg zur Schlacht bei Kargash Peak",
-                "Im Norden der Schlacht",
-                "Im Norden der Schlacht (äußerer Ring)",
-                "Im Norden der Schlacht (innerer Ring)",
-                "Im Westen der Schlacht",
-                "Im Westen der Schlacht (äußerer Ring)",
-                "Im Westen der Schlacht (innerer Ring)",
-                "Im Osten der Schlacht",
-                "Im Osten der Schlacht (äußerer Ring)",
-                "Im Osten der Schlacht (innerer Ring)",
-                "Im Süden der Schlacht",
-                "Im Süden der Schlacht (äußerer Ring)",
-                "Im Süden der Schlacht (innerer Ring)",
-                "Im Zentrum der Schlacht",
-                "Die Höhle",
-                "Dank an die Helden",
-            ],
-            "Die Stadt der Verdammten": [
-                "Ankunft in Stahlheim",
-                "Erkundung zum Gutshof des Verdammten",
-                "Zirkus der verlorenen Kinder",
-                "Das Herrenhaus",
-                "Das alte Gericht",
-                "Das Bergwerk",
-                "Das Heldengrab",
-                "Die Lehmgrube",
-                "Die Knochenzwillinge",
-                "Verlassen von Stahlheim",
-            ],
-            "Jenseits des Abgrunds": [
-                "Ein Dorf in Nöten",
-                "Der Tauchgang",
-                "Marsch auf dem Meeresgrund",
-                "Die Jagd auf den Oktopus",
-                "Nur ein Tauchgang",
-                "Marsch über den Meeresgrund",
-                "In der Eingangshalle",
-                "Lug und Trug im Labor",
-                "Die Schleuse",
-                "Der finstere Gang",
-                "Das bläuliche Tor",
-                "Das grünliche Tor",
-                "Das sandfarbene Tor",
-                "Das dunke Herz",
-                "Zurück ins Labor",
-                "Der leere Thron",
-                "Ein unerwartetes Wiedersehen",
-                "Nachwuchs",
-                "Jagd auf die Schatzjäger",
-                "Die Flucht",
-            ],
-        }
-
-        static getQuestFor(locName) {
-            for (const [groupName, groupEntries] of Object.entries(this.quests)) {
-                if (groupEntries.includes(locName)) return groupName;
-            }
-        }
-
         /**
          * Erweitert den loc.name durch den Quest- oder Schlachtbezeichner
          */
         static async getFullLocationName(reportMeta) {
             const loc = reportMeta.loc;
-            if (loc.schlacht) return loc.schlacht + ": " + loc.name.replaceAll("Eure Gruppe vs. ", "");
-            const groupName = this.getQuestFor(loc.name);
-            if (groupName) return groupName + ": " + loc.name;
+            if (loc.schlacht) return loc.schlacht + ": " + loc.name;
+            if (loc.quest) return loc.quest + ": " + loc.name;
             return loc.name;
         }
 
@@ -1867,11 +1814,11 @@
             this.searchQuery.dungeonSelection.slice(0).forEach(name => {
                 if (!dungeonsFound[name]) {
                     removeSelected = true;
-                    _util.arrayRemove(this.searchQuery.dungeonSelection, name);
+                    _.util.arrayRemove(this.searchQuery.dungeonSelection, name);
                 }
             });
             let selected = this.searchQuery.dungeonSelection.length === 0 ? "selected" : "";
-            this.dungeonSelect.innerHTML = "<option value='' " + selected + ">" + "</option>";
+            this.dungeonSelect.innerHTML = "<option value=''" + selected + ">" + "</option>";
 
             if (Object.keys(dungeonsFoundPrimary).length > 0) {
                 this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT_TAGE + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
@@ -1881,11 +1828,13 @@
                 }
                 this.dungeonSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
             }
+            //console.log("Dungeonsfound", dungeonsFound);
             for (const [locName, locNameFull] of Object.entries(dungeonsFound).sort((a, b) => a[1].localeCompare(b[1]))) {
                 if (dungeonsFoundPrimary[locName]) continue;
                 const selected = this.searchQuery.dungeonSelection.includes(locName) ? "selected" : "";
                 this.dungeonSelect.innerHTML += "<option value=\"" + locName.replaceAll("'", "\'") + "\" " + selected + ">" + locNameFull + "</option>";
             }
+            _.Libs.betterSelect(this.dungeonSelect);
             return removeSelected;
         }
 
@@ -1893,7 +1842,7 @@
             let removedSelected = false;
             this.searchQuery.groupSelection.slice(0).forEach(name => {
                 if (!groupsFound[name]) {
-                    _util.arrayRemove(this.searchQuery.groupSelection, name);
+                    _.util.arrayRemove(this.searchQuery.groupSelection, name);
                     removedSelected = true;
                 }
             });
@@ -1913,6 +1862,7 @@
                 const selected = this.searchQuery.groupSelection.includes(dungeonName) ? "selected" : "";
                 this.groupSelect.innerHTML += "<option value=\"" + dungeonName + "\" " + selected + ">" + dungeonName + "</option>";
             }
+            _.Libs.betterSelect(this.groupSelect);
             return removedSelected;
         }
 
@@ -1921,7 +1871,7 @@
             this.searchQuery.worldSelection.slice(0).forEach(name => {
                 if (!worldsFound[name]) {
                     removeSelected = true;
-                    _util.arrayRemove(this.searchQuery.worldSelection, name);
+                    _.util.arrayRemove(this.searchQuery.worldSelection, name);
                 }
             });
             let selected = this.searchQuery.worldSelection.length === 0 ? "selected" : "";
@@ -1935,11 +1885,12 @@
                 }
                 this.worldSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
             }
-            for (const dungeonName of Object.keys(worldsFound).sort()) {
-                if (worldsFoundPrimary[dungeonName]) continue;
-                const selected = this.searchQuery.worldSelection.includes(dungeonName) ? "selected" : "";
-                this.worldSelect.innerHTML += "<option value='" + dungeonName + "' " + selected + ">" + dungeonName + "</option>";
+            for (const worldId of Object.keys(worldsFound).sort()) {
+                if (worldsFoundPrimary[worldId]) continue;
+                const selected = this.searchQuery.worldSelection.includes(worldId) ? "selected" : "";
+                this.worldSelect.innerHTML += "<option value='" + worldId + "' " + selected + ">" + (this.worldValues[worldId] || worldId) + "</option>";
             }
+            _.Libs.betterSelect(this.worldSelect);
             return removeSelected;
         }
 
@@ -1977,13 +1928,10 @@
             let type;
             if (report.loc.schlacht) {
                 type = "Schlacht";
+            } else if (report.loc.quest) {
+                type = "Quest";
             } else {
-                const questName = this.getQuestFor(locName);
-                if (questName) {
-                    type = "Quest";
-                } else {
-                    type = "Dungeon";
-                }
+                type = "Dungeon";
             }
 
             return this.searchQuery.typeSelection.includes(type);
@@ -2031,7 +1979,7 @@
         static async showArchiv() {
             ArchivView.anchor.removeChild(ArchivView.anchor.children[0]);
             ArchivView.anchor.append(this.archivView);
-            _Libs.removeCSS("report.css");
+            _.Libs.removeCSS("report.css");
             if (this.scrollY) window.scroll(0, this.scrollY);
         }
 
@@ -2039,127 +1987,110 @@
             const searchTable = document.createElement("div");
             searchTable.id = "orders";
             const content = [];
-            const dateMinInput = this.createDatePicker();
-            if (this.searchQuery.dateMin) dateMinInput.value = _util.formatDateAndTime(this.searchQuery.dateMin * 60000);
-            const dateMaxInput = this.createDatePicker();
-            if (this.searchQuery.dateMax) dateMaxInput.value = _util.formatDateAndTime(this.searchQuery.dateMax * 60000);
+            const [dateMinInput, datumRow1] = this.createDatePicker(async function () {
+                try {
+                    _this.searchQuery.dateMin = new Date(_.util.parseStandardDateString(dateMinInput.value)).getTime() / 60000;
+                } catch (e) {
+                    _this.searchQuery.dateMin = null;
+                }
+                await ArchivSearch.updateSearch();
+            });
+            if (this.searchQuery.dateMin) dateMinInput.value = _.util.formatDateAndTime(this.searchQuery.dateMin * 60000);
+            const _this = this;
+            const [dateMaxInput, datumRow2] = this.createDatePicker(async function () {
+                try {
+                    _this.searchQuery.dateMax = new Date(_.util.parseStandardDateString(dateMaxInput.value));
+                    _this.searchQuery.dateMax.setDate(_this.searchQuery.dateMax.getDate() + 1);
+                    _this.searchQuery.dateMax = _this.searchQuery.dateMax.getTime() / 60000;
+                } catch (e) {
+                    _this.searchQuery.dateMax = null;
+                }
+                await ArchivSearch.updateSearch();
+            });
+            if (this.searchQuery.dateMax) dateMaxInput.value = _.util.formatDateAndTime(this.searchQuery.dateMax * 60000);
             const datumRow = document.createElement("div");
-            datumRow.append(dateMinInput);
-            datumRow.append(_UI.createButton("❌", async function () {
-                if (dateMinInput.value.trim() !== "") {
-                    dateMinInput.value = "";
-                    thisObject.searchQuery.dateMin = null;
-                    await ArchivSearch.updateSearch();
-                }
-            }));
+            datumRow.append(datumRow1);
             datumRow.append(" - ");
-            datumRow.append(dateMaxInput);
-            datumRow.append(_UI.createButton("❌", async function () {
-                if (dateMaxInput.value.trim() !== "") {
-                    dateMaxInput.value = "";
-                    thisObject.searchQuery.dateMax = null;
-                    await ArchivSearch.updateSearch();
-                }
-            }));
-            dateMinInput.onchange = async function () {
-                try {
-                    thisObject.searchQuery.dateMin = new Date(_util.parseStandardDateString(dateMinInput.value)).getTime() / 60000;
-                } catch (e) {
-                    thisObject.searchQuery.dateMin = null;
-                }
-                await ArchivSearch.updateSearch();
-            }
-            dateMaxInput.onchange = async function () {
-                try {
-                    thisObject.searchQuery.dateMax = new Date(_util.parseStandardDateString(dateMaxInput.value));
-                    thisObject.searchQuery.dateMax.setDate(thisObject.searchQuery.dateMax.getDate() + 1);
-                    thisObject.searchQuery.dateMax = thisObject.searchQuery.dateMax.getTime() / 60000;
-                } catch (e) {
-                    thisObject.searchQuery.dateMax = null;
-                }
-                await ArchivSearch.updateSearch();
-            }
-            content.push(["Zeitraum", datumRow]);
-            const thisObject = this;
+            datumRow.append(datumRow2);
+            content.push([{data: "Zeitraum", style: "vertical-align:middle;"}, datumRow]);
 
-            this.nurFavoritenSelect = document.createElement("select");
-            this.nurFavoritenSelect.onchange = async function () {
-                thisObject.searchQuery.nurFavoriten = [];
-                var options = thisObject.nurFavoritenSelect.selectedOptions;
+            let selectContainer;
+            [this.nurFavoritenSelect, selectContainer] = this.createSelectFilter(async function () {
+                _this.searchQuery.nurFavoriten = [];
+                var options = _this.nurFavoritenSelect.selectedOptions;
                 for (var i = 0, l = options.length; i < l; i++) {
                     const opt = options[i];
                     const value = opt.value || opt.text;
                     if (value === "") continue;
-                    thisObject.searchQuery.nurFavoriten.push(value);
+                    _this.searchQuery.nurFavoriten.push(value);
                 }
                 await ArchivSearch.updateSearch();
-            }
-            this.nurFavoritenSelect.innerHTML += "<option></option>";
+            });
+            this.nurFavoritenSelect.onchange =
+                this.nurFavoritenSelect.innerHTML += "<option></option>";
             this.nurFavoritenSelect.innerHTML += "<option>" + FilterQuery.FAVORIT_MANUELL + "</option>";
             this.nurFavoritenSelect.innerHTML += "<option style='color:" + AutoFavorit.TAG_COLORS[AutoFavorit.TAG_ALL] + "'>" + FilterQuery.FAVORIT_AUTO_ALL + "</option>";
             this.nurFavoritenSelect.innerHTML += "<option style='color:" + AutoFavorit.TAG_COLORS[AutoFavorit.TAG_GROUP] + "'>" + FilterQuery.FAVORIT_AUTO_GROUP + "</option>";
-            content.push(["Favoriten", this.nurFavoritenSelect]);
+            _.Libs.betterSelect(this.nurFavoritenSelect);
+            content.push([{data: "Favorit", style: "vertical-align:middle;"}, selectContainer]);
 
-            this.typeSelect = document.createElement("select");
+
+            [this.typeSelect, selectContainer] = this.createSelectFilter(async function () {
+                _this.searchQuery.typeSelection = [];
+                var options = _this.typeSelect.selectedOptions;
+                for (var i = 0, l = options.length; i < l; i++) {
+                    const opt = options[i];
+                    const value = opt.value || opt.text;
+                    if (value === "") continue;
+                    _this.searchQuery.typeSelection.push(value);
+                }
+                await ArchivSearch.updateSearch();
+            });
             this.typeSelect.innerHTML += "<option></option>";
             this.typeSelect.innerHTML += "<option>Dungeon</option>";
             this.typeSelect.innerHTML += "<option>Quest</option>";
             this.typeSelect.innerHTML += "<option>Schlacht</option>";
-            this.typeSelect.onchange = async function () {
-                thisObject.searchQuery.typeSelection = [];
-                var options = thisObject.typeSelect.selectedOptions;
+            _.Libs.betterSelect(this.typeSelect);
+            content.push([{data: "Typ", style: "vertical-align:middle;"}, selectContainer]);
+
+            [this.worldSelect, selectContainer] = this.createSelectFilter(async function () {
+                _this.searchQuery.worldSelection = [];
+                var options = _this.worldSelect.selectedOptions;
                 for (var i = 0, l = options.length; i < l; i++) {
                     const opt = options[i];
                     const value = opt.value || opt.text;
                     if (value === "") continue;
-                    thisObject.searchQuery.typeSelection.push(value);
+                    _this.searchQuery.worldSelection.push(value);
                 }
                 await ArchivSearch.updateSearch();
-            }
-            content.push(["Typ", this.typeSelect]);
+            });
+            content.push([{data: "Welt", style: "vertical-align:middle;"}, selectContainer]);
 
-            this.worldSelect = document.createElement("select");
-            this.worldSelect.onchange = async function () {
-                thisObject.searchQuery.worldSelection = [];
-                var options = thisObject.worldSelect.selectedOptions;
+            [this.groupSelect, selectContainer] = this.createSelectFilter(async function () {
+                _this.searchQuery.groupSelection = [];
+                var options = _this.groupSelect.selectedOptions;
                 for (var i = 0, l = options.length; i < l; i++) {
                     const opt = options[i];
                     const value = opt.value || opt.text;
                     if (value === "") continue;
-                    thisObject.searchQuery.worldSelection.push(value);
+                    _this.searchQuery.groupSelection.push(value);
                 }
                 await ArchivSearch.updateSearch();
-            }
-            content.push(["Welt", this.worldSelect]);
+            })
+            content.push([{data: "Gruppe", style: "vertical-align:middle;"}, selectContainer]);
 
-            this.groupSelect = document.createElement("select");
-            this.groupSelect.onchange = async function () {
-                thisObject.searchQuery.groupSelection = [];
-                var options = thisObject.groupSelect.selectedOptions;
+            [this.dungeonSelect, selectContainer] = this.createSelectFilter(async function () {
+                _this.searchQuery.dungeonSelection = [];
+                var options = _this.dungeonSelect.selectedOptions;
                 for (var i = 0, l = options.length; i < l; i++) {
                     const opt = options[i];
                     const value = opt.value || opt.text;
                     if (value === "") continue;
-                    thisObject.searchQuery.groupSelection.push(value);
+                    _this.searchQuery.dungeonSelection.push(value);
                 }
                 await ArchivSearch.updateSearch();
-            }
-            content.push(["Gruppe", this.groupSelect]);
-
-            this.dungeonSelect = document.createElement("select");
-
-            this.dungeonSelect.onchange = async function () {
-                thisObject.searchQuery.dungeonSelection = [];
-                var options = thisObject.dungeonSelect.selectedOptions;
-                for (var i = 0, l = options.length; i < l; i++) {
-                    const opt = options[i];
-                    const value = opt.value || opt.text;
-                    if (value === "") continue;
-                    thisObject.searchQuery.dungeonSelection.push(value);
-                }
-                await ArchivSearch.updateSearch();
-            }
-            content.push(["Dungeon", this.dungeonSelect]);
+            });
+            content.push([{data: "Dungeon", style: "vertical-align:middle;"}, selectContainer]);
 
             const lastRow = document.createElement("span");
             const maxResultsInput = document.createElement("input");
@@ -2184,6 +2115,7 @@
                     maxResultsInput.value = ArchivSearch.searchQuery.maxResults;
                 }
             }
+            _.Libs.betterInput(maxResultsInput);
             lastRow.append(maxResultsInput);
             const aktualisierenButton = document.createElement("input");
             aktualisierenButton.type = "button";
@@ -2191,11 +2123,11 @@
             aktualisierenButton.onclick = async function () {
                 await ArchivSearch.updateSearch();
             };
+            _.Libs.betterInput(aktualisierenButton);
             lastRow.append(aktualisierenButton);
-            content.push(["Max. Ergebnisse", lastRow]);
+            content.push([{data: "Max. Ergebnisse", style: "vertical-align:middle;"}, lastRow]);
 
-            searchTable.append(_UI.createTable(content));
-
+            searchTable.append(_.UI.createTable(content));
 
             return searchTable;
         }
@@ -2207,35 +2139,65 @@
             await ArchivView.completeDungeonInformations(true, this.archivView);
         }
 
-        static createDatePicker() {
+        static createSelectFilter(onchangeFn) {
+            const container = document.createElement("span");
+            const input = document.createElement("select");
+            container.append(input);
+            const deleteButton = _.UI.createButton("<span style='font-size:0.8em'> ❌</span>", async function () {
+                input.value = "";
+                input.dispatchEvent(new Event("change"));
+            })
+            deleteButton.style.visibility = "hidden";
+            container.onmouseenter = function () {
+                deleteButton.style.visibility = "";
+            }
+            container.onmouseleave = function () {
+                deleteButton.style.visibility = "hidden";
+            }
+            container.append(deleteButton);
+            input.onchange = onchangeFn;
+            return [input, container];
+        }
+
+        static createDatePicker(onchangeFn) {
+            const container = document.createElement("span");
             const input = document.createElement("input");
+            container.append(input);
+            _.Libs.betterInput(input);
             input.type = "text";
             $(input).datepicker({
                 dateFormat: "dd.mm.yy",
             });
             input.size = 8;
-            return input;
+            const deleteButton = _.UI.createButton("<span style='font-size:0.8em'>❌</span>", async function () {
+                input.value = "";
+                input.dispatchEvent(new Event("change"));
+            });
+            deleteButton.style.visibility = "hidden";
+            container.onmouseenter = function () {
+                deleteButton.style.visibility = "";
+            }
+            container.onmouseleave = function () {
+                deleteButton.style.visibility = "hidden";
+            }
+            container.append(deleteButton);
+            input.onchange = onchangeFn;
+            return [input, container];
         }
 
         static async showPage(reportSource, reportSiteHTML, pageType) {
+            console.clear();
             // Wir kommen von der Übersichtsseite
             if (ArchivView.anchor.children[0] === this.archivView) {
                 this.scrollY = window.scrollY;
             }
             ArchivView.anchor.removeChild(ArchivView.anchor.children[0]);
-            const doc = _util.getDocumentFor(reportSiteHTML);
+            const doc = _.util.getDocumentFor(reportSiteHTML);
             const mainContent = doc.getElementsByClassName("main_content")[0];
             const temp = document.createElement("div");
             temp.innerHTML = mainContent.outerHTML;
             ArchivView.anchor.append(temp);
             ArchivView.title.scrollIntoView();
-            const statExecuter = this.getErweiterteKampfstatistikExecuter();
-            if (statExecuter) {
-                const dbSourceReport = await MyStorage.reportArchiveSources.getValue(reportSource.reportId);
-                if (pageType === ArchivView.PAGE_TYPE_REPORT || pageType === ArchivView.PAGE_TYPE_STAT) {
-                    await statExecuter(pageType === ArchivView.PAGE_TYPE_REPORT, pageType === ArchivView.PAGE_TYPE_STAT, dbSourceReport);
-                }
-            }
             let inputs = temp.getElementsByTagName("input");
             for (const elem of inputs) {
                 if (elem.value === "Statistik" && !elem.previousElementSibling) { // dies ist bei Popups der Fall
@@ -2294,10 +2256,20 @@
                 if (reportExt) ItemLootSummary.einblenden(reportExt);
             }
             if (pageType === ArchivView.PAGE_TYPE_REPORT) {
-                _Libs.addCSS("report.css?" + new Date().getTime());
+                _.Libs.addCSS("report.css");
                 ReportView.changeView(await MyStorage.reportArchive.getValue(reportSource.reportId));
             } else {
-                _Libs.removeCSS("report.css");
+                _.Libs.removeCSS("report.css");
+            }
+
+            if (pageType === ArchivView.PAGE_TYPE_STAT || pageType === ArchivView.PAGE_TYPE_REPORT) {
+                const statExecuter = this.getErweiterteKampfstatistikExecuter();
+                if (statExecuter) {
+                    const dbSourceReport = await MyStorage.reportArchiveSources.getValue(reportSource.reportId);
+                    if (pageType === ArchivView.PAGE_TYPE_REPORT || pageType === ArchivView.PAGE_TYPE_STAT) {
+                        await statExecuter(pageType === ArchivView.PAGE_TYPE_REPORT, pageType === ArchivView.PAGE_TYPE_STAT, dbSourceReport);
+                    }
+                }
             }
         }
 
@@ -2391,7 +2363,7 @@
             console.log("recalculateSpace... start");
             for (const report of await MyStorage.reportArchive.getAll()) {
                 const reportSource = await MyStorage.reportArchiveSources.getValue(report.reportId);
-                const space = reportSource ? _util.getSpace(reportSource) : 0;
+                const space = reportSource ? _.util.getSpace(reportSource) : 0;
                 if (report.space !== space) {
                     report.space = space;
                     await MyStorage.reportArchive.setValue(report);
@@ -2435,7 +2407,7 @@
                     }
                     reportSource = {};
                 } else {
-                    const space = _util.getSpace(reportSource);
+                    const space = _.util.getSpace(reportSource);
                     if (reportMeta.space !== space) {
                         console.error("ReportMeta-Fehler: " + reportId + " Space: " + reportMeta.space + " != " + space);
                         failures++;
@@ -2661,7 +2633,7 @@
             content.push(line2);
             if (kosAdded) content.push(line3);
             navigationLevel1.style.textAlign = "center";
-            const table = _UI.createTable(content);
+            const table = _.UI.createTable(content);
             table.style.borderSpacing = "2px";
             table.style.margin = "auto";
             navigationLevel1.append(table);
@@ -2859,6 +2831,23 @@
 
     class Location {
 
+        static async reportLocationId(dungeonName, dungeonId, questName) {
+            let location = await MyStorage.location.getValue(dungeonName);
+            if (!location) location = this.createLocation(dungeonName);
+            if (!location.id) {
+                location.id = dungeonId;
+                if (questName) location.quest = questName;
+                await MyStorage.location.setValue(location);
+            }
+        }
+
+        static createLocation(locationName) {
+            return {
+                name: locationName,
+                versions: [],
+            }
+        }
+
         static async getVersionCount(locationName) {
             const location = await MyStorage.location.getValue(locationName);
             if (!location || !location.versions) return 0;
@@ -2881,7 +2870,7 @@
             for (let i = 0, l = successLevels[1]; i < l; i++) {
                 const level = reportSource.levels && reportSource.levels[i];
                 if (level) {
-                    const doc = _util.getDocumentFor(level);
+                    const doc = _.util.getDocumentFor(level);
                     const geschafft = !doc.getElementsByName("goto_last_level")[0];
                     // In Leveln die nicht erreicht wurden, werden wird keine Klasse "navigation levels" angelegt
                     if (geschafft) {
@@ -2969,7 +2958,7 @@
         static async getMatchingVersions(locationName, versionId) {
             const debug = locationName === "aAtreanijsh";
             const flexibleLength = locationName === "Atreanijsh";
-            const location = await MyStorage.location.getValue(locationName) || {name: locationName};
+            const location = await MyStorage.location.getValue(locationName) || this.createLocation(locationName);
             const versions = location.versions || (location.versions = []);
             const result = [];
             let needUpdate = false;
@@ -3043,6 +3032,109 @@
             return versionIdArray[idx] || null;
         }
 
+        static quests = {
+            "Rhanines Auftrag": [
+                "Ein Tumult im Dorf",
+                "Auf dem Weg zum Bauernhof",
+                "Der Bauernhof",
+                "Der Weg in den Wald",
+                "Zur Kultstätte",
+            ],
+            "Ein Anfang": [
+                "Das Wirtshaus am Wegesrand",
+                "Der zweite Besuch im Wirtshaus",
+                "Ein Picknick im Wald",
+                "Die Höhle unter dem Wirtshaus",
+                "Eine Siegesfeier im Wald",
+                "Auf der Jagd",
+                "Die Waldgnome",
+                "Das Grab der Gnolle",
+                "Die Karte der Orks",
+                "Im Hauptquartier der Orks",
+            ],
+            "Ein einfacher Botengang": [
+                "Auf nach Tiefenfels",
+                "Der verwunschene Wald",
+                "Durch den alten Wehrgang",
+                "Die Gruft im verwunschenen Wald",
+                "Weiter durch den Wald",
+                "In den klagenden Sümpfen",
+                "Der Turm",
+                "Das Rattennest",
+            ],
+            "Die Pläne des Technikus": [
+                "Auf nach Rabenfurth",
+                "Verfolgung der Rattenmenschen",
+                "Die Rattengrube",
+                "Weiter nach Rabenfurth",
+                "Durch den Wald",
+                "Die Flasche",
+                "Eine Bergtour",
+                "Ein alter Turm auf dem Berg",
+                "Und weiter in den Wald der Wichtel",
+                "Der Abstieg",
+                "Die letzte Etappe",
+            ],
+            "Die Schlacht bei Kargash Peak": [
+                "Der Weg zur Schlacht bei Kargash Peak",
+                "Im Norden der Schlacht",
+                "Im Norden der Schlacht (äußerer Ring)",
+                "Im Norden der Schlacht (innerer Ring)",
+                "Im Westen der Schlacht",
+                "Im Westen der Schlacht (äußerer Ring)",
+                "Im Westen der Schlacht (innerer Ring)",
+                "Im Osten der Schlacht",
+                "Im Osten der Schlacht (äußerer Ring)",
+                "Im Osten der Schlacht (innerer Ring)",
+                "Im Süden der Schlacht",
+                "Im Süden der Schlacht (äußerer Ring)",
+                "Im Süden der Schlacht (innerer Ring)",
+                "Im Zentrum der Schlacht",
+                "Die Höhle",
+                "Dank an die Helden",
+            ],
+            "Die Stadt der Verdammten": [
+                "Ankunft in Stahlheim",
+                "Erkundung zum Gutshof des Verdammten",
+                "Zirkus der verlorenen Kinder",
+                "Das Herrenhaus",
+                "Das alte Gericht",
+                "Das Bergwerk",
+                "Das Heldengrab",
+                "Die Lehmgrube",
+                "Die Knochenzwillinge",
+                "Verlassen von Stahlheim",
+            ],
+            "Jenseits des Abgrunds": [
+                "Ein Dorf in Nöten",
+                "Der Tauchgang",
+                "Marsch auf dem Meeresgrund",
+                "Die Jagd auf den Oktopus",
+                "Nur ein Tauchgang",
+                "Marsch über den Meeresgrund",
+                "In der Eingangshalle",
+                "Lug und Trug im Labor",
+                "Die Schleuse",
+                "Der finstere Gang",
+                "Das bläuliche Tor",
+                "Das grünliche Tor",
+                "Das sandfarbene Tor",
+                "Das dunke Herz",
+                "Zurück ins Labor",
+                "Der leere Thron",
+                "Ein unerwartetes Wiedersehen",
+                "Nachwuchs",
+                "Jagd auf die Schatzjäger",
+                "Die Flucht",
+            ],
+        }
+
+        static getQuestFor(locName) {
+            for (const [questName, groupEntries] of Object.entries(this.quests)) {
+                if (groupEntries.includes(locName)) return questName;
+            }
+        }
+
     }
 
     class MySettings {
@@ -3080,7 +3172,7 @@
         }
 
         static async getFresh() {
-            return this.#settingsHandler = await _Settings.getHandler(this.#settingsDef);
+            return this.#settingsHandler = await _.Settings.getHandler(this.#settingsDef);
         }
 
     }
@@ -3088,12 +3180,12 @@
     class MyStorage {
 
         static async initMyStorage(initProxyDomain, initThisDomain) {
-            if (initThisDomain) this.indexedDb = _WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
+            if (initThisDomain) this.indexedDb = _.WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
 
             if (initProxyDomain) {
-                this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
-                this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
-                this.indexedDbLocal = _Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
+                this.messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                this.indexedDb = _.WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
+                this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
                 await MyStorage.messengerPromise;
             }
             await this.initThisStorage(this.indexedDb);
@@ -3162,6 +3254,10 @@
             this.location = indexedDb.createObjectStorage("location", "name");
 
             this.itemLoot = indexedDb.createObjectStorage("itemLoot", "id");
+            this.item = indexedDb.createObjectStorage("item", "id");
+
+            //this.skill = indexedDb.createObjectStorage("skill", "name");
+            //this.skillSources = indexedDb.createObjectStorage("skillSources", "name");
 
             this.testMain = indexedDb.createObjectStorage("test", "name");
         }
@@ -3205,9 +3301,9 @@
 
             for (const [itemName, itemDef] of Object.entries(loots)) {
                 if (itemDef.stufe) {
-                    await _WoDLootDb.reportLootSafe(itemName, itemDef.count, report.loc.name, report.loc.v, report.ts, report.world, report.world_season, itemDef.stufe, report.gruppe_id, report.gruppe);
+                    await _.WoDLootDb.reportLootSafe(itemName, itemDef.count, report.loc.name, report.loc.v, report.ts, report.world, report.world_season, itemDef.stufe, report.gruppe_id, report.gruppe);
                 } else {
-                    await _WoDLootDb.reportLootUnsafe(itemName, itemDef.count, report.loc.name, report.loc.v, report.ts, report.world, report.world_season, report.stufe, report.gruppe_id, report.gruppe);
+                    await _.WoDLootDb.reportLootUnsafe(itemName, itemDef.count, report.loc.name, report.loc.v, report.ts, report.world, report.world_season, report.stufe, report.gruppe_id, report.gruppe);
                 }
             }
         }
@@ -3223,7 +3319,7 @@
                 const titleElem = doc.getElementsByTagName("h2")[0];
                 const titleSplit = titleElem.textContent.split(/-(.*)/);
                 const title = titleSplit[1].trim();
-                const absoluteTime = _WoD.getTimeString(titleSplit[0].trim());
+                const absoluteTime = _.WoD.getTimeString(titleSplit[0].trim());
                 titleElem.innerHTML = absoluteTime + " - " + title;
             }
             return util.getPlainMainContent(titleFormatter);
@@ -3250,26 +3346,36 @@
         static getPlainMainContent(functionAfterClone) {
             const myDocument = document.cloneNode(true);
 
-            const remove = node => {
-                if (node) node.parentElement.removeChild(node);
-            }
-
-            const gadgetTable = myDocument.querySelector("#gadgettable tbody");
+            let gadgetTable = myDocument.querySelector("#gadgettable tbody");
             if (gadgetTable) { // existiert in nem Popup nicht
-                _util.forEachSafe(gadgetTable.children, curTR => {
+                _.util.forEachSafe(gadgetTable.children, curTR => {
                     if (!curTR.querySelector("div#main_content")) {
-                        remove(curTR);
+                        curTR.remove();
                     } else { //
-                        _util.forEachSafe(curTR.children, curTD => {
-                            if (!curTD.querySelector("div#main_content")) remove(curTD);
+                        _.util.forEachSafe(curTR.children, curTD => {
+                            if (!curTD.querySelector("div#main_content")) {
+                                curTD.remove();
+                            }
                         });
                     }
                 });
             }
+            gadgetTable = myDocument.querySelector("#gadgettable-center-gadgets");
+            if (gadgetTable) { // existiert in nem Popup nicht
+                _.util.forEachSafe(gadgetTable.children, curTR => {
+                    if (!curTR.querySelector("div#main_content")) {
+                        curTR.remove();
+                    }
+                });
+            }
+
+            if (myDocument.querySelector("#gadgettable-left-td")) {
+                throw new Error("Bereinigung fehlgeschlagen!")
+            }
 
             const removeClassNodes = function (node, className) {
                 for (const cur of node.querySelectorAll("." + className + ":not(." + className + " ." + className + ")")) {
-                    remove(cur);
+                    cur.remove();
                 }
             }
             removeClassNodes(myDocument.documentElement, "nowod");
@@ -3277,11 +3383,17 @@
             removeClassNodes(myDocument.documentElement, "intro_open");
 
             const tooltip = myDocument.getElementsByClassName("tooltip")[0];
-            if (tooltip) remove(tooltip);
+            if (tooltip) tooltip.remove();
 
             // Stellt sicher, dass auch immer der Pfad mit bei einer URL-Angabe mit dabei ist.
             // Wenn die Datei exportiert wird, wird die Pfadangabe ja ebenfalls "vergessen".
             this.ensureAllUrlsHavePathname(myDocument);
+            for (const aElem of myDocument.querySelectorAll("a")) {
+                const onclick = aElem.getAttribute("onclick")
+                if (onclick && onclick.startsWith("return wo(")) {
+                    aElem.setAttribute("onclick", "return wo(this.href);");
+                }
+            }
 
             if (functionAfterClone) functionAfterClone(myDocument);
             return myDocument;
@@ -3404,7 +3516,7 @@
             }
 
             function buttonReplace(buttonName, text, href) {
-                _util.forEachSafe(myDocument.getElementsByName(buttonName), a => buttonReplaceWithElement(a, text, href));
+                _.util.forEachSafe(myDocument.getElementsByName(buttonName), a => buttonReplaceWithElement(a, text, href));
             }
 
             var mainNavigationButton = myDocument.getElementsByName("stats[0]")[0];
@@ -3443,12 +3555,12 @@
         }
 
         static async htmlExportFullReportAsZip(reportId) {
-            const zip = new JSZip();
+            const zip = await _.File.getJSZip();
             const reportSources = await MyStorage.getSourceReport(reportId);
             const reportMeta = await MyStorage.reportArchive.getValue(reportId);
 
             function addHTML(filename, wodData) {
-                const myDocument = _util.getDocumentFor(wodData);
+                const myDocument = _.util.getDocumentFor(wodData);
                 const exportData = util.getHtmlForExport(myDocument);
                 zip.file(filename, exportData);
             }
@@ -3461,10 +3573,11 @@
                     addHTML("Level" + (i + 1) + ".html", level);
                 }
             }
-            const downloadFileName = reportMeta.gruppe + "_" + reportMeta.loc.name + "_" + _util.formatDateAndTime(new Date(reportMeta.ts)).replaceAll(".", "_") + ".zip";
+            const downloadFileName = reportMeta.gruppe + "_" + reportMeta.loc.name + "_" + _.util.formatDateAndTime(new Date(reportMeta.ts)).replaceAll(".", "_") + ".zip";
+            console.log("Ready to zip: ", zip);
             zip.generateAsync({type: "blob"}).then(function (content) {
                 console.log("File '" + downloadFileName + "' is ready!");
-                _File.forDownload(downloadFileName, content);
+                _.File.forDownload(downloadFileName, content);
             }).catch(error => console.error("Zip-Erro: ", error));
         }
 

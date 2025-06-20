@@ -18,28 +18,40 @@
 (function () {
     'use strict';
 
-    const _Storages = demawiRepository.import("Storages");
-    const _WoDStorages = demawiRepository.import("WoDStorages");
-    const _WoDLootDb = demawiRepository.import("WoDLootDb");
-    const _BBCodeExporter = demawiRepository.import("BBCodeExporter");
-    const _File = demawiRepository.import("File");
-    const _WoD = demawiRepository.import("WoD");
-    const _util = demawiRepository.import("util");
-    const _UI = demawiRepository.import("UI");
-    const _ItemParser = demawiRepository.import("ItemParser");
-    const _CSProxy = demawiRepository.import("CSProxy");
+    const _ = {
+        Storages: demawiRepository.import("Storages"),
+        WoDStorages: demawiRepository.import("WoDStorages"),
+        WoDLootDb: demawiRepository.import("WoDLootDb"),
+        BBCodeExporter: demawiRepository.import("BBCodeExporter"),
+        File: demawiRepository.import("File"),
+        WoD: demawiRepository.import("WoD"),
+        util: demawiRepository.import("util"),
+        UI: demawiRepository.import("UI"),
+        ItemParser: demawiRepository.import("ItemParser"),
+        CSProxy: demawiRepository.import("CSProxy"),
+    }
+
 
     class Mod {
         static dbname = "wodDB";
 
         static async startMod() {
-            if (_CSProxy.ensureIframeWrap()) return;
+            const actAsProxy = _.CSProxy.check();
+            if (actAsProxy === undefined) {
+                return;
+            } else if (actAsProxy) {
+                await MyStorage.initMyStorage(false, "Main");
+                return;
+            } else {
+                await MyStorage.initMyStorage(true);
+            }
+
             await demawiRepository.startMod();
             await MyStorage.init();
-            const page = _util.getWindowPage();
+            const page = _.util.getWindowPage();
 
             // Gegenstandsseite. Einlesen der Item-Werte.
-            if (page === "item.php") await _ItemParser.onItemPage();
+            if (page === "item.php") await _.ItemParser.onItemPage();
 
             // Einbinden der Such-UI.
             if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
@@ -117,7 +129,7 @@
                 const allHrefs = document.querySelectorAll("a");
                 var missingItemsFound = 0;
                 await _.util.forEachSafe(allHrefs, async itemLinkElement => {
-                    const itemName = util.getItemNameFromElement(itemLinkElement);
+                    const itemName = _.ItemParser.getItemNameFromElement(itemLinkElement);
                     if (!itemName) return;
                     const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
                     if (sourceItem && sourceItem.invalid) return;
@@ -208,7 +220,7 @@
                 resultContainer.append(originalResultTable);
 
                 toBBCodeButton.onclick = function () {
-                    navigator.clipboard.writeText(_BBCodeExporter.toBBCode(resultContainer));
+                    navigator.clipboard.writeText(_.BBCodeExporter.toBBCode(resultContainer));
                 }
 
                 WoD.getSuchfeld().onkeydown = function (event) {
@@ -352,7 +364,7 @@
                         href.innerHTML = item.name;
 
                         if (itemDBSearch.checked) {
-                            for (let i = 0, l = item.data.edelslots; i < l; i++) {
+                            for (let i = 0, l = item.data.slots; i < l; i++) {
                                 if (itemSpan.children.length < 2) {
                                     const abstand = document.createElement("span");
                                     abstand.innerHTML = "&nbsp;";
@@ -827,7 +839,7 @@
                         if (to === "") to = null;
                         if (!from && !to) return true;
                         if (from && to && to < from) return false; // keine Klassen eingeschlossen
-                        const anzahlEdelslots = Number(item.data?.edelslots || 0);
+                        const anzahlEdelslots = Number(item.data?.slots || 0);
                         if (from !== null && Number(from) > anzahlEdelslots) return false;
                         if (to !== null && Number(to) < anzahlEdelslots) return false;
                         return true;
@@ -1201,6 +1213,18 @@
 
     class MyStorage {
 
+        static async initMyStorage(initProxyDomain, initThisDomain) {
+            if (initThisDomain) this.indexedDb = _.WoDStorages.initWodDb("WoDStats+", Mod.dbname + initThisDomain);
+
+            if (initProxyDomain) {
+                this.messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                this.indexedDb = _.WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDStats+", this.messengerPromise);
+                this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDStats+");
+                await MyStorage.messengerPromise;
+            }
+            await this.init(this.indexedDb);
+        }
+
         static async init() {
             const adjust = function (objStore) {
                 if (!objStore) return;
@@ -1221,14 +1245,8 @@
                 }
                 return objStore;
             }
-
-            this.messengerPromise = _CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
-            this.indexedDb = _WoDStorages.initWodDbProxy(Mod.dbname + "Main", "ItemDB", this.messengerPromise);
-            this.indexedDbLocal = _Storages.IndexedDb.getDb(Mod.dbname, "ItemDB");
-
             this.item = adjust(this.indexedDb.createObjectStorage("item", "id"));
             this.itemSources = adjust(this.indexedDb.createObjectStorage("itemSources", "id"));
-            await this.messengerPromise;
         }
 
 
@@ -1238,12 +1256,6 @@
 
         static getItemDB() {
             return this.item;
-        }
-
-        static async getItemFromLink(itemLink) {
-            const itemName = util.getItemNameFromElement(itemLink);
-            if (!itemName) return;
-            return await this.getItem(itemName);
         }
 
         static async getItem(itemName) {
@@ -1306,7 +1318,7 @@
         static AUSWAHL_IDS = [3, 4, 5, 6, 7, 10, 11];
 
         static getItemUrl(itemName) {
-            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _util.fixedEncodeURIComponent(itemName);
+            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(itemName);
         }
 
         static getSuchfeld() {
@@ -1399,23 +1411,6 @@
             result.type = "text";
             if (width) result.style.width = width;
             return result;
-        }
-
-        static getItemNameFromElement(aElement) {
-            const curHref = aElement.href;
-            var itemName;
-            var index = curHref.indexOf("item.php?");
-            if (index > 0) {
-                itemName = curHref.match(/name=(.*?)&/);
-            } else {
-                index = curHref.indexOf("/item/");
-                if (index > 0) {
-                    itemName = curHref.match(/item\/(.*?)&/);
-                }
-            }
-            if (!itemName) return;
-            itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
-            return itemName;
         }
 
     }

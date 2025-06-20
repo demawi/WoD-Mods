@@ -1,5 +1,5 @@
 /**
- * WoD-spezifische (WoD-Klasse) und WoD-spezifische technische Klassen mit entsprechenden Hilfsmethoden.
+ * Allgemeine und WoD-spezifische Klassen und Hilfsmethoden.
  */
 class demawiRepository {
 
@@ -46,6 +46,7 @@ class demawiRepository {
 
             csProxy; // Cross-Site Database
             objectStores = {};
+            longQuery = 1000; // wenn ein Query länger als diese Zeit (in msecs) benötigt, wird eine Warning ausgegeben
 
             constructor(dbname, modname, csProxyPromise) {
                 this.modname = modname;
@@ -57,7 +58,7 @@ class demawiRepository {
                 });
             }
 
-            async exec(...args) {
+            async executeProxyCall(...args) {
                 if (this.csProxy) return this.csProxy.exec(...args);
                 else {
                     const _this = this;
@@ -67,7 +68,7 @@ class demawiRepository {
                 }
             }
 
-            async execIteration(iterationFn, ...args) {
+            async executeProxyIteration(iterationFn, ...args) {
                 if (this.csProxy) return this.csProxy.execIteration(iterationFn, ...args);
                 else {
                     const _this = this;
@@ -81,7 +82,7 @@ class demawiRepository {
                 const objectStore = new _.Storages.ObjectStorageProxy(storageId, key, indizes);
                 objectStore.indexedDb = this;
                 const _this = this;
-                this.exec(async function (modname, dbname, storageId, key, indizes) {
+                this.executeProxyCall(async function (modname, dbname, storageId, key, indizes) {
                     await _.Storages.IndexedDb.getDb(dbname, modname).createObjectStorage(storageId, key, indizes);
                 }, _this.modname, _this.dbname, storageId, key, indizes);
 
@@ -90,10 +91,15 @@ class demawiRepository {
             }
 
             async cloneTo(dbNameTo) {
-                const dbNameFrom = this.dbname
-                await this.exec(async function (dbNameFrom, dbNameTo) {
-                    _.Storages.IndexedDb.getDb(dbNameFrom, "").cloneTo(dbNameTo);
-                }, dbNameFrom, dbNameTo);
+                await this.executeProxyCall(async function (dbNameFrom, dbNameTo) {
+                    await _.Storages.IndexedDb.getDb(dbNameFrom, "").cloneTo(dbNameTo);
+                }, this.dbname, dbNameTo);
+            }
+
+            async deleteObjectStorage(storageId) {
+                await this.executeProxyCall(async function (dbName, storageId) {
+                    await _.Storages.IndexedDb.getDb(dbName, "").deleteObjectStorage(storageId);
+                }, this.dbname, storageId);
             }
 
         }
@@ -112,50 +118,67 @@ class demawiRepository {
             }
 
             async getValue(dbObjectId) {
-                return this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
+                return this.indexedDb.executeProxyCall(async function (storageId, dbname, dbObjectId) {
                     return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getValue(dbObjectId);
                 }, this.storageId, this.indexedDb.dbname, dbObjectId);
             }
 
             async setValue(dbObject) {
-                return this.indexedDb.exec(async function (storageId, dbname, dbObject) {
+                return this.indexedDb.executeProxyCall(async function (storageId, dbname, dbObject) {
                     return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).setValue(dbObject);
                 }, this.storageId, this.indexedDb.dbname, dbObject);
             }
 
             async deleteValue(dbObjectId) {
-                return this.indexedDb.exec(async function (storageId, dbname, dbObjectId) {
+                return this.indexedDb.executeProxyCall(async function (storageId, dbname, dbObjectId) {
                     return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).deleteValue(dbObjectId);
                 }, this.storageId, this.indexedDb.dbname, dbObjectId);
             }
 
             async count() {
-                return this.indexedDb.exec(async function (storageId, dbname) {
+                return this.indexedDb.executeProxyCall(async function (storageId, dbname) {
                     return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).count();
                 }, this.storageId, this.indexedDb.dbname);
             }
 
-            async getAll(queryOpt, iterationFnOpt) {
+            async getAll(query, iterationFnOpt) {
                 if (!iterationFnOpt) {
-                    return this.indexedDb.exec(async function (storageId, dbname, queryOpt) {
-                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(queryOpt);
-                    }, this.storageId, this.indexedDb.dbname, queryOpt);
+                    if (!query) {
+                        if (query !== false) console.warn("getAll ohne Parameter kann bei großen Datenbanken zu Problemen führen");
+                        query = {};
+                    }
+                    const startTime = new Date().getTime();
+                    const longQueryTime = query.longQuery || this.indexedDb.longQuery;
+                    query.longQuery = 10000;
+                    let resultPromise = this.indexedDb.executeProxyCall(async function (storageId, dbname, query) {
+                        return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query);
+                    }, this.storageId, this.indexedDb.dbname, query);
+                    resultPromise = resultPromise.then(a => {
+                        const queryTime = new Date().getTime() - startTime;
+                        if (queryTime > longQueryTime) {
+                            console.warn("Query dauert länger als 1sec: ", queryTime / 1000 + " secs", query);
+                        } else if (query.debug === 1) {
+                            console.log("QueryTime: ", queryTime / 1000 + " secs", query);
+                        }
+                        return a;
+                    });
+                    return resultPromise;
                 }
-                return this.indexedDb.execIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
-                    await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(queryOpt, async function (a) {
+                return this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, query) {
+                    await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query, async function (a) {
                         return await respondIteration(data, a);
                     });
                     respondFinished(data);
-                }, this.storageId, this.indexedDb.dbname, queryOpt);
+                }, this.storageId, this.indexedDb.dbname, query);
             }
 
             async getAllKeys(queryOpt, iterationFnOpt) {
                 if (!iterationFnOpt) {
-                    return this.indexedDb.exec(async function (storageId, dbname, queryOpt) {
+                    return this.indexedDb.executeProxyCall(async function (storageId, dbname, queryOpt) {
                         return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt);
                     }, this.storageId, this.indexedDb.dbname, queryOpt);
                 }
-                return await this.indexedDb.execIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
+                return await this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt, async function (a) {
                         return await respondIteration(data, a);
                     });
@@ -187,6 +210,7 @@ class demawiRepository {
             instanceId;
             requestIdx = 1; // only for debugging
             debug = false;
+            longQuery = 1000; // wenn ein Query länger als diese Zeit (in msecs) benötigt, wird eine Warning ausgegeben
 
             constructor(dbname, modname, idbFactory) {
                 this.modname = modname;
@@ -246,12 +270,12 @@ class demawiRepository {
                 return dbConnection.objectStoreNames;
             }
 
-            deleteObjectStore(storageId) {
+            deleteObjectStorage(storageId) {
                 this.objectStoresToDelete.push(storageId);
                 if (this.dbConnection) this.forceReconnect("delete object " + storageId);
             }
 
-            async doesObjectStoreExist(objectStore) {
+            async doesObjectStorageExist(objectStore) {
                 let dbConnection = await this.getConnection();
                 return dbConnection.objectStoreNames.contains(objectStore.storageId);
             }
@@ -451,14 +475,15 @@ class demawiRepository {
              */
             async cloneTo(dbTo) {
                 dbTo = typeof dbTo === "string" ? demawiRepository.Storages.IndexedDb.getDb(dbTo, this.modname) : dbTo;
-                const dbName = dbTo.storageId;
+                const dbName = dbTo.dbname;
                 console.log("Clone '" + this.dbname + "' to '", dbName);
                 const dbConnectionFrom = await this.getConnection();
                 const objectStoreNames = dbConnectionFrom.objectStoreNames; // Array
                 for (const objectStoreName of objectStoreNames) {
                     const readFrom = await this.getObjectStorageChecked(objectStoreName);
                     const writeTo = await dbTo.createObjectStorage(objectStoreName, await readFrom.getPrimaryKey());
-                    console.log("Clone '" + this.dbname + "' to '" + dbName + "'... " + objectStoreName + "...");
+                    const objectCount = await readFrom.count();
+                    console.log("Clone '" + this.dbname + "' to '" + dbName + "'... " + objectStoreName + "... (" + objectCount + " objects)");
                     await readFrom.getAll(false, async cur => {
                         await writeTo.setValue(cur);
                     })
@@ -634,6 +659,7 @@ class demawiRepository {
                 const thisObject = this;
                 return new Promise(async (resolve, reject) => {
                     const objectStore = await thisObject.connect(true);
+                    //console.log("SetValue: " + dbObject.id, dbObject, objectStore.keyPath, objectStore);
                     const request = objectStore.put(dbObject);
                     request.onsuccess = function (event) {
                         resolve();
@@ -775,7 +801,7 @@ class demawiRepository {
 
             // für readonly objectstores, kann man hierüber abfragen, ob der ObjectStore auch existiert
             async exists() {
-                return await this.indexedDb.doesObjectStoreExist(this);
+                return await this.indexedDb.doesObjectStorageExist(this);
             }
 
             async copyTo(toObjectStore) {
@@ -815,6 +841,7 @@ class demawiRepository {
                 alreadyFetched = 0;
                 indexKeyPath; // indexKeyPath für die 2,3... Suche
                 pointerName; // keyMatchFrom oder keyMatchTo, je nachdem in welcher Richtung der ObjectStore durchgegangen wird.
+                idx = 1;
 
                 constructor(objectStorage, idbObjectStore, idbTarget, query, iteration, retrieveFnName) {
                     if (retrieveFnName !== "getAll") throw new Error("Für den Batch-Search wird bisher nur 'getAll' unterstützt");
@@ -837,12 +864,14 @@ class demawiRepository {
                     else delete this.query.debug;
                     while (await this.#run() !== true) ;
                     this.query.debug = debug;
+                    delete this.query.subQueryId;
                     if (this.query.debug) console.log("Batch-Query fertig!");
                 }
 
                 async #run() {
                     this.query.limit = Math.min(this.batchSize, this.limit);
                     const results = await this.objectStorage[this.retrieveFnName](this.query);
+                    this.query.subQueryId = "BatchSearch#" + this.idx++;
                     if (this.query.debug) console.log("Batch-query: ", this.query, results.length);
                     for (let i = 0, l = results.length; i < l; i++) {
                         if (await this.iteration(results[i], this.alreadyFetched + i) === false) return true;
@@ -905,10 +934,13 @@ class demawiRepository {
                  */
                 static async doSearch(objectStorage, query, iterationOpt, retrieveFnName) {
                     const startTime = new Date().getTime();
+                    const isGetAllKeys = retrieveFnName === "getAllKeys";
                     if (!query) {
-                        if (query !== false && iterationOpt === undefined && retrieveFnName === "getAll") console.warn(retrieveFnName + " ohne Parameter kann bei großen Datenbanken zu Problemen führen")
+                        if (query !== false && iterationOpt === undefined && !isGetAllKeys) console.warn(retrieveFnName + " ohne Parameter kann bei großen Datenbanken zu Problemen führen")
                         query = {};
                     }
+                    query.db = objectStorage.indexedDb.dbname;
+                    query.storageId = objectStorage.storageI;
                     const connection = await objectStorage.indexedDb.getConnection();
                     const transaction = connection.transaction(objectStorage.storageId, "readonly");
                     const idbObjectStore = transaction.objectStore(objectStorage.storageId);
@@ -924,14 +956,21 @@ class demawiRepository {
                     // Zuerst versuchen wir das Ziel zu bekommen
                     if (query.index) target = await objectStorage.constructor.TargetOps.getQueryTarget(objectStorage, target, query);
 
+
                     let resultPromise;
+                    let isMainBatch;
                     if (needReconnectable && !query.noBatch) {
+                        isMainBatch = true;
                         if (query.debug) console.log("SearchType: Batch", target.keyPath, _.util.cloneObject(query));
                         resultPromise = new objectStorage.constructor.BatchSearch(objectStorage, idbObjectStore, target, query, iterationOpt, retrieveFnName).batchIt();
                     } else {
                         let keyRange;
                         if (query.keyMatch || query.keyMatchFrom || query.keyMatchTo) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchFrom, query.keyMatchTo, query.keyMatchFromOpen, query.keyMatchToOpen);
-                        if (iterationOpt) {
+                        if (iterationOpt && isGetAllKeys) { // Wird aktuell immer komplett abgefragt
+                            if (query.order) throw new Error("getAllKeys wird aktuell nicht mit 'query.order' unterstützt!");
+                            if (query.debug) console.log("SearchType: " + retrieveFnName, target.keyPath, keyRange, _.util.cloneObject(query));
+                            resultPromise = this.awaitRequest(target[retrieveFnName](keyRange));
+                        } else if (iterationOpt) {
                             if (query.debug) console.log("SearchType: openCursorIteration", target.keyPath, keyRange, _.util.cloneObject(query));
                             resultPromise = this.#openCursorIteration(target.openCursor(keyRange, query.order), iterationOpt, query.limit, retrieveFnName);
                         } else if (query.order) {
@@ -942,11 +981,21 @@ class demawiRepository {
                             resultPromise = this.awaitRequest(target[retrieveFnName](keyRange, query.limit));
                         }
                     }
-                    if (query.debug === 1) {
-                        resultPromise = resultPromise.then(a => {
-                            console.log("QueryTime: ", (new Date().getTime() - startTime) / 1000 + " secs", query);
-                            return a;
-                        });
+                    resultPromise = resultPromise.then(a => {
+                        const queryTime = new Date().getTime() - startTime;
+                        if (!isMainBatch && queryTime > (query.longQuery || objectStorage.indexedDb.longQuery)) {
+                            console.warn("Query dauert länger als 1sec: ", queryTime / 1000 + " secs", query);
+                        } else if (query.debug === 1) {
+                            console.log("QueryTime: ", queryTime / 1000 + " secs", query);
+                        }
+                        return a;
+                    });
+                    if (iterationOpt && isGetAllKeys) { // Wird aktuell immer komplett abgefragt
+                        resultPromise.then(async result => {
+                            for (const cur of result) {
+                                if (await iterationOpt(result) === false) break;
+                            }
+                        })
                     }
                     return resultPromise;
                 }
@@ -1172,6 +1221,24 @@ class demawiRepository {
      */
     static CSProxy = class CSProxy {
 
+        /**
+         * @returns {boolean} actAsProxy. =undefined: wenn auf dieser Instanz kein Mod-Code ausgeführt werden soll
+         *                                =true: wenn die Instanz einen Proxy installiert und somit die lokale Datenbank angesprochen werden muss. Weitere Mod-Code sollte hierauf nicht weiter laufen.
+         *                                =false: wenn die Instanz kein Proxy ist und der Mod ganz normal laufen soll. Als Datenbank-Anbindung muss dafür die Proxy-Verbindung genutzt werden.
+         */
+        static check() {
+            // TODO: prüfen, ob im Proxy eine aktuelle Version läuft!?
+            if (window.origin.endsWith("//world-of-dungeons.de")) { // Main-Domain-Check
+                if (window.location.href.includes("messenger=true")) { // With ProxyMarker
+                    this.actAsCSProxyResponder();
+                    return true;
+                }
+                return;
+            }
+            if (this.ensureIframeWrap()) return;
+            return false;
+        }
+
         static isTampermonkey() {
             return GM.info.scriptHandler === "Tampermonkey";
         }
@@ -1188,9 +1255,12 @@ class demawiRepository {
          * (Same-origin) Popups sollten das iframe ihres parents nutzen.
          */
         static ensureIframeWrap() {
-            if (window.top === window && !window.opener) {
+            const isLogin = document.getElementById("WodLoginBox");
+            if (!isLogin && window.top === window && !window.opener) { // keinLogin und benötigt Wrap => wrap
                 if (!document.querySelector("#iframeWrap")) this.#ensureIframeWrapDoIt();
                 return true;
+            } else if (isLogin && window.top !== window) { // Login und Wrap gefunden => unwrap
+                window.top.location.href = window.location.href;
             }
         }
 
@@ -1210,14 +1280,21 @@ class demawiRepository {
             iframeWrap.src = window.location.href;
             document.body.insertBefore(iframeWrap, document.body.children[0]);
             //iframeWrap.contentDocument.body.className = document.body.className;
-            let cur;
-            while (cur = document.head.children[0]) {
-                document.head.removeChild(cur);
-            }
-            while (cur = document.body.children[1]) {
-                document.body.removeChild(cur);
-            }
+
             iframeWrap.addEventListener("load", function () {
+                let cur;
+                // Elemente lieber nicht entfernen, da ansonsten Seiten-Skripte ins Leere laufen und die Konsole spammen z.B. bei der Dungeon-Ansicht die Progress-Bar
+                //while (cur = document.head.children[0]) cur.remove();
+                //while (cur = document.body.children[1])  cur.remove();
+                for (let i = 0, l = document.head.children.length; i < l; i++) {
+                    const cur = document.head.children[i];
+                    if (cur.tagName === "LINK") {
+                        cur.remove();
+                        i--;
+                        l--;
+                    }
+                }
+                for (let i = 1, l = document.body.children.length; i < l; i++) document.body.children[i].style.display = "none";
                 document.title = iframeWrap.contentWindow.document.title;
                 //iframeWrap.contentWindow.addEventListener("beforeunload", function () {});
                 iframeWrap.contentWindow.addEventListener("unload", function () {
@@ -1585,11 +1662,11 @@ class demawiRepository {
         }
 
         static getSkillsDb() {
-            return this.#getCreateObjectStore("skill", "name");
+            return this.#getCreateObjectStore("skill", "id");
         }
 
         static getSkillsSourceDb() {
-            return this.#getCreateObjectStore("skillSources", "name");
+            return this.#getCreateObjectStore("skillSources", "id");
         }
 
         static getWorldDb() {
@@ -2029,7 +2106,7 @@ class demawiRepository {
     }
 
     static WoDSkillsDb = class {
-        static #skillDataVersion = 2;
+        static #skillDataVersion = 3;
 
         static TYP = {
             ANGRIFF: "Angriff",
@@ -2055,22 +2132,39 @@ class demawiRepository {
         }
 
         static async getSkill(skillName) {
-            const skillDb = _.WoDStorages.getSkillsDb();
-            let skill = await skillDb.getValue(skillName);
+            let skill = await _.WoDStorages.getSkillsDb().getValue(skillName.toLowerCase());
             if (skill && skill.dv === this.#skillDataVersion) return skill;
             // ad-hoc load
-            const now = new Date().getTime();
-            skill = {name: skillName, dv: this.#skillDataVersion, world: _.WoD.getMyWorld(), ts: now};
             const content = await _.util.loadViaXMLRequest(this.getSkillUrlAlsPopup(skillName));
             const doc = await _.util.getDocumentFor(content);
+            return this.onSkillPage(doc);
+        }
+
+        static async onSkillPage(doc, content) {
+            doc = doc || document;
+            const skillName = doc.getElementsByTagName("h1")[0].textContent.trim().substring(11).trim();
+            const now = new Date().getTime();
+            const skill = {
+                id: skillName.toLowerCase(),
+                name: skillName,
+                dv: this.#skillDataVersion,
+                world: _.WoD.getMyWorld(),
+                ts: now
+            };
             this.#parseSkillBeschreibung(doc, skill);
             if (!skill.typ) {
                 console.warn("Skill '" + skillName + "' kann nicht bestimmt werden", doc);
                 return;
             }
-            await skillDb.setValue(skill);
-            const skillSource = {name: skillName, src: content, world: _.WoD.getMyWorld(), ts: now};
+            content = doc.getElementsByClassName("main_content")[0].outerHTML;
+            const skillSource = {
+                id: skillName.toLowerCase(),
+                src: content,
+                world: _.WoD.getMyWorld(),
+                ts: now
+            };
             await _.WoDStorages.getSkillsSourceDb().setValue(skillSource);
+            await _.WoDStorages.getSkillsDb().setValue(skill);
             return skill;
         }
 
@@ -2078,10 +2172,14 @@ class demawiRepository {
             return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(skillName);
         }
 
+        /**
+         * TODO: Auswirkungen werden noch nicht erfasst
+         */
         static #parseSkillBeschreibung(doc, skill) {
             for (const entryTR of doc.querySelectorAll(".content_table tr:nth-child(2) > td:nth-child(2) tr")) {
-                const value = entryTR.children[1].textContent.trim();
-                switch (entryTR.children[0].textContent.trim()) {
+                const key = entryTR.children[0].textContent.trim();
+                let value = entryTR.children[1].textContent.trim();
+                switch (key) {
                     case "Typ":
                         // Aktive Angriffe: Angriff, Verschlechterung
                         // Aktive Sonstiges: Heilung, Verbesserung, Ruft Helfer, Initiative
@@ -2103,9 +2201,91 @@ class demawiRepository {
                         // Nahkampf, Fernkampf, Zauber, Sozial, Falle entschärfen, Verschrecken, Falle auslösen, Naturgewalt, Krankheit
                         skill.angriffstyp = value;
                         break;
-                    default:
-                        // aktuell egal
+                    case "Fertigkeitenklasse":
+                        if (value !== "-") skill.klasse = value;
                         break;
+                    case "Gegenstand":
+                        if (value !== "-") skill.item = value;
+                        break;
+                    case "Initiative": // Initiativewurf
+                        skill.iw = value;
+                        break;
+                    case "Angriff": // Angriffswurf
+                        skill.aw = value;
+                        break;
+                    case "Parade": // Paradewurf
+                        skill.pw = value;
+                        break;
+                    case "Schaden": // Schadenswurf
+                        skill.dmgw = value;
+                        break;
+                    case "Heilung": // Heilungswurf
+                        skill.hw = value;
+                        break;
+                    case "Mana-Kosten":
+                        if (value !== "-") {
+                            skill.manabasis = Number(value.match(/\((\d*)\)/)[1]);
+                        }
+                        break;
+                    case "Gewinn an MP":
+                        skill.gainMP = value;
+                        break;
+                    case "Finaler Wirkbonus":
+                        skill.wirkbonus = value;
+                        break;
+                    case "Ziel":
+                        skill.target = value;
+                        break;
+                    case "Max. betroffene Helden":
+                    case "Max. betroffene Gegner":
+                        skill.range = value;
+                        break;
+                    case "Verlust an HP": // z.B. "Zellteilung"
+                        skill.hpLoss = value;
+                        break;
+                    case "Designed by":
+                        // ignorieren
+                        break;
+                    default:
+                        console.warn("Unbekannte Fertigkeitkategorie gefunden, welche aktuell nicht verarbeitet wird: '" + key + "'", skill);
+                        alert("Unbekannte Fertigkeitkategorie gefunden, welche aktuell nicht verarbeitet wird: '" + key + "' (" + skill.name + ")");
+                        break;
+                }
+            }
+            const classInfo = doc.getElementById("classinfo");
+            if (classInfo) {
+                skill.classInfo = {};
+                const tds = classInfo.querySelectorAll("td");
+                for (const td of tds) {
+                    let fertigkeitType;
+                    let klasse;
+                    for (const cur of td.childNodes) {
+                        switch (cur.tagName) {
+                            case "H3":
+                                switch (cur.textContent.trim().replace(" für:", "")) {
+                                    case "Basisfertigkeit":
+                                        fertigkeitType = "bf";
+                                        break;
+                                    case "Nebenfertigkeit":
+                                        fertigkeitType = "nf";
+                                        break;
+                                    case "Klassenfremde Fertigkeit":
+                                        fertigkeitType = "kf";
+                                        break;
+                                }
+                                break;
+                            case undefined:
+                                klasse = cur.textContent.trim();
+                                break;
+                            case "SPAN":
+                                const lvl = Number(cur.textContent.match(/ (\d*)\)/)[1]);
+                                skill.classInfo[klasse] = {
+                                    type: fertigkeitType,
+                                    lvl: lvl,
+                                }
+                                break;
+                        }
+                    }
                 }
             }
         }
@@ -2189,6 +2369,10 @@ class demawiRepository {
 
         static getMyStufe(doc) {
             return Number(_.WoD.getValueFromMainForm("stufe", doc));
+        }
+
+        static getCurrentReportLevel(doc) {
+            return Number(_.WoD.getValueFromMainForm("current_level", doc));
         }
 
         static async getMyWorldSeasonNr(doc) {
@@ -2285,7 +2469,7 @@ class demawiRepository {
             let locName;
             if (this.getReportType(doc) === "Duell") throw new Error("Duelle werden hier noch nicht unterstützt!");
             const titleSplit = doc.getElementsByTagName("h2")[0].textContent.split(/-(.*)/);
-            locName = titleSplit[1].trim();
+            locName = titleSplit[1].trim().replaceAll("Eure Gruppe vs. ", "");
             ts = this.getTimestampFromString(titleSplit[0].trim()) / 60000;
 
             const myWorld = this.getMyWorld(doc);
@@ -2573,7 +2757,7 @@ class demawiRepository {
             let maxLevel;
 
             const getNumbers = function (maxSuccessLevel, finishedRooms) {
-                if (locName === "Offene Rechnung") {
+                if (locName === "Offene Rechnung" || locName === "Bühne frei!") {
                     if (maxSuccessLevel > 0) {
                         maxSuccessLevel++;
                         finishedRooms++;
@@ -2760,6 +2944,50 @@ class demawiRepository {
                 "    cursor: pointer;\n" +
                 "    background-position: center 0px;\n" +
                 "}");
+
+            _.Libs.addCSS("https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css");
+            // select2
+            let select = $('select');
+            if (!select) console.warn("Kein select-feld gefunden");
+            let bg = select.css('background-color');
+            let c = select.css('color');
+            addRule('.select2-selection, .select2-dropdown { background: ' + bg + ' !important; } ');
+            addRule('.select2-selection span { color: ' + c + ' !important; } ');
+            addRule('.select2-dropdown li[aria-selected="true"] { background-color: rgba(255, 255, 255, 0.25) !important; } ');
+            addRule('.select2-results__option { padding: 0px !important; padding-left: 5px !important;} ');
+            addRule('.button_image_info { width: 20px; } ');
+            addRule('.select2-container--default .select2-selection--single { border-color: #999999 !important;}')
+            // select2_compact
+            //addRule('.select2-selection__rendered { font-size: 14px; } ');
+            addRule('.select2-results__options { max-height: ' + (window.screen.height * 0.4) + 'px !important; } ');
+            addRule('.select2-container, .select2-selection--single, .select2-selection__rendered, .select2-selection__arrow { height: 20px !important; line-height: 20px !important; } ');
+            addRule('.button_image_info { margin-top: -5px; } ');
+
+            $(document).on('select2:open', () => {
+                document.querySelector('.select2-search__field').focus();
+            });
+        }
+
+        static betterInput(inputElement) {
+            inputElement.style.margin = "0px";
+            inputElement.style.padding = "0px";
+            inputElement.style.paddingLeft = "8px";
+            inputElement.style.paddingRight = "8px";
+            inputElement.style.borderRadius = "4px";
+            if (inputElement.type === "button") inputElement.style.height = "21px";
+            else inputElement.style.height = "20px";
+            inputElement.style.fontWeight = "normal";
+            inputElement.style.fontSize = "14px";
+        }
+
+        static betterSelect(selectField) {
+            setTimeout(function () {
+                $(selectField).select2({
+                    dropdownAutoWidth: true,
+                    width: 'auto',
+                    //placeholder: "Bitte wählen"
+                });
+            }, 0);
         }
 
         static addCSS(url) {
@@ -2842,7 +3070,7 @@ class demawiRepository {
             const button = document.createElement("span");
             button.classList.add("nowod");
             button.innerHTML = htmlContent;
-            button.style.fontSize = "12px";
+            if (!button.style.fontSize) button.style.fontSize = "12px";
             button.style.cursor = "pointer";
             button.onclick = callback;
             return button;
@@ -2918,6 +3146,11 @@ class demawiRepository {
      * Hilfemethoden für Down- und Uploads
      */
     static File = class {
+
+        static async getJSZip() {
+            await _.Libs.evalViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js")
+            return new JSZip();
+        }
 
         static forDownload(filename, data) {
             const blob = new Blob([data], {type: 'text/plain'});
@@ -3197,7 +3430,11 @@ class demawiRepository {
                 newArray.push(array[i]);
             }
             for (const cur of newArray) {
-                await fn(cur);
+                if (this.isAsyncFunction(fn)) {
+                    await fn(cur);
+                } else {
+                    fn(cur);
+                }
             }
         }
 
@@ -3417,6 +3654,7 @@ class demawiRepository {
             console.warn(msg, ...args);
         }
         let withSources = true;
+        let _container;
 
         class UnitId {
             name;
@@ -4043,7 +4281,10 @@ class demawiRepository {
                         }
                     }
                 }
-
+                if (!unknownEntry.where) unknownEntry.where = {};
+                const reportData = _.WoD.getFullReportBaseData(_container);
+                const founding = reportData.loc.name + "|" + _.WoD.getCurrentReportLevel(_container) + "|" + reportData.reportId;
+                unknownEntry.where[founding] = 1;
                 await unknownSkillDb.setValue(unknownEntry);
                 return unknownIdentifier;
             }
@@ -4161,6 +4402,7 @@ class demawiRepository {
                 const startTime = new Date().getTime();
                 warnings = [];
                 withSources = activateSources;
+                _container = container;
 
                 const roundContentTable = this.#getContentTable(container);
                 const areas = Array();
@@ -4274,7 +4516,37 @@ class demawiRepository {
     static ItemParserDataVersion = 5;
     static ItemParser = class {
 
+        static getItemNameFromElement(aElement) {
+            const curHref = aElement.href;
+            var itemName;
+            var index = curHref.indexOf("item.php?");
+            if (index > 0) {
+                itemName = curHref.match(/name=(.*?)&/);
+            } else {
+                index = curHref.indexOf("/item/");
+                if (index > 0) {
+                    itemName = curHref.match(/item\/(.*?)&/);
+                }
+            }
+            if (!itemName) return;
+            itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
+            if (!this.isValidItemName(itemName)) {
+                console.warn("Nicht korrekten ItemNamen entdeckt: '" + itemName + "'");
+                return;
+            }
+            return itemName;
+        }
+
+        static isValidItemName(itemName) {
+            return !!itemName.match(/^[\p{Letter}0-9 ():,'.+?!-]*$/u);
+        }
+
         static createItem(itemName) {
+            if (!this.isValidItemName(itemName)) {
+                console.error("ItemName ist nicht korrekt: '" + itemName + "'");
+                throw new Error("ItemName ist korrekt: '" + itemName + "'"); // TODO: nur temorär aktiv
+                return;
+            }
             return {
                 id: itemName.toLowerCase(),
                 name: itemName,
@@ -4295,6 +4567,7 @@ class demawiRepository {
             let item = await this.getItemSourceDB().getValue(itemName.toLowerCase());
             if (!item || !item.details) {
                 item = this.createItem(itemName);
+                if (!item) return;
                 item.invalid = true;
             }
             item.ts = new Date().getTime();
@@ -4321,6 +4594,7 @@ class demawiRepository {
             const all = document.getElementsByTagName("h1")[0];
             var itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
             const sourceItem = this.createItem(itemName);
+            if (!sourceItem) return;
             sourceItem.details = details;
             sourceItem.link = link;
             await this.getItemSourceDB().setValue(sourceItem);
@@ -4400,7 +4674,7 @@ class demawiRepository {
                                 console.error("Unbekannte Besonderheit entdeckt", item.name, besonderheiten);
                                 alert("Unbekannte Besonderheit entdeckt");
                             }
-                            data.edelslots = matches[1];
+                            data.slots = matches[1];
                         }
                         break;
                     case "Heldenklassen":

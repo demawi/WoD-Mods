@@ -18,7 +18,9 @@
 (function () {
     'use strict';
 
-    const _Storages = demawiRepository.import("Storages");
+    const _ = {
+        Storages: demawiRepository.import("Storages"),
+    }
 
     class Mod {
         static dbname = "wodDB";

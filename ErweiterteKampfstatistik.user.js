@@ -23,19 +23,24 @@
 (function () {
     'use strict';
 
-    const _Storages = demawiRepository.import("Storages");
-    const _WoDStorages = demawiRepository.import("WoDStorages");
-    const _BBCodeExporter = demawiRepository.import("BBCodeExporter");
-    const _WoD = demawiRepository.import("WoD");
-    const _WoDParser = demawiRepository.import("WoDParser");
-    const _ReportParser = demawiRepository.import("ReportParser");
-    const _util = demawiRepository.import("util");
-    const _Libs = demawiRepository.import("Libs");
-    const _UI = demawiRepository.import("UI");
-    const _Dices = demawiRepository.import("Dices");
+    const _ = {
+        Storages: demawiRepository.import("Storages"),
+        WoDStorages: demawiRepository.import("WoDStorages"),
+        BBCodeExporter: demawiRepository.import("BBCodeExporter"),
+        WoD: demawiRepository.import("WoD"),
+        WoDParser: demawiRepository.import("WoDParser"),
+        ReportParser: demawiRepository.import("ReportParser"),
+        util: demawiRepository.import("util"),
+        Libs: demawiRepository.import("Libs"),
+        UI: demawiRepository.import("UI"),
+        Dices: demawiRepository.import("Dices"),
+        CSProxy: demawiRepository.import("CSProxy"),
+        Settings: demawiRepository.import("Settings"),
+    }
 
     class Mod {
         static dbname = "wodDB";
+        static modname = "KampfberichtStatistiken";
         static version = "0.19";
         static stand = "01.05.2025";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
@@ -50,19 +55,32 @@
          * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
          */
         static async startMod(kampfbericht, kampfstatistik, dbReportSource) {
-            await demawiRepository.startMod();
-            await MyStorage.init();
-            let thisObject = this;
-            unsafeWindow.statExecuter = async function (...args) {
-                await Mod.startMod(...args);
+            const actAsProxy = _.CSProxy.check();
+            if (actAsProxy === undefined) {
+                return;
+            } else if (actAsProxy) {
+                await MyStorage.initMyStorage(false, "Main");
+                return;
+            } else {
+                await MyStorage.initMyStorage(true);
             }
+            await demawiRepository.startMod();
+            unsafeWindow.statExecuter = async function (...args) {
+                console.log(GM.info.script.name + " wird aufgerufen");
+                await Mod.startMod2(...args);
+            }
+            await this.startMod2();
+        }
+
+        static async startMod2(kampfbericht, kampfstatistik, dbReportSource) {
+            const _this = this;
             if (dbReportSource && dbReportSource.levels) {
                 await this.syncWithReportSources(dbReportSource);
-                await Mod.startMod(kampfbericht, kampfstatistik); // ohne Report nochmal aufrufen
+                await Mod.startMod2(kampfbericht, kampfstatistik); // ohne Report nochmal aufrufen
                 return;
             }
             if (WoD.istSeite_AbenteuerUebungsplatz()) {
-                let [levelData, errors] = await _ReportParser.parseKampfbericht(document, true);
+                let [levelData, errors] = await _.ReportParser.parseKampfbericht(document, true);
                 if (levelData) {
                     OutputAnchor.init();
                     Mod.thisLevelDatas = [levelData];
@@ -75,19 +93,19 @@
                 OutputAnchor.init();
                 OutputAnchor.runSafe(async function () {
                     // cur_rep_id für Dungeons, report bei Schlachten
-                    const reportData = _WoD.getFullReportBaseData();
+                    const reportData = _.WoD.getFullReportBaseData();
                     const reportId = reportData.reportId;
-                    thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
-                    console.log("ReportId: ", reportId, thisObject.thisReport);
+                    _this.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
+                    console.log("ReportId: ", reportId, _this.thisReport);
 
-                    var [levelData, levelNr, errors] = await thisObject.readKampfberichtAndStoreIntoReport(document, thisObject.thisReport, reportId);
+                    var [levelData, levelNr, errors] = await _this.readKampfberichtAndStoreIntoReport(document, _this.thisReport, reportId);
                     OutputAnchor.reportWarnings(errors);
                     if (levelData) {
                         let roundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
 
                         var hinweisText = ": " + roundCount + " Runden";
                         if (levelData.areas.length > 0) {
-                            hinweisText += " [" + _util.arrayMap(levelData.areas, area => area.rounds.length).join(", ") + "]";
+                            hinweisText += " [" + _.util.arrayMap(levelData.areas, area => area.rounds.length).join(", ") + "]";
                         }
                         const reportProgress = Mod.getReportProgress();
                         if (reportProgress.missingReports.length > 0) {
@@ -96,26 +114,26 @@
                         OutputAnchor.setTitle(hinweisText);
                         Mod.thisLevelDatas = [];
                         Mod.thisLevelDatas[levelNr - 1] = levelData;
-                        await MyStorage.getReportStatsDB().setValue(thisObject.thisReport);
+                        await MyStorage.getReportStatsDB().setValue(_this.thisReport);
                     }
                 });
             }
             if (kampfstatistik || WoD.istSeite_Kampfstatistik()) { // Statistikseite (keine Zwischenspeicherung nur Anzeige)
                 OutputAnchor.init();
                 OutputAnchor.runSafe(async function () {
-                    const reportData = _WoD.getFullReportBaseData();
+                    const reportData = _.WoD.getFullReportBaseData();
                     const reportId = reportData.reportId;
-                    thisObject.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
-                    await thisObject.#invalidateOldCache(thisObject.thisReport);
+                    _this.thisReport = await MyStorage.getReportStatsDB().getValue(reportId);
+                    await _this.#invalidateOldCache(_this.thisReport);
 
                     // Holen und Speichern der erreichten Level
-                    const successStats = _WoDParser.retrieveSuccessInformationOnStatisticPage(document, thisObject.thisReport.success);
-                    thisObject.thisReport.maxLevels = Math.min(successStats.levels[0] + 1, successStats.levels[1]);
-                    await MyStorage.getReportStatsDB().setValue(thisObject.thisReport);
+                    const successStats = _.WoDParser.retrieveSuccessInformationOnStatisticPage(document, _this.thisReport.success);
+                    _this.thisReport.maxLevels = Math.min(successStats.levels[0] + 1, successStats.levels[1]);
+                    await MyStorage.getReportStatsDB().setValue(_this.thisReport);
 
-                    console.log("ReportId: ", reportId, thisObject.thisReport);
+                    console.log("ReportId: ", reportId, _this.thisReport);
 
-                    if (thisObject.thisReport.levelCount) {
+                    if (_this.thisReport.levelCount) {
                         const reportProgress = Mod.getReportProgress();
 
                         var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
@@ -123,11 +141,17 @@
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                         }
                         OutputAnchor.setTitle(hinweisText);
-                        Mod.thisLevelDatas = thisObject.thisReport.levelDatas;
+                        Mod.thisLevelDatas = _this.thisReport.levelDatas;
                     } else {
                         OutputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
                     }
-                    MyStorage.validateAllReports(); // no await
+                    const settings = await MySettings.getFresh();
+                    if (!settings.get(MySettings.SETTING.LAST_VALIDATION) || new Date(settings.get(MySettings.SETTING.LAST_VALIDATION)) < new Date().setDate(new Date().getDate() - 1)) {
+                        console.log("Check ReportStats-Validation")
+                        MyStorage.maintenanceAllReports(); // no await, blockiert aber ja dennoch die Anwendung
+                        settings.set(MySettings.SETTING.LAST_VALIDATION, new Date().getTime());
+                        await settings.save();
+                    }
                 });
             }
         }
@@ -136,7 +160,7 @@
             const levelDatas = (report.levelDatas || []).slice(0);
             for (let i = 0, l = levelDatas.length; i < l; i++) {
                 const levelData = levelDatas[i];
-                if (levelData && (!levelData.dv || levelData.dv !== _ReportParser.reportDataVersion)) {
+                if (levelData && (!levelData.dv || levelData.dv !== _.ReportParser.reportDataVersion)) {
                     delete report.levelDatas[i];
                 }
             }
@@ -150,13 +174,14 @@
             const statReport = await MyStorage.getReportStatsDB().getValue(reportId);
             let changed = false;
             for (let i = 0, l = dbReportSource.levels.length; i < l; i++) {
-                if (!statReport.levelDatas || !statReport.levelDatas[i]) {
-                    const doc = _util.getDocumentFor(dbReportSource.levels[i]);
+                if ((!statReport.levelDatas || !statReport.levelDatas[i]) && dbReportSource.levels[i]) {
+                    const doc = _.util.getDocumentFor(dbReportSource.levels[i]);
                     await this.readKampfberichtAndStoreIntoReport(doc, statReport, reportId);
                     changed = true;
                 }
             }
             if (changed) {
+                console.log("syncWithReportSources: Sourcen wurden gecached!");
                 await MyStorage.getReportStatsDB().setValue(statReport);
             }
         }
@@ -173,10 +198,10 @@
                     report.levelCount = navigationBar.children.length - 1;
                 }
             }
-            console.log("Read Kampfbericht: ", reportId, levelNr);
-            const [levelData, errors] = await _ReportParser.parseKampfbericht(container, true);
+            console.log("Read Kampfbericht: " + reportId + " lvl" + levelNr);
+            const [levelData, errors] = await _.ReportParser.parseKampfbericht(container, true);
             if (false) {
-                const [levelData2, errors2] = await _ReportParser.parseKampfbericht(container, false);
+                const [levelData2, errors2] = await _.ReportParser.parseKampfbericht(container, false);
                 console.log("AAAAAAAAAAAAAAAAA " + JSON.stringify(levelData).length);
                 console.log("BBBBBBBBBBBBBBBBB " + JSON.stringify(levelData2).length, levelData2);
                 const zip = new JSZip();
@@ -328,7 +353,7 @@
                     resultat.innerHTML = "";
                     return;
                 }
-                let result = _Dices.winsOver2(awAVG, Number(eingabeAWmin.value) || 0, Number(eingabeAWmax.value) || 0, pwAVG, Number(eingabePWmin.value) || 0, Number(eingabePWmax.value) || 0);
+                let result = _.Dices.winsOver2(awAVG, Number(eingabeAWmin.value) || 0, Number(eingabeAWmax.value) || 0, pwAVG, Number(eingabePWmin.value) || 0, Number(eingabePWmax.value) || 0);
                 result = 100 * result;
                 resultat.innerHTML = "Trefferwahrscheinlichkeit: " + result + " %";
             }
@@ -338,7 +363,7 @@
             eingabePWavg.addEventListener("change", berechnen);
             eingabePWmin.addEventListener("change", berechnen);
             eingabePWmax.addEventListener("change", berechnen);
-            return _UI.createTable([wurfrechner]);
+            return _.UI.createTable([wurfrechner]);
         }
 
         static createNummerneingabe() {
@@ -531,8 +556,8 @@
                     subStats.actionClassification = function (curAction) {
                         let curSettings = curStats.actionClassification(curAction);
                         return {
-                            fromMe: curSettings.fromMe && _ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
-                            atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => _ReportParser.isUnitEqual(statTarget.unit, target.unit)),
+                            fromMe: curSettings.fromMe && _.ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
+                            atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => _.ReportParser.isUnitEqual(statTarget.unit, target.unit)),
                             cmp: "unit", // nur fürs debugging
                         }
                     }
@@ -572,7 +597,7 @@
                         }
                         unitCount[unit.id.id] = true;
                     }
-                    if (_ReportParser.isUnitEqual(unit, action.unit)) {
+                    if (_.ReportParser.isUnitEqual(unit, action.unit)) {
                         subStats.actionUnit = unit;
                     }
                     return subStats;
@@ -595,7 +620,7 @@
                         }
                         unitCount[unit.id.id] = true;
                     }
-                    if (_ReportParser.isUnitEqual(unit, action.unit)) {
+                    if (_.ReportParser.isUnitEqual(unit, action.unit)) {
                         subStats.actionUnit = unit;
                     }
                     return subStats;
@@ -652,9 +677,9 @@
             "items": {
                 name: "Gegenstände",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, _util.arrayMap(statTarget.skill.items, a => a.name).join(", "), "sub", "items");
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, _.util.arrayMap(statTarget.skill.items, a => a.name).join(", "), "sub", "items");
                     if (!subStats) return false;
-                    subStats.title = _util.arrayMap(statTarget.skill.items, a => a.srcRef).join(", ");
+                    subStats.title = _.util.arrayMap(statTarget.skill.items, a => a.srcRef).join(", ");
                     return subStats;
                 }
             },
@@ -686,7 +711,7 @@
                     curStats.statRoot = statRoot;
                     const filterKriterium = SearchEngine.FilterKriterien[queryFilter.spec];
                     if (!filterKriterium) {
-                        throw _util.error("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
+                        throw _.util.error("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
                     }
                     const subStats = filterKriterium.apply(statRoot, curStats, queryFilter, action, target, statTarget, damage);
                     if (!subStats) return subStats;
@@ -1147,7 +1172,7 @@
                 for (const column of tableView.columns) {
                     const curHeader = column.header;
                     if (!curHeader || !curHeader.startsWith("<td")) {
-                        throw _util.error("Header-Zelle muss immer mit <td anfangen!", column.id, curHeader);
+                        throw _.util.error("Header-Zelle muss immer mit <td anfangen!", column.id, curHeader);
                     }
                     header.innerHTML += curHeader;
                 }
@@ -1161,7 +1186,7 @@
                     for (const column of tableView.columns) {
                         const columnResult = column.cellRenderer(statResult);
                         if (!columnResult.startsWith("<td")) {
-                            throw _util.error("Zelleneintrag muss immer mit <td anfangen!", column.id, columnResult);
+                            throw _.util.error("Zelleneintrag muss immer mit <td anfangen!", column.id, columnResult);
                         }
                         line.innerHTML += columnResult;
                     }
@@ -1411,7 +1436,7 @@
                 infoTipp += "<li>Das Eingabe-Element welches sich dort öffnet ist eine übliche Multiple Auswahlliste. Zusammen mit der Strg-Taste lassen sich hier mehrere Werte auswählen.</li>";
                 infoTipp += "</ul>";
                 info.innerHTML = "<span class='bbignore'><img alt='' height='14px' border='0' src='/wod/css/skins/skin-8/images/icons/inf.gif'></span>";
-                _WoD.addTooltip(info, infoTipp);
+                _.WoD.addTooltip(info, infoTipp);
                 infoHeader.append(info);
 
                 const toBBCodeButtonContainer = document.createElement("span");
@@ -1427,7 +1452,7 @@
                 toBBCodeButton.style.marginLeft = "2px";
                 toBBCodeButton.style.color = "darkgrey";
                 toBBCodeButton.classList.add("bbignore");
-                _WoD.addTooltip(toBBCodeButton, 'Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren.');
+                _.WoD.addTooltip(toBBCodeButton, 'Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren.');
 
                 //toBBCodeButton.title = "Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren."
 
@@ -1451,7 +1476,7 @@
                         toBBCodeButtonContainer.removeChild(toBBCodeDone);
                         toBBCodeButtonContainer.append(toBBCodeButton);
                     }, 1500);
-                    navigator.clipboard.writeText(_BBCodeExporter.toBBCode(table));
+                    navigator.clipboard.writeText(_.BBCodeExporter.toBBCode(table));
                 }
 
                 this.anchor.appendChild(table);
@@ -1791,13 +1816,45 @@
 
     }
 
+    class MySettings {
+        static SETTING = {
+            LAST_VALIDATION: "lastValidation",
+        }
+        static SEASONS_ACTIVATED = false;
+        static #settingsDef = {
+            modName: Mod.modname,
+            defaultSettings: {
+                [this.SETTING.LAST_VALIDATION]: new Date().getTime(),
+            },
+        }
+
+        static #settingsHandler;
+
+        static async get() {
+            return this.#settingsHandler;
+        }
+
+        static async getFresh() {
+            return this.#settingsHandler = await _.Settings.getHandler(this.#settingsDef);
+        }
+
+    }
+
     class MyStorage {
 
-        static #inited = false;
+        static async initMyStorage(initProxyDomain, initThisDomain) {
+            if (initThisDomain) this.indexedDb = _.WoDStorages.initWodDb("WoDStats+", Mod.dbname + initThisDomain);
 
-        static async init() {
-            if (this.#inited) return;
-            this.#inited = true;
+            if (initProxyDomain) {
+                this.messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                this.indexedDb = _.WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDStats+", this.messengerPromise);
+                this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDStats+");
+                await MyStorage.messengerPromise;
+            }
+            await this.initThisStorage(this.indexedDb);
+        }
+
+        static async initThisStorage(indexedDb) {
             const adjust = function (objStore) {
                 let resultGetValue = objStore.getValue;
                 objStore.getValue = async function (dbObjectId) {
@@ -1811,35 +1868,31 @@
                 }
                 return objStore;
             }
-            this.indexedDb = _WoDStorages.initWodDb("WoDStats+", Mod.dbname);
-            this.reportStats = adjust(this.indexedDb.createObjectStorage("reportStats", "reportId"));
+            this.reportStats = adjust(indexedDb.createObjectStorage("reportStats", "reportId"));
         }
 
         /**
-         * @returns {_Storages.ObjectStorage}
+         * @returns {_.Storages.ObjectStorage}
          */
         static getReportStatsDB() {
             return this.reportStats;
         }
 
-        static async validateAllReports() {
-            const reportDB = this.getReportStatsDB()
+        /**
+         * Die Durchführung ist doch recht intensiv, hier sollten dann doch nochmal Meta-Daten erhoben werden.
+         * oder eine ProgressBar eingeführt werden
+         * oder ...
+         */
+        static async maintenanceAllReports() {
+            const reportStatsDB = this.getReportStatsDB();
             let compareDate = new Date();
             compareDate.setDate(compareDate.getDate() - 8); // x-Tage lang vorhalten
-            let spaceSum = 0;
-            for (const report of await reportDB.getAll(false)) { // werden nie so viele werden
-                if (!report.ts || report.ts < compareDate.getTime()) {
-                    await reportDB.deleteValue(report.reportId);
-                } else {
-                    if (false) {
-                        const mySpace = JSON.stringify(report).length;
-                        if (mySpace > 20000000)
-                            console.log("ReportStats: ", report.reportId, (Math.round(10 * mySpace / 1024 / 1025) / 10 + " MB"), report);
-                        spaceSum += mySpace
-                    }
-                }
+            for (const reportId of await reportStatsDB.getAllKeys({
+                index: ["ts"],
+                keyMatchTo: [compareDate.getTime()],
+            })) { // werden nie so viele werden
+                await reportStatsDB.deleteValue(reportId);
             }
-            //console.log("ReportStats-Space: " + (Math.round(10 * spaceSum / 1024 / 1025) / 10 + " MB"));
         }
 
     }
