@@ -489,7 +489,11 @@ class demawiRepository {
                     const request = objectStore.get(dbObjectId);
                     request.onsuccess = function (event) {
                         const result = event.target.result;
-                        resolve(result);
+                        if (result) {
+                            resolve(cloneInto(result, {}));
+                        } else {
+                            resolve(result);
+                        }
                     };
                 });
             }

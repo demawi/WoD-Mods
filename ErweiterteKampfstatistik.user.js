@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.20
+// @version        0.20.1
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -240,8 +240,8 @@
         }
 
         static findFirstHeldenLevel(levelDataArray) {
-            for(const level of levelDataArray) {
-                if(level) return level;
+            for (const level of levelDataArray) {
+                if (level) return level;
             }
         }
 
