@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.0.4";
+    static version = "1.0.5";
 
     /**
      * Indexed-DB Framework.
@@ -704,11 +704,8 @@ class demawiRepository {
                     const request = objectStore.get(dbObjectId);
                     request.onsuccess = function (event) {
                         const result = event.target.result;
-                        if (result) {
-                            resolve(cloneInto(result, {}));
-                        } else {
-                            resolve(result);
-                        }
+                        if (result) resolve(cloneInto(result, {})); // für FF benötigt, damit auch wenn man nur lokal auf die DB zugreift kein Cross-Origin-Problem auftritt
+                        else resolve(result);
                     };
                     request.onerror = function (event) {
                         console.log("getValue-error");
@@ -1225,22 +1222,37 @@ class demawiRepository {
      */
     static CSProxy = class CSProxy {
 
+        static #supported = ["Tampermonkey", "Greasemonkey"];
+
         /**
-         * @returns {boolean} actAsProxy. =undefined: wenn auf dieser Instanz kein Mod-Code ausgeführt werden soll
-         *                                =true: wenn die Instanz einen Proxy installiert und somit die lokale Datenbank angesprochen werden muss. Weitere Mod-Code sollte hierauf nicht weiter laufen.
-         *                                =false: wenn die Instanz kein Proxy ist und der Mod ganz normal laufen soll. Als Datenbank-Anbindung muss dafür die Proxy-Verbindung genutzt werden.
+         * 4 Modes:
+         * - Script-Execution with Local-Domain (cant proxy)
+         * - Script-Execution with Proxy-Domain
+         * - No Script-Exection with Local-Domain (react as proxy for that domain)
+         * - Nothing at all
+         *
+         * @return  [boolean, String] [scriptExecution, witchDbToUse]
+         *                                              witchDbToUse "p"=proxy, "l"=local
          */
         static check() {
-            // TODO: prüfen, ob im Proxy eine aktuelle Version läuft!?
-            if (window.origin.endsWith("//world-of-dungeons.de")) { // Main-Domain-Check
+            if (!this.#supported.includes(GM.info.scriptHandler)) {
+                alert(GM.info.script.name + "\nScriptEngine: '" + GM.info.scriptHandler + "' wird aktuell nicht unterstützt.\nBitte kontaktiere den Entwickler für eine entsprechende Unterstützung.");
+                return [false];
+            }
+            if (this.cantProxy()) return [true, "l"];
+            if (window.origin.endsWith("//world-of-dungeons.de")) { // Main-Domain-Check, hier wird generell kein weiterer Script-Code ausgeführt
                 if (window.location.href.includes("messenger=true")) { // With ProxyMarker
                     this.actAsCSProxyResponder();
-                    return true;
-                }
-                return;
+                    return [false, "l"];
+                } else return [false];
             }
-            if (this.ensureIframeWrap()) return;
-            return false;
+            if (this.ensureIframeWrap()) return [false];
+            const version = window.top._demrepv || (window.opener && window.opener.top._demrepv);
+            if (version !== _.version) { // Die Version hat sich geändert, alles nochmal laden.
+                window.top.location.reload();
+                if(window.opener) window.close(); // Popup muss geschlossen werden, damit es erneut geöffnet werden kann
+            }
+            return [true, "p"];
         }
 
         static isTampermonkey() {
@@ -1270,6 +1282,7 @@ class demawiRepository {
 
         static #ensureIframeWrapDoIt() {
             console.log("Iframe-Wrap wurde erstellt!");
+            unsafeWindow._demrepv = _.version;
             const iframeWrap = document.createElement("iframe");
             iframeWrap.style.width = "100%";
             iframeWrap.style.height = "100%";
@@ -1629,6 +1642,28 @@ class demawiRepository {
      *
      */
     static WoDStorages = class {
+
+        static async useLocalDomain(modDbName) {
+            return this.initWodDb("___", modDbName);
+        }
+
+        static async tryConnectToMainDomain(modDbName) {
+            const [scriptExecution, dbType] = _.CSProxy.check();
+
+            if (scriptExecution) {
+                if (dbType === "l") { // cant proxy
+                    return this.initWodDb("___", modDbName);
+                } else if (dbType === "p") {
+                    const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                    const indexedDb = this.initWodDbProxy(modDbName + "Main", "___", messengerPromise);
+                    await messengerPromise;
+                    return indexedDb;
+                }
+            } else { // proxy
+                if (dbType === "l") this.initWodDb("___", modDbName + "Main");
+            }
+        }
+
         static #indexedDb;
 
         /**
@@ -2819,7 +2854,6 @@ class demawiRepository {
 
             if (node.classList && node.classList.contains("bbignore")) return "";
             var result = this.toBBCodeRaw(node, defaultSize);
-            console.log(result)
             if (result.length !== 3) {
                 console.log("Interner Fehler: Keine Array-Länge von 3 zurückgegeben", node);
             }

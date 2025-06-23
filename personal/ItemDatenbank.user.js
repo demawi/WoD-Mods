@@ -36,15 +36,9 @@
         static dbname = "wodDB";
 
         static async startMod() {
-            const actAsProxy = _.CSProxy.check();
-            if (actAsProxy === undefined) {
-                return;
-            } else if (actAsProxy) {
-                await MyStorage.initMyStorage(false, "Main");
-                return;
-            } else {
-                await MyStorage.initMyStorage(true);
-            }
+            const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
+            if(!indexedDb) return;
+            await MyStorage.initMyStorage(indexedDb);
 
             await demawiRepository.startMod();
             await MyStorage.init();
@@ -438,6 +432,16 @@
             static "Rüstung (Betroffener)" = {
                 pfad: "effects.target.ruestung",
                 when: "Bonus - Rüstung",
+                toHTML: AutoColumns.default3SpaltenOutput
+            }
+            static "Anfälligkeit (Besitzer)" = {
+                pfad: "effects.owner.anfaelligkeit",
+                when: "Bonus - Anfälligkeit",
+                toHTML: AutoColumns.default3SpaltenOutput
+            }
+            static "Anfälligkeit (Betroffener)" = {
+                pfad: "effects.target.anfaelligkeit",
+                when: "Bonus - Anfälligkeit",
                 toHTML: AutoColumns.default3SpaltenOutput
             }
             static "Parade (Besitzer)" = {
@@ -853,10 +857,11 @@
 
             static "Bonus - Angriff" = (container) => this.effects2Kriterium(container, "angriff", ["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN])
             static "Bonus - Parade" = (container) => this.effects2Kriterium(container, "parade", ["<Parade>", ...ItemSearch.SearchDomains.PARADETYPEN])
-            static "Bonus - Schaden" = (container) => this.schadenRuestung(container, true);
-            static "Bonus - Rüstung" = (container) => this.schadenRuestung(container, false);
+            static "Bonus - Schaden" = (container) => this.schadenRuestungAnfaelligkeit(container, "schaden");
+            static "Bonus - Rüstung" = (container) => this.schadenRuestungAnfaelligkeit(container, "ruestung");
+            static "Bonus - Anfälligkeit" = (container) => this.schadenRuestungAnfaelligkeit(container, "anfaelligkeit");
 
-            static schadenRuestung(container, schadenValue) {
+            static schadenRuestungAnfaelligkeit(container, boniType) {
                 const selectSchadensart = ItemSearch.UI.createSelect(["<Schadensart>", ...ItemSearch.SearchDomains.SCHADENSARTEN]);
                 container.append(selectSchadensart);
                 const selectBesitzerBetroffener = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
@@ -864,7 +869,7 @@
                 const selectAngriffstyp = ItemSearch.UI.createSelect(["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN]);
                 container.append(selectAngriffstyp);
                 const selectAZ = ItemSearch.UI.createSelect(["<a/z>", ...ItemSearch.SearchDomains.SCHADENSBONITYP]);
-                if (schadenValue) container.append(selectAZ);
+                if (boniType === "schaden") container.append(selectAZ);
 
                 return {
                     matches: function (item) {
@@ -873,7 +878,7 @@
                         var result = Array();
 
                         if (selectBesitzerBetroffener.value === "Besitzer" || selectBesitzerBetroffener.value === "") {
-                            const cur = schadenValue ? item.effects?.owner?.schaden : item.effects?.owner?.ruestung;
+                            const cur = item.effects?.owner?.[boniType];
                             if (cur) result.push(...cur);
                             if (selectSchadensart.value !== "" && item.data?.wirkung?.type) {
                                 result.push({
@@ -884,7 +889,7 @@
                             }
                         }
                         if (selectBesitzerBetroffener.value === "Betroffener" || selectBesitzerBetroffener.value === "") {
-                            const cur = schadenValue ? item.effects?.target?.schaden : item.effects?.target?.ruestung;
+                            const cur = item.effects?.target?.[boniType];
                             if (cur) result.push(...cur);
                         }
 
@@ -904,7 +909,7 @@
                             if (selectAngriffstyp.value !== "" && !angriffsTyp(selectAngriffstyp.value)) {
                                 return false;
                             }
-                            if (schadenValue && selectAZ.value !== "") {
+                            if (boniType === "schaden" && selectAZ.value !== "") {
                                 var matches = false;
                                 switch (selectAZ.value) {
                                     case ItemSearch.SearchDomains.SCHADENSBONITYP[0]:
@@ -1213,15 +1218,9 @@
 
     class MyStorage {
 
-        static async initMyStorage(initProxyDomain, initThisDomain) {
-            if (initThisDomain) this.indexedDb = _.WoDStorages.initWodDb("WoDStats+", Mod.dbname + initThisDomain);
-
-            if (initProxyDomain) {
-                this.messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
-                this.indexedDb = _.WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDStats+", this.messengerPromise);
-                this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDStats+");
-                await MyStorage.messengerPromise;
-            }
+        static async initMyStorage(indexedDb) {
+            this.indexedDb = indexedDb;
+            this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "ItemDB");
             await this.init(this.indexedDb);
         }
 

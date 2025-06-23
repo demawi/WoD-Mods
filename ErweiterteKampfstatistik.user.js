@@ -55,15 +55,10 @@
          * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
          */
         static async startMod(kampfbericht, kampfstatistik, dbReportSource) {
-            const actAsProxy = _.CSProxy.check();
-            if (actAsProxy === undefined) {
-                return;
-            } else if (actAsProxy) {
-                await MyStorage.initMyStorage(false, "Main");
-                return;
-            } else {
-                await MyStorage.initMyStorage(true);
-            }
+            const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
+            if(!indexedDb) return;
+            await MyStorage.initMyStorage(indexedDb);
+
             await demawiRepository.startMod();
             unsafeWindow.statExecuter = async function (...args) {
                 console.log(GM.info.script.name + " wird aufgerufen");
@@ -1842,15 +1837,9 @@
 
     class MyStorage {
 
-        static async initMyStorage(initProxyDomain, initThisDomain) {
-            if (initThisDomain) this.indexedDb = _.WoDStorages.initWodDb("WoDStats+", Mod.dbname + initThisDomain);
-
-            if (initProxyDomain) {
-                this.messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
-                this.indexedDb = _.WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDStats+", this.messengerPromise);
-                this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDStats+");
-                await MyStorage.messengerPromise;
-            }
+        static async initMyStorage(indexedDb) {
+            this.indexedDb = indexedDb;
+            this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDStats+");
             await this.initThisStorage(this.indexedDb);
         }
 

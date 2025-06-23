@@ -54,15 +54,9 @@
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
         static async startMod() {
-            const actAsProxy = _.CSProxy.check();
-            if (actAsProxy === undefined) {
-                return;
-            } else if (actAsProxy) {
-                await MyStorage.initMyStorage(false, "Main");
-                return;
-            } else {
-                await MyStorage.initMyStorage(true);
-            }
+            const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
+            if(!indexedDb) return;
+            await MyStorage.initMyStorage(indexedDb);
 
             const page = _.util.getWindowPage();
             demawiRepository.startMod("Page: '" + page + "'");
@@ -3179,15 +3173,9 @@
 
     class MyStorage {
 
-        static async initMyStorage(initProxyDomain, initThisDomain) {
-            if (initThisDomain) this.indexedDb = _.WoDStorages.initWodDb("WoDReportArchiv", Mod.dbname + initThisDomain);
-
-            if (initProxyDomain) {
-                this.messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
-                this.indexedDb = _.WoDStorages.initWodDbProxy(Mod.dbname + "Main", "WoDReportArchiv", this.messengerPromise);
-                this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
-                await MyStorage.messengerPromise;
-            }
+        static async initMyStorage(indexedDb) {
+            this.indexedDb = indexedDb;
+            this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDReportArchiv");
             await this.initThisStorage(this.indexedDb);
         }
 
