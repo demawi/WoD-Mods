@@ -274,6 +274,7 @@
         static COLOR_GREEN = "rgb(62, 156, 62)";
         static COLOR_RED = "rgb(203, 47, 47)";
         static COLOR_YELLOW = "rgb(194, 194, 41)";
+        static COLOR_GRAY = "gray";
         static PAGE_TYPE_STAT = "Statistik";
         static PAGE_TYPE_ITEMS = "Items";
         static PAGE_TYPE_REPORT = "Berichtseite";
@@ -328,7 +329,6 @@
             });
             await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL);
             await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP);
-            //this.checkMaintenance();
         }
 
         /**
@@ -353,41 +353,6 @@
                 await MyStorage.reportArchive.setValue(report);
             });
             console.log("resyncVersions finished!");
-        }
-
-        static async checkMaintenance() {
-            const settings = await MySettings.get();
-
-            // Zuerst Auto-Favoriten erst dann Löschen
-            if (settings[MySettings.SETTING.AUTO_FAVORIT_ALL_CHECK]) {
-                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL, !settings.get(MySettings.SETTING.AUTO_FAVORIT_ALL));
-                settings.set(MySettings.SETTING.AUTO_FAVORIT_ALL_CHECK, false);
-                await settings.save();
-            }
-            if (false && settings.updateAutoFavoritAllSeason) {
-                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL_SEASON, !settings.autoFavoritAllSeason);
-                delete settings.updateAutoFavoritAllSeason;
-                await settings.save();
-            }
-            if (settings[MySettings.SETTING.AUTO_FAVORIT_GROUP_CHECK]) {
-                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP, !settings.get(MySettings.SETTING.AUTO_FAVORIT_GROUP));
-                settings.set(MySettings.SETTING.AUTO_FAVORIT_GROUP_CHECK, false);
-                await settings.save();
-            }
-            if (false && settings.updateAutoFavoritGroupSeason) {
-                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP_SEASON, !settings.autoFavoritGroupSeason);
-                delete settings.updateAutoFavoritGroupSeason;
-                await settings.save();
-            }
-
-            if (settings.get(MySettings.SETTING.AUTO_LOESCHEN)) {
-                // Täglich einmal
-                if (!settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK) || new Date(settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK)) < new Date().setDate(new Date().getDate() - 1)) {
-                    console.log("Auto Löschen wird ausgeführt!");
-                    settings.set(MySettings.SETTING.AUTO_LOESCHEN_CHECK, new Date().getTime());
-                    await settings.save();
-                }
-            }
         }
 
         /**
@@ -470,103 +435,13 @@
             //await this.resyncVersions();
             //await this.resyncFavorites();
 
-            if (false) {
-                console.log("CCCCCCCC1 ", Location.isMatching(["abc", null], ["abc", "def", "acd"], true, undefined, true));
-                console.log("CCCCCCCC2 ", Location.isMatching(["abc", "def"], ["abc", "def", "acd"], true, undefined, true));
-                console.log("CCCCCCCC3 ", Location.isMatching(["abc", "def"], ["abc", "def", null], true, undefined, true));
-                console.log("CCCCCCCC4 ", Location.isMatching(["abc", null], ["abc", "def", null], true, undefined, true));
-                console.log("CCCCCCCC5 ", Location.isMatching(["abc", "def", null, null], ["abc", "def", null, null, null, null], true, undefined, true));
-                console.log("CCCCCCCC6 ", Location.isMatching(["abc", "def", "kae", null], ["abc", "def", null], true, undefined, true));
-            }
-
-            //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
-            //await MyStorage.indexedDb.cloneTo("WodDBMain_Backup2");
-            //await (await MyStorage.indexedDbLocal.getObjectStorageChecked("reportArchive")).getAll(false, async function(cur) {
-            //  await MyStorage.reportArchive.setValue(cur);
-            //});
-
-            if (false) await MyStorage.skill.getAll({}, async function (skill) {
-                await MyStorage.skillSources.getValue(skill.name);
-            });
-
-            if (false) await MyStorage.reportArchive.getAll({}, async function (report) {
-                const questName = Location.getQuestFor(report.loc.name);
-                if (questName) {
-                    report.loc.quest = questName;
-                    await MyStorage.reportArchive.setValue(report);
-                }
-            });
-            if (false) await MyStorage.item.getAll({}, async function (cur) {
-                const slots = cur.data.edelslots;
-                if (slots) {
-                    cur.data.slots = slots;
-                    delete cur.data.edelslots;
-                    await MyStorage.item.setValue(cur);
-                }
-            });
-
-            let count = 0;
-            let found = {}
-            if (false) {
-                await MyStorage.reportArchive2.getAll({}, async function (a) {
-                    if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
-                    found[a.reportId] = true;
-                    count++;
-                    if (count === 100) return false;
-                });
-                console.log("BBBBBBB " + count);
-            }
-
-            //console.log("IIIIIIIIIIII", await _.WoDStorages.getLootDb().getValue("erdbrauner reif des waldes"));
-            //console.log("JJJJJJJJJ", await MyStorage.itemLoot.getValue("erdbrauner reif des waldes"));
             //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
 
             //await MyStorage.indexedDb.cloneTo("wodDB_Backup6");
             //await this.resyncSourcesToReports();
             //await this.rewriteReportArchiveItems();
 
-            if (false) {
-                count = 0;
-                found = {}
-                await MyStorage.reportArchive.getAll({
-                    //index: "ts",
-                    order: "next",
-                    keyMatchFrom: "WA15389813",
-                    keyMatchFromOpen: false,
-                    //debug: 2,
-                }, async a => {
-                    //console.log("Result: ", a);
-                    if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
-                    found[a.reportId] = true;
-                    count++;
-                });
-                console.log("AAAAAAAAAA ", count);
-
-                count = 0;
-                found = {}
-                await MyStorage.reportArchive.getAll({ // no result request
-                    index: "ts",
-                    //order: "next",
-                    keyMatchFrom: "WA15389813",
-                    keyMatchFromOpen: false,
-                    //debug: 2,
-                }, async a => {
-                    //console.log("Result: ", a);
-                    if (found[a.reportId]) throw new Error("entry already found! " + a.reportId);
-                    found[a.reportId] = true;
-                    count++;
-                });
-                console.log("BBBBBBB ", count);
-            }
-
-            if (false) {
-                console.log("AAAAAAAAAAA", (await MyStorage.reportArchive.getAll({
-                    index: "locName",
-                    keyMatch: IDBKeyRange.only("Ahnenforschung"),
-                })).length);
-            }
-
-            await this.checkMaintenance();
+            await Maintenance.checkMaintenance();
             console.log("Checked Maintenance");
             this.title = document.getElementsByTagName("h1")[0];
 
@@ -938,7 +813,7 @@
                                 curTR.style.backgroundColor = ArchivView.COLOR_RED;
                                 successLose++;
                             } else {
-                                curTR.style.backgroundColor = "lightgreen";
+                                curTR.style.backgroundColor = ArchivView.COLOR_GRAY;
                             }
                         }
                     }
@@ -1658,8 +1533,9 @@
                 const aggregateInfos = [];
                 let stufeMin = 100;
                 let stufeMax = 0;
-                const stufen = Object.keys(item.stufen);
-                for (const cur of stufen) {
+                const stufen = Object.entries(item.stufen);
+                for (const [cur, add] of stufen) {
+                    if(!add.safe) continue;
                     const curNr = Number(cur);
                     if (curNr < stufeMin) stufeMin = curNr;
                     if (curNr > stufeMax) stufeMax = curNr;
@@ -1875,26 +1751,17 @@
                 this.worldSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + ArchivSearch.AUSWAHL_BEVORZUGT_TAGE + " Tagen aktiv ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 for (const worldId of Object.keys(worldsFoundPrimary).sort()) {
                     const selected = this.searchQuery.worldSelection.includes(worldId) ? "selected" : "";
-                    this.worldSelect.innerHTML += "<option value='" + worldId + "' " + selected + ">" + (this.worldValues[worldId] || worldId) + "</option>";
+                    this.worldSelect.innerHTML += "<option value='" + worldId + "' " + selected + ">" + (_.WoD.worldNames[worldId] || worldId) + "</option>";
                 }
                 this.worldSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
             }
             for (const worldId of Object.keys(worldsFound).sort()) {
                 if (worldsFoundPrimary[worldId]) continue;
                 const selected = this.searchQuery.worldSelection.includes(worldId) ? "selected" : "";
-                this.worldSelect.innerHTML += "<option value='" + worldId + "' " + selected + ">" + (this.worldValues[worldId] || worldId) + "</option>";
+                this.worldSelect.innerHTML += "<option value='" + worldId + "' " + selected + ">" + (_.WoD.worldNames[worldId] || worldId) + "</option>";
             }
             _.Libs.betterSelect(this.worldSelect);
             return removeSelected;
-        }
-
-        static worldValues = {
-            "WA": "Algarion",
-            "WB": "Barkladesh",
-            "WC": "Cartegon",
-            "WD": "Darakesh",
-            // Sandkasten??
-            // Xerasia
         }
 
         static isValidFavorit(report) {
@@ -2352,6 +2219,50 @@
     }
 
     class Maintenance {
+
+        static async checkMaintenance() {
+            const settings = await MySettings.get();
+
+            // Zuerst Auto-Favoriten erst dann Löschen
+            if (settings[MySettings.SETTING.AUTO_FAVORIT_ALL_CHECK]) {
+                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL, !settings.get(MySettings.SETTING.AUTO_FAVORIT_ALL));
+                settings.set(MySettings.SETTING.AUTO_FAVORIT_ALL_CHECK, false);
+                await settings.save();
+            }
+            if (false && settings.updateAutoFavoritAllSeason) {
+                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_ALL_SEASON, !settings.autoFavoritAllSeason);
+                delete settings.updateAutoFavoritAllSeason;
+                await settings.save();
+            }
+            if (settings[MySettings.SETTING.AUTO_FAVORIT_GROUP_CHECK]) {
+                await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP, !settings.get(MySettings.SETTING.AUTO_FAVORIT_GROUP));
+                settings.set(MySettings.SETTING.AUTO_FAVORIT_GROUP_CHECK, false);
+                await settings.save();
+            }
+            if (false && settings.updateAutoFavoritGroupSeason) {
+                //await AutoFavorit.checkAutoFavoriten(AutoFavorit.TAG_GROUP_SEASON, !settings.autoFavoritGroupSeason);
+                delete settings.updateAutoFavoritGroupSeason;
+                await settings.save();
+            }
+
+            if (settings.get(MySettings.SETTING.AUTO_LOESCHEN)) {
+                // Täglich einmal
+                if (!settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK) || new Date(settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK)) < new Date().setDate(new Date().getDate() - 1)) {
+                    console.log("Auto Löschen wird ausgeführt!");
+
+                    const anzahlTage = await (MySettings.get()).get(MySettings.SETTING.AUTO_LOESCHEN_TAGE);
+                    let date = new Date();
+                    date.setDate(date.getDate() - anzahlTage);
+                    MyStorage.reportArchive.getAll({
+                        index: ["ts", "fav.none"],
+                        keyMatchTo: [ date.getTime(), 2],
+                    });
+
+                    settings.set(MySettings.SETTING.AUTO_LOESCHEN_CHECK, new Date().getTime());
+                    await settings.save();
+                }
+            }
+        }
 
         static async recalculateSpace() {
             console.log("recalculateSpace... start");

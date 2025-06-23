@@ -1250,7 +1250,7 @@ class demawiRepository {
             const version = window.top._demrepv || (window.opener && window.opener.top._demrepv);
             if (version !== _.version) { // Die Version hat sich geändert, alles nochmal laden.
                 window.top.location.reload();
-                if(window.opener) window.close(); // Popup muss geschlossen werden, damit es erneut geöffnet werden kann
+                if (window.opener) window.close(); // Popup muss geschlossen werden, damit es erneut geöffnet werden kann
             }
             return [true, "p"];
         }
@@ -1781,7 +1781,7 @@ class demawiRepository {
      */
     static WoDLootDb = class {
 
-        static MAX_LOOT_ENTRIES = 20;
+        static MAX_LOOT_ENTRIES = 50;
 
         static async getValue(itemId) {
             itemId = itemId.toLowerCase();
@@ -1932,8 +1932,12 @@ class demawiRepository {
 
             // Allgemeine .stufen
             const stufenLoot = item.stufen[heldenstufeGesichert || heldenstufeUngesichert] || (item.stufen[heldenstufeGesichert || heldenstufeUngesichert] = {});
-            if (heldenstufeGesichert) stufenLoot.safe = timestampInMinutes;
-            else stufenLoot.unsafe = timestampInMinutes;
+            if (heldenstufeGesichert) {
+                stufenLoot.safe = timestampInMinutes;
+                delete stufenLoot.unsafe;
+            } else if (!stufenLoot.safe) {
+                stufenLoot.unsafe = timestampInMinutes;
+            }
 
             // Allgemeine Tage
             const dayInYearId = _.util.formatDate(new Date(timestampInMinutes * 60000)).replaceAll(".", "").substring(0, 4);
@@ -2122,7 +2126,7 @@ class demawiRepository {
 
         static #copyOver(from, to) {
             for (const [key, value] of Object.entries(from)) {
-                to[key] = value;
+                if (value > 0) to[key] = value;
             }
         }
 
@@ -2336,6 +2340,17 @@ class demawiRepository {
      */
     static WoD = class {
 
+        static worldNames = {
+            "WA": "Algarion",
+            "WB": "Barkladesh",
+            "WC": "Cartegon",
+            "WD": "Darakesh",
+            // Sandkasten??
+            // Xerasia
+        }
+
+        static worldIds = Object.fromEntries(Object.entries(this.worldNames).map(([a, b]) => [a, b.toLowerCase()]).map(a => a.reverse()))
+
         /**
          * Wird am Element die Id setzen. Mouseover, mouseout, mousemove events werden vom wodToolTip überschrieben.
          */
@@ -2376,7 +2391,14 @@ class demawiRepository {
         }
 
         static getMyWorld(doc) {
-            return _.WoD.getValueFromMainForm("wod_post_world", doc);
+            return _.WoD.getValueFromMainForm("wod_post_world", doc) || this.getMyWorldFromUrl(doc);
+        }
+
+
+        static getMyWorldFromUrl(doc) {
+            let worldName = window.location.hostname;
+            worldName = worldName.substring(0, worldName.indexOf("."));
+            return this.worldIds[worldName];
         }
 
         static getMyGroupName(doc) {
@@ -2388,14 +2410,18 @@ class demawiRepository {
         }
 
         static getMyHeroId(doc) {
-            return _.WoD.getValueFromMainForm("session_hero_id", doc);
+            return _.WoD.getValueFromMainForm("session_hero_id", doc) || this.getMyHeroIdFromUrl(doc);
+        }
+
+        static getMyHeroIdFromUrl(doc) {
+            return new URL(window.location.href).searchParams.get("session_hero_id");
         }
 
         /**
          * Gibt das gesichert erste Vorkommen der session_hero_id zurück
          */
         static getMyHeroIdFirst(doc) {
-            return _.WoD.getValueFromMainForm("session_hero_id", doc, true);
+            return _.WoD.getValueFromMainForm("session_hero_id", doc, true) || this.getMyHeroIdFromUrl(doc);
         }
 
         static getMyHeroName(doc) {
