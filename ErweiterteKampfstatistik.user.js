@@ -1867,11 +1867,6 @@
             return this.reportStats;
         }
 
-        /**
-         * Die Durchführung ist doch recht intensiv, hier sollten dann doch nochmal Meta-Daten erhoben werden.
-         * oder eine ProgressBar eingeführt werden
-         * oder ...
-         */
         static async maintenanceAllReports() {
             const reportStatsDB = this.getReportStatsDB();
             let compareDate = new Date();

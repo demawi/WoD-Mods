@@ -145,30 +145,10 @@ class demawiRepository {
                 const dbName = this.indexedDb.dbname;
                 const storageId = this.storageId;
                 if (!iterationFnOpt) {
-                    if (!query) {
-                        if (query !== false) console.warn("getAll ohne Parameter kann bei großen Datenbanken zu Problemen führen");
-                        query = {};
-                    }
-                    const startTime = new Date().getTime();
-                    const longQueryTime = query.longQuery || this.indexedDb.longQuery;
-                    query.longQuery = 10000;
-                    query.db = [dbName, storageId, "getAll"];
-                    let resultPromise = this.indexedDb.executeProxyCall(async function (storageId, dbname, query) {
+                    return this.indexedDb.executeProxyCall(async function (storageId, dbname, query) {
                         return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query);
                     }, storageId, dbName, query);
-                    resultPromise = resultPromise.then(a => {
-                        const queryTime = new Date().getTime() - startTime;
-                        if (queryTime > longQueryTime) {
-                            console.warn("Query dauert länger als 1sec: ", queryTime / 1000 + " secs", query);
-                        } else if (query.debug === 1) {
-                            console.log("QueryTime: ", queryTime / 1000 + " secs", query);
-                        }
-                        return a;
-                    });
-                    return resultPromise;
                 }
-                if(!query) query = {};
-                query.db = [dbName, storageId, "getAll"];
                 return this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, query) {
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query, async function (a) {
                         return await respondIteration(data, a);
@@ -180,8 +160,6 @@ class demawiRepository {
             async getAllKeys(query, iterationFnOpt) {
                 const dbName = this.indexedDb.dbname;
                 const storageId = this.storageId;
-                if(!query) query = {};
-                query.db = [dbName, storageId, "getAll"];
                 if (!iterationFnOpt) {
                     return this.indexedDb.executeProxyCall(async function (storageId, dbname, queryOpt) {
                         return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt);
@@ -862,7 +840,7 @@ class demawiRepository {
                     this.iteration = iteration;
                     this.limit = this.query.limit || Number.MAX_VALUE;
                     this.retrieveFnName = retrieveFnName;
-                    this.batchSize = query.batchSize || 100;
+                    this.batchSize = query.batchSize || 50;
                     delete query.batchSize; // für die Subanfragen selbst soll keine Batch-Search verwendet werden
                 }
 
@@ -942,15 +920,16 @@ class demawiRepository {
                  * @returns {Promise<any>}
                  */
                 static async doSearch(objectStorage, query, iterationOpt, retrieveFnName) {
+                    const ignoreWarning = query === false;
+                    query = query || {};
                     const startTime = new Date().getTime();
                     const isGetAllKeys = retrieveFnName === "getAllKeys";
-                    if (!query) {
-                        if (query !== false && iterationOpt === undefined && !isGetAllKeys) console.warn(retrieveFnName + " ohne Parameter kann bei großen Datenbanken zu Problemen führen")
-                        query = {};
-                    }
                     const dbName = objectStorage.indexedDb.dbname;
                     const storageId = objectStorage.storageId;
                     query.db = [dbName, storageId, retrieveFnName];
+                    if (!ignoreWarning && !isGetAllKeys && !iterationOpt && !query.index) {
+                        console.warn(retrieveFnName + " ohne Parameter kann bei großen Datenbanken zu Problemen führen ", query);
+                    }
                     const connection = await objectStorage.indexedDb.getConnection();
                     const transaction = connection.transaction(storageId, "readonly");
                     const idbObjectStore = transaction.objectStore(storageId);
