@@ -2,7 +2,7 @@
 // @name           [WoD] Erweiterte Kampfstatistik
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.20.1
+// @version        0.20.2
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
@@ -30,7 +30,7 @@
 
     class Mod {
         static dbname = "wodDB";
-        static version = "0.20";
+        static version = "0.20.2";
         static stand = "01.02.2025";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
         static currentReportDataVersion = 7;
@@ -860,12 +860,16 @@
                             }
                         }
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
-                        if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
-                            ReportParser.Action(currentAction, null, currentAction.children[1], currentAction.children[2]).forEach(a => vorrunde.push(a));
-                        } else { // Runden-Aktion
-                            ReportParser.Action(currentAction, currentAction.children[0], currentAction.children[1], currentAction.children[2]).forEach(a => {
-                                runde.push(a)
-                            });
+                        try {
+                            if (currentAction.children[0].innerHTML + "" === "&nbsp;") { // Vorrunden-Aktion
+                                ReportParser.Action(currentAction, null, currentAction.children[1], currentAction.children[2]).forEach(a => vorrunde.push(a));
+                            } else { // Runden-Aktion
+                                ReportParser.Action(currentAction, currentAction.children[0], currentAction.children[1], currentAction.children[2]).forEach(a => {
+                                    runde.push(a)
+                                });
+                            }
+                        } catch (e) {
+                            console.log("ActionParse-error: ", e);
                         }
                     }
                 }
