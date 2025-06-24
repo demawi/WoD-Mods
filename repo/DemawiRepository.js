@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.0.5";
+    static version = "1.0.5.1";
 
     /**
      * Indexed-DB Framework.
@@ -776,10 +776,10 @@ class demawiRepository {
              *     index: ["ts", "item.loc"], // Angabe der Indizes über die eingeschränkt oder sortiert werden soll, sofern ein solcher Index noch nicht vorhanden ist, wird er adHoc erstellt.
              *     order: "prev", // ein String Wert aus ORDER, sortiert die Ergebnisse, bzw. kann mit den "unique"-Parametern auch Einträge überspringen. Sortiert wird abhängig von der Reihenfolge im angegebenen Index.
              *     keyMatch: [_Storages.MATCHER.NUMBER.ANY, "Ahnenforschung"], // [IDBKeyRange|Array] der Array definiert Matches mit der gleichen Länge wie der Index-Array. Es können aber auch Wildcards aus _Storages.Matcher genutzt werden.
-             *     keyMatchFrom: [1, "Ahnenforschung"] // [Array] wird als lowerBound verwendet. Sofern die untere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
+             *     keyMatchAfter: [1, "Ahnenforschung"] // [Array] wird als lowerBound verwendet. Sofern die untere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
              *     keyMatcheTo: [1231233, "Balesh"], // [Array] wird als upperBound verwendet. Sofern die obere Schranke nicht bekannt ist, können auch Wildcards verwendet werden.
-             *     keyMatchFromOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
-             *     keyMatchToOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
+             *     keyMatchAfterOpen: true, // schließt den angegebenen Wert an der unteren Grenze aus (z.B. Ahnenforschung wäre dann selbst nicht mit dabei)
+             *     keyMatchBeforeOpen: true, // schließt den angegebenen Wert an der oberen Grenze aus (z.B. Balesh wäre dann selbst nicht mit dabei)
              *     limit: 20,             // [int] eine Limitierung der Ergebnisse
              *     batchSize: 100,        // [int] default:100 wie viele Objekte maximal gleichzeitig aus der Datenbank geholt werden, wird dieses angegeben muss eine iterationFn angegeben werden
              * }
@@ -825,8 +825,8 @@ class demawiRepository {
             /**
              * Die erste Anfrage wird standard-gemäß der query.batchSize (default = 100) ausgeführt.
              * Für nachfolgende Anfragen wird der Query angepasst und
-             * für Vorwärtssuche: keyMatchFrom und keyMatchFromOpen
-             * für Rückwartssuche: keyMatchTo und keyMatchToOpen
+             * für Vorwärtssuche: keyMatchAfter und keyMatchAfterOpen
+             * für Rückwartssuche: keyMatchBefore und keyMatchBeforeOpen
              * gesetzt.
              * Abhängig der query.batchSize wird den Unteranfragen ein entsprechendes query.limit mitgegeben.
              */
@@ -841,7 +841,7 @@ class demawiRepository {
                 limit;
                 alreadyFetched = 0;
                 indexKeyPath; // indexKeyPath für die 2,3... Suche
-                pointerName; // keyMatchFrom oder keyMatchTo, je nachdem in welcher Richtung der ObjectStore durchgegangen wird.
+                pointerName; // keyMatchAfter oder keyMatchBefore, je nachdem in welcher Richtung der ObjectStore durchgegangen wird.
                 idx = 1;
 
                 constructor(objectStorage, idbObjectStore, idbTarget, query, iteration, retrieveFnName) {
@@ -897,13 +897,13 @@ class demawiRepository {
                             this.query.index = indexDef;
                         }
                         if (!this.query.order || this.query.order.startsWith("next")) {
-                            this.query.keyMatchFromOpen = true;
-                            this.pointerName = "keyMatchFrom";
-                            if (this.query.keyMatch) this.query.keyMatchTo = this.query.keyMatch;
+                            this.query.keyMatchAfterOpen = true;
+                            this.pointerName = "keyMatchAfter";
+                            if (this.query.keyMatch) this.query.keyMatchBefore = this.query.keyMatch;
                         } else {
-                            this.query.keyMatchToOpen = true;
-                            this.pointerName = "keyMatchTo";
-                            if (this.query.keyMatch) this.query.keyMatchFrom = this.query.keyMatch;
+                            this.query.keyMatchBeforeOpen = true;
+                            this.pointerName = "keyMatchBefore";
+                            if (this.query.keyMatch) this.query.keyMatchAfter = this.query.keyMatch;
                         }
                         delete this.query.keyMatch;
                         if (this.query.debug) console.log("Batch-query Index wurde ggf. angepasst ", this.query);
@@ -922,8 +922,7 @@ class demawiRepository {
                 }
 
                 static #getValueFromObject(object, pathToValue) {
-                    if (pathToValue.includes(".")) throw new Error("KeyPfad innerhalb eines Objekte sind noch nicht möglich '" + pathToValue + "'");
-                    return object[pathToValue]
+                    return pathToValue.split('.').reduce((previous, current) => previous[current], object);
                 }
             }
 
@@ -966,7 +965,7 @@ class demawiRepository {
                         resultPromise = new objectStorage.constructor.BatchSearch(objectStorage, idbObjectStore, target, query, iterationOpt, retrieveFnName).batchIt();
                     } else {
                         let keyRange;
-                        if (query.keyMatch || query.keyMatchFrom || query.keyMatchTo) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchFrom, query.keyMatchTo, query.keyMatchFromOpen, query.keyMatchToOpen);
+                        if (query.keyMatch || query.keyMatchAfter || query.keyMatchBefore) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchAfter, query.keyMatchBefore, query.keyMatchAfterOpen, query.keyMatchBeforeOpen);
                         if (iterationOpt && isGetAllKeys) { // Wird aktuell immer komplett abgefragt
                             if (query.order) throw new Error("getAllKeys wird aktuell nicht mit 'query.order' unterstützt!");
                             if (query.debug) console.log("SearchType: " + retrieveFnName, target.keyPath, keyRange, _.util.cloneObject(query));
@@ -1006,28 +1005,28 @@ class demawiRepository {
                  * keyRangeSingle muss alleine angegeben werden. Ansonsten können keyRangeFromOpt und keyRangeToOpt zusammen oder nur einer von beiden angegeben werden.
                  * @returns {IDBKeyRange}
                  */
-                static async #getQueryKeyRange(objectStorage, target, query, keyMatch, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen) {
+                static async #getQueryKeyRange(objectStorage, target, query, keyMatch, keyMatchAfter, keyMatchBefore, keyMatchAfterOpen, keyMatchBeforeOpen) {
                     if (query.keyMatch instanceof IDBKeyRange) return keyMatch;
                     if (keyMatch && typeof keyMatch === "string") keyMatch = [keyMatch];
-                    if (keyMatchFrom && typeof keyMatchFrom === "string") keyMatchFrom = [keyMatchFrom];
-                    if (keyMatchTo && typeof keyMatchTo === "string") keyMatchTo = [keyMatchTo];
+                    if (keyMatchAfter && typeof keyMatchAfter === "string") keyMatchAfter = [keyMatchAfter];
+                    if (keyMatchBefore && typeof keyMatchBefore === "string") keyMatchBefore = [keyMatchBefore];
                     let hasWildcards = false;
                     if (keyMatch) {
                         hasWildcards = keyMatch.filter(a => typeof a === "object").length > 0;
                         if (!hasWildcards) return IDBKeyRange.only(keyMatch);
-                        keyMatchFrom = keyMatch;
-                        keyMatchTo = keyMatch;
+                        keyMatchAfter = keyMatch;
+                        keyMatchBefore = keyMatch;
                     } else {
-                        if (keyMatchFrom) hasWildcards = keyMatchFrom.filter(a => typeof a === "object").length > 0;
-                        if (!hasWildcards && keyMatchTo) hasWildcards = keyMatchTo.filter(a => typeof a === "object").length > 0;
+                        if (keyMatchAfter) hasWildcards = keyMatchAfter.filter(a => typeof a === "object").length > 0;
+                        if (!hasWildcards && keyMatchBefore) hasWildcards = keyMatchBefore.filter(a => typeof a === "object").length > 0;
                     }
 
                     if (hasWildcards) {
                         const lowerBound = []; // Wildcards werden mit den minimalst möglichen Werten gefüllt
                         const upperBound = []; // Wildcards werden mit den maximalst möglichen Werten gefüllt
-                        for (let i = 0, l = (keyMatchFrom || keyMatchTo).length; i < l; i++) {
-                            const low = keyMatchFrom && keyMatchFrom[i];
-                            const high = keyMatchTo && keyMatchTo[i];
+                        for (let i = 0, l = (keyMatchAfter || keyMatchBefore).length; i < l; i++) {
+                            const low = keyMatchAfter && keyMatchAfter[i];
+                            const high = keyMatchBefore && keyMatchBefore[i];
                             if (low) {
                                 if (typeof low !== "object") {
                                     lowerBound.push(low);
@@ -1051,9 +1050,9 @@ class demawiRepository {
                                 }
                             }
                         }
-                        return this.#toIDBKeyRange(target, lowerBound.length > 0 ? lowerBound : undefined, upperBound.length > 0 ? upperBound : undefined, keyMatchFromOpen, keyMatchToOpen);
+                        return this.#toIDBKeyRange(target, lowerBound.length > 0 ? lowerBound : undefined, upperBound.length > 0 ? upperBound : undefined, keyMatchAfterOpen, keyMatchBeforeOpen);
                     } else { // no wildcards, die Arrays werden 1:1 übernommen
-                        return this.#toIDBKeyRange(target, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen);
+                        return this.#toIDBKeyRange(target, keyMatchAfter, keyMatchBefore, keyMatchAfterOpen, keyMatchBeforeOpen);
                     }
                 }
 
@@ -1061,19 +1060,19 @@ class demawiRepository {
                     return Array.isArray(value) && value[0] === againstWildcard[0];
                 }
 
-                static #toIDBKeyRange(target, keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen) {
+                static #toIDBKeyRange(target, keyMatchAfter, keyMatchBefore, keyMatchAfterOpen, keyMatchBeforeOpen) {
                     if (typeof target.keyPath === "string") {
-                        if (keyMatchFrom) keyMatchFrom = keyMatchFrom[0];
-                        if (keyMatchTo) keyMatchTo = keyMatchTo[0];
+                        if (keyMatchAfter) keyMatchAfter = keyMatchAfter[0];
+                        if (keyMatchBefore) keyMatchBefore = keyMatchBefore[0];
                     }
-                    if (keyMatchFrom) {
-                        if (keyMatchTo) {
-                            return IDBKeyRange.bound(keyMatchFrom, keyMatchTo, keyMatchFromOpen, keyMatchToOpen);
+                    if (keyMatchAfter) {
+                        if (keyMatchBefore) {
+                            return IDBKeyRange.bound(keyMatchAfter, keyMatchBefore, keyMatchAfterOpen, keyMatchBeforeOpen);
                         } else {
-                            return IDBKeyRange.lowerBound(keyMatchFrom, keyMatchFromOpen);
+                            return IDBKeyRange.lowerBound(keyMatchAfter, keyMatchAfterOpen);
                         }
                     } else {
-                        return IDBKeyRange.upperBound(keyMatchTo, keyMatchToOpen);
+                        return IDBKeyRange.upperBound(keyMatchBefore, keyMatchBeforeOpen);
                     }
                 }
 
@@ -1576,6 +1575,32 @@ class demawiRepository {
         }
     }
 
+    /**
+     * TODO: Anzeige an der Oberfläche
+     */
+    static Migration = class Migration {
+
+        static start(text) {
+            return new _.Migration(text);
+        }
+
+        text;
+
+        constructor(text) {
+            this.text = text;
+        }
+
+        progress(cur, to) {
+
+        }
+
+        failure(text) {
+        }
+
+        end() {
+        }
+    }
+
     static Settings = class Settings {
         static async getHandler(settingsDef) {
             const settingsHandler = new _.Settings(settingsDef);
@@ -1600,9 +1625,13 @@ class demawiRepository {
             this.data[id] = value;
         }
 
+        delete(id) {
+            this.#ensureId(id);
+            delete this.data[id];
+        }
+
         #ensureId(id) {
-            const value = this.settingsDef.defaultSettings[id];
-            if (value === undefined || value === null) {
+            if (!(id in this.settingsDef.defaultSettings)) {
                 const msg = "[" + this.settingsDef.modName + "] hat Setting '" + id + "' nicht definiert!";
                 console.error(msg, this.settingsDef);
                 throw new Error(msg);
@@ -4669,19 +4698,21 @@ class demawiRepository {
             // Auf alte dataversions prüfen
             const needRewrite = await _.WoDStorages.getItemDb().getAllKeys({
                 index: ["dv"],
-                keyMatchTo: [_.ItemParserDataVersion],
-                keyMatchToOpen: true,
+                keyMatchBefore: [_.ItemParserDataVersion],
+                keyMatchBeforeOpen: true,
             });
             if (needRewrite.length > 0) {
+                const migration = _.Migration.start("Items werden neu geschrieben", needRewrite.length);
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...");
                 for (const curItemId of needRewrite) {
                     const sourceItem = await _.WoDStorages.getItemSourcesDb().getValue(curItemId);
                     if (sourceItem) {
-                        const curItem = await this.getItemDB().getValue(curItemId);
+                        //const curItem = await this.getItemDB().getValue(curItemId);
                         const item = await this.parseSourceItem(sourceItem);
                         await this.getItemDB().setValue(item);
                     }
                 }
+                migration.end();
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries... Finished!");
             }
         }

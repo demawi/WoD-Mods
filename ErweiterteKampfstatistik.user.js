@@ -1878,7 +1878,7 @@
             compareDate.setDate(compareDate.getDate() - 8); // x-Tage lang vorhalten
             for (const reportId of await reportStatsDB.getAllKeys({
                 index: ["ts"],
-                keyMatchTo: [compareDate.getTime()],
+                keyMatchBefore: [compareDate.getTime()],
             })) { // werden nie so viele werden
                 await reportStatsDB.deleteValue(reportId);
             }

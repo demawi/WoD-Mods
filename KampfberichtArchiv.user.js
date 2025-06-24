@@ -55,7 +55,7 @@
 
         static async startMod() {
             const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
-            if(!indexedDb) return;
+            if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
 
             const page = _.util.getWindowPage();
@@ -118,7 +118,7 @@
                 const groupName = header.textContent;
                 const groupId = new URL(header.href).searchParams.get("id");
                 const schlachtName = document.getElementsByTagName("h2")[0].textContent.trim();
-                console.log("Schlachtname: " + schlachtName)
+                //console.log("Schlachtname: " + schlachtName)
                 for (const roundX of oldRound1.parentElement.children) {
                     for (const aElem of roundX.getElementsByTagName("a")) {
                         if (aElem.textContent === "(Bericht)") {
@@ -166,6 +166,7 @@
 
             const reportData = _.WoD.getFullReportBaseData();
             const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
+            if (!reportMeta.fav) reportMeta.fav = {none: 1};
             reportMeta.world_season = await _.WoD.getMyWorldSeasonNr(); // sollte immer aufgerufen werden, damit sich auch die Saison-Zeit der Gruppe aktualsiert
 
             if (document.getElementsByClassName("paginator").length > 0) {
@@ -317,18 +318,13 @@
         static async resyncFavorites() {
             // Erst alle löschen dann neu belegen
             await MyStorage.reportArchive.getAll(false, async function (report) {
-                delete report.favAuto;
-                if (report.fav) {
-                    report.fav = {
-                        [AutoFavorit.TAG_MANUELL]: 1, // manuell
-                    }
-                } else {
-                    delete report.fav;
+                if (!report.fav) {
+                    report.fav = {none: 1};
+                    await MyStorage.reportArchive.setValue(report);
                 }
-                await MyStorage.reportArchive.setValue(report);
             });
-            await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL);
-            await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP);
+            //await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_ALL);
+            //await AutoFavorit.checkAutoFavoritenForTagName(AutoFavorit.TAG_GROUP);
         }
 
         /**
@@ -525,7 +521,7 @@
                     memorySpace += report.srcs.space;
                     dungeonStat.space = (dungeonStat.space || 0) + report.srcs.space;
                 }
-                if (report.fav) dungeonStat.fav = (dungeonStat.fav || 0) + 1;
+                if (!report.fav.none) dungeonStat.fav = (dungeonStat.fav || 0) + 1;
                 const success = report.success;
                 if (!success) continue;
                 const members = success.members;
@@ -734,7 +730,7 @@
                         archiviertAktionenTD.append(deleteButton);
                         updateLoeschenButton = async function (curReportMeta) {
                             curReportMeta = curReportMeta || await MyStorage.reportArchive.getValue(reportId);
-                            const isBlocked = curReportMeta.fav;
+                            const isBlocked = !curReportMeta.fav.none;
                             if (isBlocked) {
                                 deleteButton.style.visibility = "hidden";
                             } else {
@@ -894,25 +890,29 @@
 
             const autoLoeschenTageLabel = document.createElement("span");
             autoLoeschenTageLabel.innerHTML = "Anzahl Tage:";
-            const autoLoeschenTage = this.createTextBox(() => settings[MySettings.SETTING.AUTO_LOESCHEN_TAGE],
+            const autoLoeschenTage = this.createTextBox(() => settings.get(MySettings.SETTING.AUTO_LOESCHEN_TAGE),
                 async function (value) {
                     try {
                         value = Math.round(Number(value));
+                        if (value < 1) {
+                            value = 1;
+                            autoLoeschenTage.value = value;
+                        }
                     } catch (e) {
+                        autoLoeschenTage.value = settings.get(MySettings.SETTING.AUTO_LOESCHEN_TAGE);
                     }
-                    settings[MySettings.SETTING.AUTO_LOESCHEN_TAGE] = value;
-                    await MySettings.save();
+                    settings.set(MySettings.SETTING.AUTO_LOESCHEN_TAGE, value);
+                    settings.delete(MySettings.SETTING.AUTO_LOESCHEN_CHECK); // check on next call
+                    await settings.save();
                 });
             autoLoeschenTage.size = 4;
 
             let updateVisibility;
-            const autoLoeschen = this.createCheckBox(() => settings[MySettings.SETTING.AUTO_LOESCHEN],
+            const autoLoeschen = this.createCheckBox(() => settings.get(MySettings.SETTING.AUTO_LOESCHEN),
                 async function (value) {
-                    settings[MySettings.SETTING.AUTO_LOESCHEN] = value;
-                    if (!value) {
-                        delete settings[MySettings.SETTING.AUTO_LOESCHEN_CHECK];
-                    }
-                    await MySettings.save();
+                    settings.set(MySettings.SETTING.AUTO_LOESCHEN, value);
+                    settings.delete(MySettings.SETTING.AUTO_LOESCHEN_CHECK); // check on next call or not necessary
+                    await settings.save();
                     updateVisibility();
                 });
             updateVisibility = async function () {
@@ -936,10 +936,10 @@
             this.addHeader(settingTable, "Sonstiges", "");
             const tableContent = [];
 
-            const lootSummaryCheckbox = this.createCheckBox(() => settings.lootSummary,
+            const lootSummaryCheckbox = this.createCheckBox(() => settings.get(MySettings.SETTING.LOOT_SUMMARY),
                 async function (value) {
-                    settings.lootSummary = value;
-                    await MySettings.save();
+                    settings.set(MySettings.SETTING.LOOT_SUMMARY, value);
+                    await settings.save();
                 });
 
             tableContent.push(["Zusammenfassung Gegenstandsseite: ", lootSummaryCheckbox]);
@@ -1010,11 +1010,11 @@
                     await settings.save();
                 });
             autoLoeschenFavoritGroup.title = "Für jede Gruppe wird generell nur je ein Dungeon markiert.";
-            const autoLoeschenFavoritGroupSeason = this.createCheckBox(() => settings.get(MySettings.SETTING_AUTO_FAVORIT_GROUP_SEASON),
+            const autoLoeschenFavoritGroupSeason = this.createCheckBox(() => settings.get(MySettings.SETTING.AUTO_FAVORIT_GROUP_SEASON),
                 async function (value) {
                     settings.set(MySettings.SETTING.SETTING_AUTO_FAVORIT_GROUP_SEASON, value);
                     settings.set(MySettings.SETTING.SETTING_AUTO_FAVORIT_GROUP_SEASON_CHECK, true);
-                    await MySettings.save();
+                    await settings.save();
                 });
             autoLoeschenFavoritGroupSeason.title = "Für jede Gruppe in jeder Saison wird je ein Dungeon markiert.";
             const getFavoritCheckBox = function (checkbox, tagName) {
@@ -1535,7 +1535,7 @@
                 let stufeMax = 0;
                 const stufen = Object.entries(item.stufen);
                 for (const [cur, add] of stufen) {
-                    if(!add.safe) continue;
+                    if (!add.safe) continue;
                     const curNr = Number(cur);
                     if (curNr < stufeMin) stufeMin = curNr;
                     if (curNr > stufeMax) stufeMax = curNr;
@@ -2220,6 +2220,9 @@
 
     class Maintenance {
 
+        /**
+         * Prüft, ob AutoFavoriten und/oder die Löschautomatik durchzuführen ist.
+         */
         static async checkMaintenance() {
             const settings = await MySettings.get();
 
@@ -2249,14 +2252,17 @@
                 // Täglich einmal
                 if (!settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK) || new Date(settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK)) < new Date().setDate(new Date().getDate() - 1)) {
                     console.log("Auto Löschen wird ausgeführt!");
-
-                    const anzahlTage = await (MySettings.get()).get(MySettings.SETTING.AUTO_LOESCHEN_TAGE);
+                    const settings = await MySettings.get();
+                    const anzahlTage = settings.get(MySettings.SETTING.AUTO_LOESCHEN_TAGE);
                     let date = new Date();
                     date.setDate(date.getDate() - anzahlTage);
-                    MyStorage.reportArchive.getAll({
+                    await MyStorage.reportArchive.getAll({
                         index: ["ts", "fav.none"],
-                        keyMatchTo: [ date.getTime(), 2],
+                        keyMatchBefore: [date.getTime(), Number.MAX_VALUE],
+                    }, async function (report) {
+                        console.log("Lösche ", report.reportId);
                     });
+                    alert("Archiv-Löschungen wurden geprüft!");
 
                     settings.set(MySettings.SETTING.AUTO_LOESCHEN_CHECK, new Date().getTime());
                     await settings.save();
@@ -2360,7 +2366,7 @@
             if (report.fav) {
                 delete report.fav[tagName];
                 if (Object.keys(report.fav).length === 0) {
-                    delete report.fav;
+                    report.fav.none = 1;
                 }
             }
         }
@@ -2454,7 +2460,7 @@
             const report = await MyStorage.reportArchive.getValue(reportId);
             delete report.srcs;
             await MyStorage.reportArchive.setValue(report);
-            if (report.fav) await AutoFavorit.recheckAutoFavoritenForReport(report);
+            if (!report.fav.none) await AutoFavorit.recheckAutoFavoritenForReport(report);
         }
 
     }
@@ -3049,8 +3055,13 @@
             AUTO_LOESCHEN_CHECK: "autoLoeschenCheck",
             AUTO_FAVORIT_ALL: "autoFavoritAll",
             AUTO_FAVORIT_ALL_CHECK: "autoFavoritAllCheck",
+            AUTO_FAVORIT_All_SEASON: "autoFavoritAllSeason",
+            AUTO_FAVORIT_All_SEASON_CHECK: "autoFavoritAllSeasonCheck",
             AUTO_FAVORIT_GROUP: "autoFavoritGroup",
             AUTO_FAVORIT_GROUP_CHECK: "autoFavoritGroupCheck",
+            AUTO_FAVORIT_GROUP_SEASON: "autoFavoritGroupSeason",
+            AUTO_FAVORIT_GROUP_SEASON_CHECK: "autoFavoritGroupSeasonCheck",
+
             MAX_RESULTS: "maxResults",
             LOOT_SUMMARY: "lootSummary",
         }
@@ -3059,10 +3070,12 @@
             modName: Mod.modname,
             defaultSettings: {
                 autoLoeschen: false,
-                autoLoeschenTage: 14,
+                [this.SETTING.AUTO_LOESCHEN_TAGE]: 14,
                 autoFavoritAllCheck: false,
                 autoFavoritGroupCheck: false,
-                autoLoeschenCheck: new Date().getTime(),
+                [this.SETTING.AUTO_FAVORIT_All_SEASON]: false,
+                [this.SETTING.AUTO_FAVORIT_GROUP_SEASON]: false,
+                autoLoeschenCheck: undefined,
                 autoFavoritAll: true,
                 autoFavoritGroup: true,
                 maxResults: 100,
