@@ -142,6 +142,8 @@ class demawiRepository {
             }
 
             async getAll(query, iterationFnOpt) {
+                const dbName = this.indexedDb.dbname;
+                const storageId = this.storageId;
                 if (!iterationFnOpt) {
                     if (!query) {
                         if (query !== false) console.warn("getAll ohne Parameter kann bei großen Datenbanken zu Problemen führen");
@@ -150,9 +152,10 @@ class demawiRepository {
                     const startTime = new Date().getTime();
                     const longQueryTime = query.longQuery || this.indexedDb.longQuery;
                     query.longQuery = 10000;
+                    query.db = [dbName, storageId, "getAll"];
                     let resultPromise = this.indexedDb.executeProxyCall(async function (storageId, dbname, query) {
                         return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query);
-                    }, this.storageId, this.indexedDb.dbname, query);
+                    }, storageId, dbName, query);
                     resultPromise = resultPromise.then(a => {
                         const queryTime = new Date().getTime() - startTime;
                         if (queryTime > longQueryTime) {
@@ -164,26 +167,32 @@ class demawiRepository {
                     });
                     return resultPromise;
                 }
+                if(!query) query = {};
+                query.db = [dbName, storageId, "getAll"];
                 return this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, query) {
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query, async function (a) {
                         return await respondIteration(data, a);
                     });
                     respondFinished(data);
-                }, this.storageId, this.indexedDb.dbname, query);
+                }, storageId, dbName, query);
             }
 
-            async getAllKeys(queryOpt, iterationFnOpt) {
+            async getAllKeys(query, iterationFnOpt) {
+                const dbName = this.indexedDb.dbname;
+                const storageId = this.storageId;
+                if(!query) query = {};
+                query.db = [dbName, storageId, "getAll"];
                 if (!iterationFnOpt) {
                     return this.indexedDb.executeProxyCall(async function (storageId, dbname, queryOpt) {
                         return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt);
-                    }, this.storageId, this.indexedDb.dbname, queryOpt);
+                    }, storageId, dbName, query);
                 }
                 return await this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt, async function (a) {
                         return await respondIteration(data, a);
                     });
                     respondFinished(data);
-                }, this.storageId, this.indexedDb.dbname, queryOpt);
+                }, storageId, dbName, query);
             }
         }
 
@@ -939,11 +948,12 @@ class demawiRepository {
                         if (query !== false && iterationOpt === undefined && !isGetAllKeys) console.warn(retrieveFnName + " ohne Parameter kann bei großen Datenbanken zu Problemen führen")
                         query = {};
                     }
-                    query.db = objectStorage.indexedDb.dbname;
-                    query.storageId = objectStorage.storageI;
+                    const dbName = objectStorage.indexedDb.dbname;
+                    const storageId = objectStorage.storageId;
+                    query.db = [dbName, storageId, retrieveFnName];
                     const connection = await objectStorage.indexedDb.getConnection();
-                    const transaction = connection.transaction(objectStorage.storageId, "readonly");
-                    const idbObjectStore = transaction.objectStore(objectStorage.storageId);
+                    const transaction = connection.transaction(storageId, "readonly");
+                    const idbObjectStore = transaction.objectStore(storageId);
                     let target = idbObjectStore;
                     /**
                      * In bestimmten Fällen müssen wir eine Suchanfrage an einer bestimmten Stelle wiederaufnehmen, weil wir es nicht in einer einzigen Transaktion abhandeln können.

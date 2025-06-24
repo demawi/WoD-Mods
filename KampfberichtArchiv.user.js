@@ -884,7 +884,7 @@
         }
 
         static async createLoeschautomatik(settingTable, settings) {
-            this.addHeader(settingTable, "Löschautomatik", "Es werden standardmäßig nur die Quell-Berichte und nicht die ermittelten Meta-Daten gelöscht. Die Löschung wird einmal täglich beim Aufrufen der 'Kampfberichte'-Seite durchgeführt.");
+            this.addHeader(settingTable, "Löschautomatik", "Es werden standardmäßig nur die Quell-Berichte und nicht die ermittelten Meta-Daten gelöscht. Die Löschung wird einmal täglich beim Aufrufen der 'Kampfberichte'-Seite überprüft.");
 
             const tableContent = [];
 
@@ -976,7 +976,7 @@
         }
 
         static async createAutoFavorit(settingTable, settings) {
-            this.addHeader(settingTable, "Auto-Favorit", "Durch das Setzen eines Datensatzes als Favorit, wird dieser Datensatz vom Löschen ausgenommen. Die Änderung tritt beim nächsten Aufruf der 'Kampfberichte'-Seite in Kraft.", "Auswahlkriterien sind pro Dungeonversion: \n1. Größere Anzahl an Mitglieder die das Ziel erreicht haben\n2. Größere Anzahl erreichter Level\n3. Größere Anzahl an erfolgreichen Räumen\n4. Der Datensatz mit dem neueren Datum");
+            this.addHeader(settingTable, "Auto-Favorit", "Durch das Setzen eines Datensatzes als Favorit, wird dieser Datensatz von der Löschautomatik ausgenommen. Die Änderung tritt beim nächsten Aufruf der 'Kampfberichte'-Seite in Kraft.", "Auswahlkriterien sind pro Dungeonversion: \n1. Größere Anzahl an Mitglieder die das Ziel erreicht haben\n2. Größere Anzahl erreichter Level\n3. Größere Anzahl an erfolgreichen Räumen\n4. Der Datensatz mit dem neueren Datum");
 
             const tableContent = [];
 
