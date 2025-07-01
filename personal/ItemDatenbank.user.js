@@ -21,6 +21,7 @@
     const _ = {
         Storages: demawiRepository.import("Storages"),
         WoDStorages: demawiRepository.import("WoDStorages"),
+        WoDItemDb:  demawiRepository.import("WoDItemDb"),
         WoDLootDb: demawiRepository.import("WoDLootDb"),
         BBCodeExporter: demawiRepository.import("BBCodeExporter"),
         File: demawiRepository.import("File"),
@@ -34,10 +35,11 @@
 
     class Mod {
         static dbname = "wodDB";
+        static version = GM.info.script.version;
 
         static async startMod() {
             const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
-            if(!indexedDb) return;
+            if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
 
             await demawiRepository.startMod();
@@ -60,7 +62,7 @@
             const item = await this.findNext();
             if (item) {
                 const iframe = document.createElement("iframe");
-                iframe.src = WoD.getItemUrl(item.name);
+                iframe.src = _.WoD.getItemUrl(item.name);
                 iframe.style.display = "none";
                 document.body.append(iframe);
             }
@@ -350,12 +352,9 @@
                         }
 
                         const itemSpan = document.createElement("span");
-                        const href = document.createElement("a");
+                        const href = _.WoD.createItemLink(item.name);
                         itemSpan.append(href);
-                        const url = WoD.getItemUrl(item.name);
-                        href.href = url;
                         href.target = "ItemView";
-                        href.innerHTML = item.name;
 
                         if (itemDBSearch.checked) {
                             for (let i = 0, l = item.data.slots; i < l; i++) {
@@ -368,9 +367,7 @@
                                 img.src = "/wod/css/icons/WOD/gems/gem_0.png";
                                 itemSpan.append(img);
                             }
-                            href.onclick = function () {
-                                return wo(url + "&IS_POPUP=1");
-                            }
+                            // href.onclick = function () {return wo(url + "&IS_POPUP=1");}
                         } else {
                             href.onclick = function () {
                                 itemSpan.parentElement.removeChild(itemSpan);
@@ -477,12 +474,12 @@
             static "Fertigkeit (Besitzer)" = {
                 pfad: "effects.owner.fertigkeit",
                 when: "Bonus - Fertigkeit",
-                toHTML: AutoColumns.default2SpaltenOutputWithLink(a => WoD.getLinkForFertigkeit(a)),
+                toHTML: AutoColumns.default2SpaltenOutputWithLink(a => _.WoD.createSkillLink(a)),
             }
             static "Fertigkeit (Betroffener)" = {
                 pfad: "effects.target.fertigkeit",
                 when: "Bonus - Fertigkeit",
-                toHTML: AutoColumns.default2SpaltenOutputWithLink(a => WoD.getLinkForFertigkeit(a)),
+                toHTML: AutoColumns.default2SpaltenOutputWithLink(a => _.WoD.createSkillLink(a)),
             }
             static "Talentklasse (Besitzer)" = {
                 pfad: "effects.owner.talentklasse",
@@ -658,7 +655,7 @@
                 if (result.length > 0) result += "<br>";
                 const bonus = AutoColumns.replaceHSFRMitBerechnung(parade.bonus);
                 console.log("GegBonus", parade.bonus, bonus);
-                result += (linkFn && linkFn(parade.type) || parade.type) + ": " + bonus + (parade.dauer ? " (" + parade.dauer + (parade.bemerkung ? "/" + parade.bemerkung : "") + ")" : "");
+                result += (linkFn && linkFn(parade.type).outerHTML || parade.type) + ": " + bonus + (parade.dauer ? " (" + parade.dauer + (parade.bemerkung ? "/" + parade.bemerkung : "") + ")" : "");
             });
             return result;
         }
@@ -1257,7 +1254,7 @@
             return this.item;
         }
 
-        static async getItem(itemName) {
+        static async getItem_Deprecated(itemName) {
             if (!this.itemSources.getValue(itemName)) {
                 const newItem = {name: itemName};
                 await this.itemSources.setValue(newItem);
@@ -1303,10 +1300,7 @@
                 }
             }
             if (!sourceItem) {
-                const newItem = {
-                    name: itemName,
-                    ts: new Date().getTime(),
-                }
+                const newItem = _.WoDItemDb.createItem(itemName);
                 await this.itemSources.setValue(newItem);
             }
         }
@@ -1316,16 +1310,8 @@
     class WoD {
         static AUSWAHL_IDS = [3, 4, 5, 6, 7, 10, 11];
 
-        static getItemUrl(itemName) {
-            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(itemName);
-        }
-
         static getSuchfeld() {
             return this.getSuchInput("item_?name");
-        }
-
-        static getLinkForFertigkeit(fertigkeit) {
-            return "<a href='/wod/spiel/hero/skill.php?name=" + fertigkeit + "&is_popup=1' onclick=\"return wo('/wod/spiel/hero/skill.php?name=" + fertigkeit + "&session_hero_id=373802&IS_POPUP=1');\">" + fertigkeit + "</a>";
         }
 
         static getSuchInput(nameSchema) {

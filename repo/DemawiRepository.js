@@ -840,7 +840,7 @@ class demawiRepository {
                     this.iteration = iteration;
                     this.limit = this.query.limit || Number.MAX_VALUE;
                     this.retrieveFnName = retrieveFnName;
-                    this.batchSize = query.batchSize || 50;
+                    this.batchSize = query.batchSize || 20;
                     delete query.batchSize; // für die Subanfragen selbst soll keine Batch-Search verwendet werden
                 }
 
@@ -1235,12 +1235,33 @@ class demawiRepository {
                 } else return [false];
             }
             if (this.ensureIframeWrap()) return [false];
-            const version = window.top._demrepv || (window.opener && window.opener.top._demrepv);
+            const rootWindow = this.getRootWindow();
+            const version = rootWindow._demrepv;
             if (version !== _.version) { // Die Version hat sich geändert, alles nochmal laden.
-                window.top.location.reload();
+                // Fall 1: Mod hat sich nach dem ersten Laden der Seite aktualisiert
+                // Fall 2: Mehrere Mods, nur einer hat sich aktualisiert, der andere läuft hier dann immer auf einen Fehler
+                console.log("Versionchange: reload");
                 if (window.opener) window.close(); // Popup muss geschlossen werden, damit es erneut geöffnet werden kann
+
+                // nur die vorherige Mod stößt den Reload an, damit es bei Versionsunterschieden (z.B. eine Mod ist nicht aktuell) nicht zu Dauerschleifen kommt
+                if (GM.info.script.name === rootWindow._demrepm) rootWindow.location.reload();
+                else {
+                    // damit der eigentlich Mod Zeit für den Reload hat, dann brauchen diese Meldungen gar nicht erst angezeigt werden.
+                    // kann aber natürlich auch passieren, wenn eine inner Seite aufgerufen wurde, wo die Mod, die den Proxy installiert hat nicht zur Ausführung kommt.
+                    setTimeout(function () {
+                        alert(GM.info.script.name + ": falsche Version erkannt!" + "\n\nMainDomainProxy-Version: " + rootWindow._demrepv + "\nwurde von " + rootWindow._demrepm + " installiert!" + "\n\n" + GM.info.script.name + " erwartet Version " + _.version + "\n\nAlle demawi-Mods müssen auf der gleichen Version laufen bzw. aktuell sein!");
+                    }, 2000);
+                }
+                return [false];
             }
             return [true, "p"];
+        }
+
+        static getRootWindow(win) {
+            win = win || window;
+            if (win.opener) return this.getRootWindow(win.opener);
+            if (win.top && win.top !== win) return this.getRootWindow(win.top);
+            return win;
         }
 
         static isTampermonkey() {
@@ -1271,6 +1292,7 @@ class demawiRepository {
         static #ensureIframeWrapDoIt() {
             console.log("Iframe-Wrap wurde erstellt!");
             unsafeWindow._demrepv = _.version;
+            unsafeWindow._demrepm = GM.info.script.name;
             const iframeWrap = document.createElement("iframe");
             iframeWrap.style.width = "100%";
             iframeWrap.style.height = "100%";
@@ -2166,6 +2188,111 @@ class demawiRepository {
 
     }
 
+    static WoDItemDb = class {
+
+        /**
+         * Items können dennoch Unique für einen bestimmten Bereich sein
+         * siehe z.B. Abgrund-Quest-Uniques oder auf bestimmte Stufen begrenzt
+         */
+        static GENERATOR_ITEMS = [
+            [
+                ["", "Gut", "Sehr gut", "Perfekt", "Göttlich"], // Stufe
+                ["Amulett", "Armreif", "Gürtel", "Ring", "Talisman", "Umhang"],
+                ["der göttlichen Strafe", "des Armbrustschützen", "des Bücherwurms", "des Giftmischers", "des strahlenden Anführers", "des magischen Flusses", "der magischen Markierung",
+                    "des wilden Tieres", "des überragenden Ringers", "der Mannigfaltigkeit", "des meisterlichen Messerwerfers", "des Keulenschwingers", "des Kräutersammlers", "des listenreichen Kämfpers",
+                    "des meisterlichen Schrotes", "des Meisters mit der Schlinge", "des Ritualisten", "des Schwertmeisters", "des primitiven Affen", "des Spaßmachers", "des Seilschwingers", "des Stabfechters",
+                    "des meisterlichen Speerträgers", "des göttlichen Segens", "des Duellanten", "des Axtkämpfers", "der Tarnung", "der überragenden Schildparade", "des Alchemisten", "des Blasrohrschützen",
+                    "des bösen Blickes", "des Duellschützen", "des geborenen Spötters", "des Heilers", "der Einschüchterung", "der flinken Klinge", "der magischen Verteidigung"]
+            ],
+            [ // Waffen Generator
+                ["", "Einfach", "Gut", "Verbessert", "Perfekt", "Sagenhaft"], // Stufe, aber: Äxte haben z.B. statt diesem Präfix eigene Namen
+                ["Flammend", "Frostig", "Smaragd", "Vipern", "Quarz", "Runenbeschrieben", "Ursprünglich", "Leicht", "Magisch", "Gut"], // zweiter Präfix, Parierdolch hat hier z.B. auch "Gut" ist aber keine "Stufe"
+                ["", "des Hasses", "der Geschwindigkeit", "der Gewandtheit", "der Vitalität", "mit Perlmutt", "mit Smaragd"],
+            ],
+            [
+                ["Gesegnet"],
+                ["Armband"],
+                ["der göttlichen Gnade", "der Heilkunst", "der Lebensenergie", "der Magieresistenz", "der Manaregeneration", "der Raserei", "der Zuversicht", "des abgehärteten Kämpen", "des Formwandlers",
+                    "des inneren Fokus", "des Kräuterkundigen", "des Magus", "des Naturzauberers", "des ruhmreichen Feldherren", "des Schutz wider der Elemente", "des Widerstandes"]
+            ],
+            [ // Szepter und Streitkolben
+                ["Normal", "Gesegnet", "Geweiht", "Geheiligt", "Göttergeschmiedet"],
+                ["Demosan-", "Lion-"],
+                [],
+            ],
+            [ // Gebetsstab / Seherstab mit Suffix (für Prohpet)
+                ["Vergessen", "", "Gesegnet", "Geweiht", "Geheiligt", "Göttergeschmiedet"],
+                ["Aiara-", "Akbeth-", "Rashon-"],
+                ["", "aus Giftranken", "aus Glutborke", "des Hirten", "des Orakels", "des Richters"],
+            ],
+            [ // der Mannigfaltigkeit
+                ["Gut", "Sehr gut", "Perfekt", "Göttlich"], // Stufe
+                ["Amulett", "Gürtel", "Talisman", "Umhang", "Stirnband"],
+                ["der Mannigfaltigkeit"],
+            ],
+            [ // Schmuck: Bronze bis Platin
+                ["Bronze-", "Silber-", "Gold-", "Platin-"], // Stufe
+                ["Armreif", "Halskette", "Ring", "Ohrring", "Schmuckgürtel"],
+                ["der Mannigfaltigkeit", "mit kleinem Rubin", "mit kleinem Saphir"],
+            ],
+            [ // Stufe 29 Generator
+                ["Leicht", "Verstärkt", "Gesegnet"], // Stufe
+                ["Nicolit-Beinschienen", "Nicolit-Panzerhandschuhe", "Nicolit-Panzerstiefel"],
+                ["des furchtlosen Kriegers", "des weisen Magiers", "des standhaften Beschützers", "der helfenden Hand"]
+            ],
+            [ // Abgrund-Quest
+                ["Abweisende", "Passgenaue", "Kantige", "Strahlende"], // Typ
+                [""], // "Magma/Tiefen", "muschellamellen/quallenseide"
+                ["der Aufmerksamkeit", "der Austrahlung", "der Durchsetzungsstärke", "der Geistesgegenwart", "der Geschwindikeit", "der Gesundheit", "der Gewandheit", "der Kraft"],
+            ],
+            [ // Abgrund-Quest-Perlen
+                ["Große", "Pulsierend"], // Typ
+                ["blauschimmernd", "grünschimmernd", "rotschimmernd", "goldschimmernd"],
+                ["Kanjalperle", "Perle"],
+            ],
+            [ // Mönch-Generator
+                ["", "Leicht", "Magisch", "Robust"],
+                ["Stirnband", "Haube", "Kappe"],
+                ["des unbeirrbaren Kriegers", "des Assassinen", "der totalen Abstinenz"],
+            ]
+        ];
+
+        static isGeneratorItem(itemName) {
+        }
+
+        static async getItem(itemName) {
+            return await _.WoDStorages.getItemDb().getValue(itemName.toLowerCase());
+        }
+
+        static async setItem(item) {
+            await _.WoDStorages.getItemDb().setValue(item);
+        }
+
+        /**
+         * Wird für geparste als auch für Source-Items gleichermaßen genutzt.
+         */
+        static createItem(itemName) {
+            if (!this.isValidItemName(itemName)) {
+                console.error("ItemName ist nicht korrekt: '" + itemName + "'");
+                throw new Error("ItemName ist korrekt: '" + itemName + "'"); // TODO: nur temorär aktiv
+                return;
+            }
+            const now = new Date().getTime();
+            return {
+                id: itemName.toLowerCase(),
+                name: itemName,
+                ts: now,
+                world: {
+                    [_.WoD.getMyWorld()]: now,
+                }
+            }
+        }
+
+        static isValidItemName(itemName) {
+            return !!itemName.match(/^[\p{Letter}0-9 ():,'.+?!-]*$/u);
+        }
+    }
+
     static WoDSkillsDb = class {
         static #skillDataVersion = 3;
 
@@ -2193,12 +2320,22 @@ class demawiRepository {
         }
 
         static async getSkill(skillName) {
+            const skill = await _.WoDStorages.getSkillsDb().getValue(skillName.toLowerCase());
+            if (skill && skill.dv === this.#skillDataVersion) return skill;
+            return null;
+        }
+
+        static async getSkillWithDirectLoad(skillName) {
             let skill = await _.WoDStorages.getSkillsDb().getValue(skillName.toLowerCase());
             if (skill && skill.dv === this.#skillDataVersion) return skill;
             // ad-hoc load
             const content = await _.util.loadViaXMLRequest(this.getSkillUrlAlsPopup(skillName));
             const doc = await _.util.getDocumentFor(content);
             return this.onSkillPage(doc);
+        }
+
+        static isAngriff(skillTyp) {
+            return skillTyp === _.WoDSkillsDb.TYP.ANGRIFF || skillTyp === _.WoDSkillsDb.TYP.VERSCHLECHTERUNG;
         }
 
         static async onSkillPage(doc, content) {
@@ -2292,6 +2429,7 @@ class demawiRepository {
                         skill.gainMP = value;
                         break;
                     case "Finaler Wirkbonus":
+                    case "Finaler Wirkbonus:":
                         skill.wirkbonus = value;
                         break;
                     case "Ziel":
@@ -2369,6 +2507,75 @@ class demawiRepository {
 
         static worldIds = Object.fromEntries(Object.entries(this.worldNames).map(([a, b]) => [a, b.toLowerCase()]).map(a => a.reverse()))
 
+        static VIEW = {
+            TOMBOLA: "tombola",
+            NEWS: "news",
+            ITEMS_GEAR: "gear",
+            DUNGEONS: "dungeons",
+            QUEST: "quest",
+            HEROES: "heroes",
+            MOVE: "move",
+            ITEM: "item",
+            COMBAT_REPORT: "combat_report",
+            REPORT_OVERVIEW: "report_overview",
+            REPORT_ITEMS: "report_items",
+            REPORT: "report",
+            SKILL: "skill",
+            ITEMS_STORE: "storage",
+        }
+
+        static getView() {
+            const pathname = window.location.pathname;
+            if (pathname.includes("/item/")) return this.VIEW.ITEM;
+            if (pathname.includes("/skill/")) return this.VIEW.SKILL;
+
+            const page = _.util.getWindowPage();
+            switch (page) {
+                case "tombola.php":
+                    return this.VIEW.TOMBOLA;
+                case "": // Login-/News-Page
+                case "news.php":
+                    return this.VIEW.NEWS;
+                case "items.php":
+                    const view = _.WoD.getItemsView();
+                    if (view === "") return this.VIEW.ITEMS_STORE;
+                    return view;
+                case "dungeon.php":
+                    return this.VIEW.DUNGEONS;
+                case "new_quest.php":
+                case "quests.php":
+                    return this.VIEW.QUEST;
+                case "heroes.php":
+                    return this.VIEW.HEROES;
+                case "move.php":
+                    return this.VIEW.MOVE;
+                case "item.php":
+                    return this.VIEW.ITEM;
+                case "combat_report.php": // Schlacht
+                case "report.php": // Dungeon
+                    const title = document.getElementsByTagName("h1")[0];
+                    if (title.textContent.trim() === "Kampfberichte") {
+                        return this.VIEW.REPORT_OVERVIEW;
+                    } else {
+                        return this.VIEW.REPORT; // Statistik, Gegenstände oder Kampfbericht
+                    }
+                case "skill.php":
+                    return this.VIEW.SKILL;
+            }
+        }
+
+        static getReportView(silent) {
+            const title = document.getElementsByTagName("h1")[0].textContent.trim();
+            if (title.startsWith("Kampfstatistik")) return "stats";
+            if (title.startsWith("Übersicht Gegenstände")) return "items";
+            if (title.startsWith("Kampfbericht:")) return "fight";
+            if (title.startsWith("Kampfberichte")) return "overview";
+            if (!silent) {
+                console.error("Report-Seite konnte nicht ermittelt werden!", title);
+                throw new Error("Report-Seite konnte nicht ermittelt werden!");
+            }
+        }
+
         /**
          * Wird am Element die Id setzen. Mouseover, mouseout, mousemove events werden vom wodToolTip überschrieben.
          */
@@ -2404,8 +2611,7 @@ class demawiRepository {
 
         static getValueFromMainForm(valueType, doc, first) {
             const form = _.WoD.getMainForm(doc, first);
-            if (!form) return;
-            return form[valueType].value;
+            return form && form[valueType] && form[valueType].value;
         }
 
         static getMyWorld(doc) {
@@ -2556,7 +2762,7 @@ class demawiRepository {
             ts = this.getTimestampFromString(titleSplit[0].trim()) / 60000;
 
             const myWorld = this.getMyWorld(doc);
-            const result = {
+            return {
                 reportId: myWorld + reportId + reportIdSuffix, // um mehrere Welten zu unterstützen sollte diese ID verwendet werden
                 id: reportId,
                 world: myWorld,
@@ -2569,7 +2775,115 @@ class demawiRepository {
                 gruppe_id: this.getMyGroupId(doc),
                 stufe: this.getMyStufe(doc),
             }
+        }
+
+        static getItemUrl(itemName) {
+            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(itemName);
+        }
+
+        static createSkillLink(skillName, onclickPromise, fixId) {
+            return this.createWoDPopupLink(skillName, "/wod/spiel/hero/skill.php", {name: skillName}, onclickPromise, fixId);
+        }
+
+        static createItemLink(itemName, instanceId, onclickPromise) {
+            const searchParams = {
+                name: itemName,
+            };
+            if (instanceId) searchParams.instanceId = instanceId;
+            return this.createWoDPopupLink(itemName, "/wod/spiel/hero/item.php", searchParams, onclickPromise);
+        }
+
+        static createWoDPopupLink(anzeigeName, url, searchParams, windowCallback, fixId) {
+            const myUrl = new URL(url, document.baseURI);
+            if (searchParams) {
+                for (const [key, value] of Object.entries(searchParams)) {
+                    myUrl.searchParams.append(key, value);
+                }
+            }
+            myUrl.searchParams.append("is_popup", 1);
+            const result = document.createElement("a");
+            url = myUrl.pathname + myUrl.search;
+            result.href = url;
+            result.innerHTML = anzeigeName;
+            result.target = "_blank";
+            const _this = this;
+            result.onclick = function () {
+                const win = _this.wodPopup(url, undefined, undefined, fixId);
+                if (win && windowCallback) windowCallback(win);
+                return false;
+            }
             return result;
+        }
+
+        /**
+         * Kopie der wo()-Funktion
+         */
+        static wodPopup(url, w, h, id) {
+            var location = "location=1,statusbar=1,toolbar=1,"
+            if (this.isInternUrl(url)) {
+                location = "location=0,statusbar=0,toolbar=0,"
+                var found = url.search(/is_popup/)
+                if (found === -1) url = this.appendGetParam(url, 'is_popup=1')
+            }
+
+            if (typeof id == 'undefined') {
+                const day = new Date();
+                id = day.getTime();
+            }
+
+            if (typeof w == 'undefined' || w === 0) {
+                w = 8 * screen.width / 10
+
+                if (w > 900)
+                    w = 900
+            } else if (w <= 100) {
+                w = w * screen.width / 100
+            }
+
+            if (typeof h == 'undefined' || h === 0)
+                h = 8 * screen.height / 10
+
+            else if (h <= 100) {
+                h = h * screen.height / 100
+            }
+
+            const x = (screen.width - w) / 2
+            const y = (screen.height - h) / 2
+
+            var n = window.open(url,
+                id,
+                location + "scrollbars=1,menubar=0,resizable=1,width=" + w + ",height=" + h + ",left = " + x + ",top = " + y)
+
+            // n==null kann bei Popupblockern passieren, der Browser gibt aber einen Hinweis
+            if (n !== null && typeof (n) != 'undefined') {
+                n.focus();
+            }
+            return n;
+        }
+
+        static isInternUrl(url) {
+            var start = url.substring(0, 1);
+            return start === '/' || start === '.';
+        }
+
+        static appendGetParam(url, param) {
+
+            const qmark_index = url.indexOf('?')
+            if (qmark_index < 0)
+                return url + '?' + param
+
+            let anchor = ''
+            const anchor_index = url.indexOf('#')
+
+            if (anchor_index > 0) {
+                anchor = url.substr(anchor_index)
+                url = url.substr(0, anchor_index)
+            }
+
+            if (url[url.length - 1] !== '&')
+                url = url + '&'
+
+            return url + param + anchor
         }
     }
 
@@ -3051,6 +3365,7 @@ class demawiRepository {
         }
 
         static betterInput(inputElement) {
+            this.useJQueryUI();
             inputElement.style.margin = "0px";
             inputElement.style.padding = "0px";
             inputElement.style.paddingLeft = "8px";
@@ -3148,10 +3463,31 @@ class demawiRepository {
     }
 
     static UI = class {
+
+        static SIGNS = {
+            WARN: "⚠️",
+            ERROR: "💥",
+        }
+
+        static WOD_SIGNS = {
+            YES: "/wod/css/img/smiley/yes.png",
+        }
+
         static createButton(htmlContent, callback) {
             const button = document.createElement("span");
             button.classList.add("nowod");
             button.innerHTML = htmlContent;
+            if (!button.style.fontSize) button.style.fontSize = "12px";
+            button.style.cursor = "pointer";
+            button.onclick = callback;
+            return button;
+        }
+
+        static createRealButton(htmlContent, callback) {
+            const button = document.createElement("input");
+            button.type = "button";
+            button.classList.add("nowod");
+            button.value = htmlContent;
             if (!button.style.fontSize) button.style.fontSize = "12px";
             button.style.cursor = "pointer";
             button.onclick = callback;
@@ -3737,6 +4073,23 @@ class demawiRepository {
         }
         let withSources = true;
         let _container;
+        let missingSkillInfos = {};
+        const requestSkillInfoFromUser = function (skillOrIdentifier, fertigkeit, actionTR) {
+            const skillRequest = {
+                line: actionTR.innerHTML,
+                wuerfe: fertigkeit.wuerfe, // muss ggf. auch die Wurfhöhe vom User bestimmt werden oder kann dieses evtl. durch die Parade-Würfe eingegrenzt werden?
+            };
+            let path;
+            if (typeof skillOrIdentifier === "string") {
+                path = missingSkillInfos.noskills || (missingSkillInfos.noskills = {});
+                path = path[skillOrIdentifier] || (path[skillOrIdentifier] = []);
+            } else {
+                path = missingSkillInfos.skills || (missingSkillInfos.skills = {});
+                const skillName = skillOrIdentifier.textContent.trim();
+                path = path[skillName] || (path[skillName] = []);
+            }
+            path.push(skillRequest);
+        }
 
         class UnitId {
             name;
@@ -4287,26 +4640,13 @@ class demawiRepository {
                 const manaCostNode = actionTD.querySelector(".rep_mana_cost");
                 if (manaCostNode) fertigkeit.mp = manaCostNode.textContent.match(/(\d*) MP/)[1];
 
-                // Fertigkeit .name .typ .angriffsart bestimmen
-                await this.bestimmeFertigkeitFromSkillA(fertigkeit, actionTD);
-
-                let unknownIdentifier;
-                if (!fertigkeit.typ) unknownIdentifier = await this.bestimmeFertigkeitFromTarget(curRound, fertigkeit, actionTD, actionUnit, targetTD);
-                if (!fertigkeit.typ) {
-                    addWarning("Eine Fertigkeit konnte nicht automatisch bestimmt werden.", actionTD, unknownIdentifier);
-                } else {
-                    if (fertigkeit.typ === _.WoDSkillsDb.TYP.VERSCHLECHTERUNG) fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
-                }
-
                 // Würfe bestimmen
                 const wuerfe = Array();
                 this.bestimmeWuerfe(actionTD, wuerfe);
                 fertigkeit.wuerfe = wuerfe;
 
-                return [fertigkeit, actionUnit];
-            }
-
-            static async bestimmeFertigkeitFromSkillA(fertigkeit, actionTD) {
+                // Fertigkeit .name .typ .angriffsart bestimmen
+                let requestedSkillInfoFromUser; // entweder skillLink-Element oder unknownSkillIdentifier-String
                 const actionSkillA = actionTD.querySelector("a[href*=\"/skill/\"]");
                 if (actionSkillA) {
                     fertigkeit.name = actionSkillA.textContent.trim();
@@ -4316,8 +4656,65 @@ class demawiRepository {
                     this.bestimmeFertigkeitFromText(fertigkeit, actionTD);
                     if (!fertigkeit.typ) {
                         const dbSkill = await _.WoDSkillsDb.getSkill(fertigkeit.name);
-                        if (dbSkill.typ) fertigkeit.typ = dbSkill.typ;
-                        if (dbSkill.angriffstyp) fertigkeit.angriffstyp = dbSkill.angriffstyp;
+                        if (!dbSkill) {
+                            const typ = this.getFertigkeitTypFromTarget(targetTD, actionUnit, curRound);
+                            if (typ && !_.WoDSkillsDb.isAngriff(typ)) {
+                                fertigkeit.typ = typ;
+                            } else {
+                                requestedSkillInfoFromUser = actionSkillA;
+                            }
+                        } else {
+                            if (dbSkill.typ) fertigkeit.typ = dbSkill.typ;
+                            if (dbSkill.angriffstyp) fertigkeit.angriffstyp = dbSkill.angriffstyp;
+                        }
+                    }
+                }
+
+                if (!requestedSkillInfoFromUser && this.actionSkillIstUnvollstaendig(fertigkeit)) {
+                    const unknownIdentifier = await this.bestimmeFertigkeitFromTarget(curRound, fertigkeit, actionTD, actionUnit, targetTD);
+                    if (fertigkeit.typ === _.WoDSkillsDb.TYP.VERSCHLECHTERUNG) fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                    /**
+                     * immer an den User weitergeben, damit auch bereits eingetragene Informationen nachträglich noch geändert werden können.
+                     * Ausserhalb muss dann entschieden werden, was wirklich noch fehlt.
+                     */
+                    requestedSkillInfoFromUser = unknownIdentifier;
+                }
+
+                if (requestedSkillInfoFromUser) requestSkillInfoFromUser(requestedSkillInfoFromUser, fertigkeit, actionTD.parentElement);
+
+                return [fertigkeit, actionUnit];
+            }
+
+
+            static actionSkillIstUnvollstaendig(skill) {
+                return !skill.typ || (_.WoDSkillsDb.isAngriff(skill.typ) && !skill.angriffstyp);
+            }
+
+            static actionSkillIstUnvollstaendigWuerfe(skill) {
+                return _.WoDSkillsDb.isAngriff(skill.typ) && !skill.wuerfe;
+            }
+
+            static isAngriff(targetTD) {
+                const text = targetTD.textContent;
+                return text.includes(": Erfolg") || text.includes(": guter Erfolg") || text.includes(": kritischer Erfolg") || text.includes(": Fehlschlag");
+            }
+
+            static isHeilung(targetTD) {
+                const text = targetTD.textContent;
+                return text.match(/\+ \d* HP/) || text.match(/\+ \d* MP/);
+            }
+
+            static getFertigkeitTypFromTarget(targetTD, actionUnit, curRound) {
+                if (this.isAngriff(targetTD)) {
+                    return _.WoDSkillsDb.TYP.ANGRIFF; // kann ANGRIFF oder VERSCHLECHTERUNG sein!!
+                } else if (this.isHeilung(targetTD)) {
+                    return _.WoDSkillsDb.TYP.HEILUNG;
+                } else {
+                    const targetUnitId = UnitId.findAny(targetTD, actionUnit && actionUnit.id);
+                    if (targetUnitId) {
+                        const unitLookup = curRound.unitLookup(targetUnitId, true);
+                        if (!unitLookup) return _.WoDSkillsDb.TYP.RUFT_HELFER; // Units die vorher noch nicht bekannt waren spawnen
+                        else return _.WoDSkillsDb.TYP.VERBESSERUNG; // Eine bereits bekannte Unit würde verbessert werden
                     }
                 }
             }
@@ -4328,39 +4725,36 @@ class demawiRepository {
              */
             static async bestimmeFertigkeitFromTarget(curRound, fertigkeit, actionTD, actionUnit, targetTD) {
                 const unknownIdentifier = this.getIdentifierOfTheUnknown(actionTD);
+                console.log("Unknown: ", unknownIdentifier, actionTD);
                 const unknownSkillDb = _.WoDStorages.getSkillsUnknownDb();
                 const unknownEntry = await unknownSkillDb.getValue(unknownIdentifier) || {id: unknownIdentifier};
                 if (unknownEntry.typ) fertigkeit.typ = unknownEntry.typ;
                 if (unknownEntry.angriffstyp) fertigkeit.angriffstyp = unknownEntry.angriffstyp;
+                unknownEntry.wurf = !!fertigkeit.wuerfe;
 
                 // TODO: weiter definieren in welchem Dungeon und in welchem Level, gab es nen variablen Wurf oder ist der auch unbekannt?
 
-                // Check 1: Erst suchen wir, ob ein Skill anwgewendet wurde.
+                // Check 1: Erst suchen wir, ob ein Parade-Skill anwgewendet wurde.
                 const targetSkillA = targetTD.querySelector("a[href*=\"/skill/\"]"); // Skill aus dem Target zur automatischen Ableitung
                 if (targetSkillA) {
                     const paradeSkill = await _.WoDSkillsDb.getSkill(targetSkillA.textContent);
                     // Verschlechterung wird ebenfalls auf Angriff gemappt!!!
                     if (paradeSkill) {
-                        fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.ANGRIFF;
-                        fertigkeit.angriffstyp = unknownEntry.angriffstyp = paradeSkill.angriffstyp;
+                        const autoBestimmung = unknownEntry.auto || (unknownEntry.auto = {});
+                        fertigkeit.typ = unknownEntry.typ = autoBestimmung.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                        fertigkeit.angriffstyp = unknownEntry.angriffstyp = autoBestimmung.angriffstyp = paradeSkill.angriffstyp;
+                    } else {
+                        return targetSkillA; // um weitermachen zu können brauchen wir die Information über den Skill
                     }
                 }
                 if (!fertigkeit.typ) { // Kein Skill in der Action und auch nicht im Target.
                     /**
                      * evtl. können wir zumindest ableiten, ob es sich um einen Angriff oder einen Buff handelt.
                      */
-                    const text = targetTD.textContent;
-                    if (text.includes(": Erfolg") || text.includes(": guter Erfolg") || text.includes(": kritischer Erfolg") || text.includes(": Fehlschlag")) {
-                        fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.ANGRIFF; // kann ANGRIFF oder VERSCHLECHTERUNG sein!!
-                    } else if (text.match(/\+ \d* HP/) || text.match(/\+ \d* MP/)) {
-                        fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.HEILUNG;
-                    } else {
-                        const targetUnitId = UnitId.findAny(targetTD, actionUnit && actionUnit.id);
-                        if (targetUnitId) {
-                            const unitLookup = curRound.unitLookup(targetUnitId, true);
-                            if (!unitLookup) fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.RUFT_HELFER; // Units die vorher noch nicht bekannt waren spawnen
-                            else fertigkeit.typ = unknownEntry.typ = _.WoDSkillsDb.TYP.VERBESSERUNG; // Eine bereits bekannte Unit würde verbessert werden
-                        }
+                    const typ = this.getFertigkeitTypFromTarget(targetTD, actionUnit, curRound);
+                    if (typ) {
+                        const autoBestimmung = unknownEntry.auto || (unknownEntry.auto = {});
+                        fertigkeit.typ = unknownEntry.typ = autoBestimmung.typ = typ;
                     }
                 }
                 if (!unknownEntry.where) unknownEntry.where = {};
@@ -4405,6 +4799,9 @@ class demawiRepository {
                                 fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.EXPLOSION;
                             } else if (curText.includes("ruft herbei mittels")) {
                                 fertigkeit.typ = _.WoDSkillsDb.TYP.RUFT_HELFER;
+                            } else if (curText.includes(" verseucht ")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.KRANKHEIT;
                             }
                             break;
                         default:
@@ -4416,16 +4813,27 @@ class demawiRepository {
 
             static getIdentifierOfTheUnknown(actionTD) {
                 const definitionElem = actionTD.cloneNode(true);
+                this.removeNonIdentifiableElements(definitionElem);
+                return definitionElem.textContent.replace(/ ?\(.*\) ?/g, "").replaceAll("\n", "").trim(); // Alle Klammer+inhalte beseitigen.
+            }
+
+            static removeNonIdentifiableElements(definitionElem) {
                 for (let i = 0; i < definitionElem.childNodes.length; i++) {
                     const cur = definitionElem.childNodes[i];
                     if (cur.tagName === "A" && (cur.href.includes("/npc/") || cur.href.includes("/hero/"))) {
-                        definitionElem.replaceChild(document.createTextNode("XY"), cur);
+                        //definitionElem.replaceChild(document.createTextNode("XY"), cur);
+                    } else if (cur.tagName === "SPAN") {
+                        if (cur.childElementCount <= 0) {
+                            definitionElem.removeChild(cur);
+                            i--;
+                        } else {
+                            this.removeNonIdentifiableElements(cur);
+                        }
                     } else if (cur.tagName) {
                         definitionElem.removeChild(cur);
                         i--;
                     }
                 }
-                return definitionElem.textContent.replace(/ ?\(.*\) ?/g, "").replaceAll("\n", "").trim(); // Alle Klammer+inhalte beseitigen.
             }
 
             static bestimmeWuerfe(actionTD, wuerfe) {
@@ -4445,13 +4853,12 @@ class demawiRepository {
                                         if (wo && wo.endsWith(":")) {
                                             wo = wo.replace(":", "").trim();
                                         }
-                                        wuerfe.push({
-                                            value: wurfMatcher[2],
-                                            dest: wo,
-                                        })
+                                        const entry = {
+                                            value: wurfMatcher[2]
+                                        };
+                                        if (wo) entry.dest = wo;
+                                        wuerfe.push(entry);
                                     }
-
-
                                 }
                             )
                             break;
@@ -4485,6 +4892,7 @@ class demawiRepository {
                 warnings = [];
                 withSources = activateSources;
                 _container = container;
+                missingSkillInfos = {};
 
                 const roundContentTable = this.#getContentTable(container);
                 const areas = Array();
@@ -4521,6 +4929,8 @@ class demawiRepository {
                 result.areas = areas;
                 if (warnings.length > 0) result.warnings = warnings;
                 console.log("Parsed Report in " + Math.round((new Date().getTime() - startTime) / 10) / 100 + " secs. With sources: " + withSources, result);
+
+                if (Object.keys(missingSkillInfos).length > 0) result.missingSkillInfos = missingSkillInfos;
                 return [result, warnings];
             }
 
@@ -4612,29 +5022,11 @@ class demawiRepository {
             }
             if (!itemName) return;
             itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
-            if (!this.isValidItemName(itemName)) {
+            if (!_.WoDItemDb.isValidItemName(itemName)) {
                 console.warn("Nicht korrekten ItemNamen entdeckt: '" + itemName + "'");
                 return;
             }
             return itemName;
-        }
-
-        static isValidItemName(itemName) {
-            return !!itemName.match(/^[\p{Letter}0-9 ():,'.+?!-]*$/u);
-        }
-
-        static createItem(itemName) {
-            if (!this.isValidItemName(itemName)) {
-                console.error("ItemName ist nicht korrekt: '" + itemName + "'");
-                throw new Error("ItemName ist korrekt: '" + itemName + "'"); // TODO: nur temorär aktiv
-                return;
-            }
-            return {
-                id: itemName.toLowerCase(),
-                name: itemName,
-                ts: new Date().getTime(),
-                world: _.WoD.getMyWorld(),
-            }
         }
 
         static getItemSourceDB() {
@@ -4648,11 +5040,20 @@ class demawiRepository {
         static async reportNonExistingItem(itemName) {
             let item = await this.getItemSourceDB().getValue(itemName.toLowerCase());
             if (!item || !item.details) {
-                item = this.createItem(itemName);
+                item = _.WoDItemDb.createItem(itemName);
                 if (!item) return;
                 item.invalid = true;
             }
             item.ts = new Date().getTime();
+            const myWorld = _.WoD.getMyWorld();
+            delete item.world[myWorld];
+            if (Object.keys(item.world).length === 0) {
+                await this.getItemDB().deleteValue(item.id);
+                delete item.link;
+                delete item.details;
+                item.invalid = true;
+                await this.getItemSourceDB().deleteValue(item.id);
+            }
             await this.getItemSourceDB().setValue(item);
         }
 
@@ -4666,25 +5067,34 @@ class demawiRepository {
                 }
                 return;
             }
+            const all = document.getElementsByTagName("h1")[0];
+            const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
             if (this.hasSetOrGemBonus(link)) {
                 console.log("Set oder gem-boni entdeckt! Item wird nicht für die Datenbank verwendet!");
-                return;
+                return itemName;
             }
-            link = link.innerHTML;
-            const details = document.getElementById("details").innerHTML;
 
-            const all = document.getElementsByTagName("h1")[0];
-            var itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
-            const sourceItem = this.createItem(itemName);
-            if (!sourceItem) return;
-            sourceItem.details = details;
+            const itemSourcesDb = this.getItemSourceDB();
+            const itemDB = this.getItemDB();
+
+            const sourceItem = await itemSourcesDb.getValue(itemName.toLowerCase()) || _.WoDItemDb.createItem(itemName);
+            const myWorld = _.WoD.getMyWorld();
+            const now = new Date().getTime();
+            sourceItem.ts = now;
+            sourceItem.world[myWorld] = now;
+
+            link = link.innerHTML;
+            sourceItem.details = document.getElementById("details").innerHTML;
             sourceItem.link = link;
-            await this.getItemSourceDB().setValue(sourceItem);
-            const item = await this.parseSourceItem(sourceItem);
-            await this.getItemDB().setValue(item);
+
+            await itemSourcesDb.setValue(sourceItem);
+            const item = await this.parseSourceItem(sourceItem, myWorld, now);
+            item.ts = now;
+            item.world[myWorld] = now;
+            await itemDB.setValue(item);
             console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
 
-            // Auf alte dataversions prüfen
+            // Maintenance: Auf alte dataversions prüfen
             const needRewrite = await _.WoDStorages.getItemDb().getAllKeys({
                 index: ["dv"],
                 keyMatchBefore: [_.ItemParserDataVersion],
@@ -4694,16 +5104,17 @@ class demawiRepository {
                 const migration = _.Migration.start("Items werden neu geschrieben", needRewrite.length);
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...");
                 for (const curItemId of needRewrite) {
-                    const sourceItem = await _.WoDStorages.getItemSourcesDb().getValue(curItemId);
+                    const sourceItem = await itemSourcesDb.getValue(curItemId);
                     if (sourceItem) {
                         //const curItem = await this.getItemDB().getValue(curItemId);
                         const item = await this.parseSourceItem(sourceItem);
-                        await this.getItemDB().setValue(item);
+                        await itemDB.setValue(item);
                     }
                 }
                 migration.end();
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries... Finished!");
             }
+            return itemName;
         }
 
         static hasSetOrGemBonus(linkElement) {
@@ -4711,14 +5122,9 @@ class demawiRepository {
         }
 
         static async parseSourceItem(itemSource) {
-            const item = await this.getItemDB().getValue(itemSource.id) || {
-                id: itemSource.id,
-                name: itemSource.name,
-            };
+            const item = await this.getItemDB().getValue(itemSource.id) || _.WoDItemDb.createItem(itemSource.name);
             item.details = itemSource.details; // nur temporär fürs parsen
             item.link = itemSource.link; // nur temporär fürs parsen
-            item.ts = itemSource.ts;
-            item.world = itemSource.world;
             await this.#writeItemData(item);
             delete item.details;
             delete item.link;
@@ -5005,7 +5411,7 @@ class demawiRepository {
     }
 
     static startMod(zusatz) {
-        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (zusatz ? " " + zusatz : ""));
+        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (zusatz ? " " + zusatz : ""), GM.info);
     }
 
     static getModName() {

@@ -48,8 +48,10 @@
     }
 
     class Mod {
-        static dbname = "wodDB";
         static modname = "KampfberichtArchiv";
+        static version = GM.info.script.version;
+        static dbname = "wodDB";
+
 
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
@@ -58,50 +60,44 @@
             if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
 
-            const page = _.util.getWindowPage();
-            demawiRepository.startMod("Page: '" + page + "'");
+            const view = _.WoD.getView();
+            demawiRepository.startMod("View: '" + view + "'");
             await _.WoDWorldDb.placeSeasonElem();
             await MySettings.getFresh();
 
-            switch (page) {
-                case "tombola.php":
+            switch (view) {
+                case _.WoD.VIEW.TOMBOLA:
                     await TombolaLoot.onTombolaPage();
                     break;
-                case "": // Login-/News-Page
-                case "news.php":
+                case _.WoD.VIEW.NEWS:
                     await TombolaLoot.onNewsPage();
                     break;
-                case "items.php":
-                    const view = _.WoD.getItemsView();
-                    if (view === "gear") await Ausruestung.start();
+                case _.WoD.VIEW.ITEMS_GEAR:
+                    await Ausruestung.start();
                     break;
-                case "dungeon.php":
+                case _.WoD.VIEW.DUNGEONS:
                     await DungeonAuswahl.start();
                     break;
-                case "new_quest.php":
-                case "quests.php":
+                case _.WoD.VIEW.QUEST:
                     await QuestAuswahl.start();
                     break;
-                case "heroes.php":
+                case _.WoD.VIEW.HEROES:
                     await _.WoDWorldDb.onMeineHeldenAnsicht();
                     break;
-                case "move.php":
+                case _.WoD.VIEW.MOVE:
                     await this.onMovePage();
                     break;
-                case "item.php":
-                    await _.ItemParser.onItemPage();
-                    await ItemFunde.start();
+                case _.WoD.VIEW.ITEM:
+                    const itemName = await _.ItemParser.onItemPage();
+                    if (itemName) await ItemFunde.start(itemName);
                     break;
-                case "combat_report.php": // Schlacht
-                case "report.php": // Dungeon
-                    const title = document.getElementsByTagName("h1")[0];
-                    if (title.textContent.trim() === "Kampfberichte") {
-                        await ArchivView.onKampfberichteSeite();
-                    } else {
-                        await this.onReportSite();
-                    }
+                case _.WoD.VIEW.REPORT_OVERVIEW:
+                    await ArchivView.onKampfberichteSeite();
                     break;
-                case "skill.php":
+                case _.WoD.VIEW.REPORT: // Statistik, Gegenstände oder Kampfbericht
+                    await this.onReportSite();
+                    break;
+                case _.WoD.VIEW.SKILL:
                     await _.WoDSkillsDb.onSkillPage();
                     break;
             }
@@ -190,18 +186,20 @@
             };
             console.log("Current Report ", reportData, reportMeta, reportSource);
 
-            if (title.textContent.trim().startsWith("Kampfstatistik")) {
+            const reportView = _.WoD.getReportView();
+
+            if (reportView === "stats") {
                 reportSource.stats = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.stats = true;
                 reportMeta.success = _.WoDParser.retrieveSuccessInformationOnStatisticPage(document, reportMeta.success);
-            } else if (title.textContent.trim().startsWith("Übersicht Gegenstände")) {
+            } else if (reportView === "items") {
                 reportSource.items = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.items = true;
                 const memberList = _.WoDParser.parseKampfberichtGegenstaende();
                 const reportLoot = await MyStorage.putToLoot(reportSource.reportId, memberList);
                 await MyStorage.submitLoot(reportMeta, reportLoot);
                 if ((await MySettings.get()).get(MySettings.SETTING.LOOT_SUMMARY)) await ItemLootSummary.einblenden(reportLoot, reportMeta);
-            } else if (title.textContent.trim().startsWith("Kampfbericht")) {
+            } else if (reportView === "fight") {
                 const form = _.WoD.getMainForm();
                 const levelNr = _.WoD.isSchlacht() ? 1 : form.current_level.value;
                 let navigationLevels = document.getElementsByClassName("navigation levels")[0];
@@ -430,9 +428,7 @@
             //await this.syncSuccessInformation();
             //await this.resyncVersions();
             //await this.resyncFavorites();
-
             //await MyStorage.indexedDbLocal.cloneTo(MyStorage.indexedDb);
-
             //await MyStorage.indexedDb.cloneTo("wodDB_Backup6");
             //await this.resyncSourcesToReports();
             //await this.rewriteReportArchiveItems();
@@ -1058,6 +1054,12 @@
     class ItemLootSummary {
 
         static async einblenden(reportLoot, reportMeta) {
+            // TODO: Allgemeine Item-Links auf die Subdomain umlenken
+            const origin = window.location.origin;
+            for (const curElem of document.querySelectorAll("a[href*=\"/item/\"]")) {
+                curElem.href = curElem.href.replace("http://world-of-dungeons.de", origin);
+            }
+
             reportMeta = reportMeta || await MyStorage.reportArchive.getValue(reportLoot.reportId);
             const memberList = reportLoot.members;
             const eingesammeltPre = {};
@@ -1481,12 +1483,10 @@
         /**
          * Zusatz für die Gegenstandsseite
          */
-        static async start() {
+        static async start(itemName) {
             const hints = document.getElementsByClassName("hints")[0];
             if (!hints) return;
             const all = document.getElementsByTagName("h1")[0];
-            const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
-            if (!itemName) return;
             const item = await _.WoDLootDb.getValue(itemName.toLowerCase());
             const loot = (item && item.loot) || [];
 

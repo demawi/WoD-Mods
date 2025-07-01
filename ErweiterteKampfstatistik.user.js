@@ -26,6 +26,7 @@
     const _ = {
         Storages: demawiRepository.import("Storages"),
         WoDStorages: demawiRepository.import("WoDStorages"),
+        WoDSkillsDb: demawiRepository.import("WoDSkillsDb"),
         BBCodeExporter: demawiRepository.import("BBCodeExporter"),
         WoD: demawiRepository.import("WoD"),
         WoDParser: demawiRepository.import("WoDParser"),
@@ -39,14 +40,17 @@
     }
 
     class Mod {
-        static dbname = "wodDB";
         static modname = "KampfberichtStatistiken";
-        static version = "0.19";
-        static stand = "01.05.2025";
+        static version = GM.info.script.version;
+        static dbname = "wodDB";
         static forumLink = "/wod/spiel/forum/viewtopic.php?pid=16698430";
 
         static thisReport;
         static thisLevelDatas; // Array der Level über welche die Auswertung gefahren wird
+
+        static async recalculateStats() {
+            this.startMod2();
+        }
 
         /**
          * Einstiegspunkt der Anwendung. Falls von externer Mod aufgerufen wird, sollten die Parameter entsprechend gesetzt werden.
@@ -54,9 +58,9 @@
          * @param kampfstatistik ob es sich um die Kampfstatistik-Seite handelt
          * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
          */
-        static async startMod(kampfbericht, kampfstatistik, dbReportSource) {
+        static async startMod() {
             const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
-            if(!indexedDb) return;
+            if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
 
             await demawiRepository.startMod();
@@ -64,10 +68,15 @@
                 console.log(GM.info.script.name + " wird aufgerufen");
                 await Mod.startMod2(...args);
             }
-            await this.startMod2();
+            const _this = this;
+            setTimeout(async function () {
+                await _this.startMod2();
+            }, 100);
         }
 
         static async startMod2(kampfbericht, kampfstatistik, dbReportSource) {
+            this.thisReport = undefined;
+            this.thisLevelDatas = undefined;
             const _this = this;
             if (dbReportSource && dbReportSource.levels) {
                 await this.syncWithReportSources(dbReportSource);
@@ -80,11 +89,14 @@
                     OutputAnchor.init();
                     Mod.thisLevelDatas = [levelData];
                     let roundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
-                    let hinweisText = ": " + roundCount + " Runden";
-                    OutputAnchor.setTitle.setTitle(hinweisText);
+                    let hinweisText = roundCount + " Runden";
+                    OutputAnchor.setTitleMessage(hinweisText);
+                    await OutputAnchor.reportMissingSkillInfos([levelData]);
                 }
             }
-            if (kampfbericht || WoD.istSeite_Kampfbericht()) { // Einzelseite
+
+            const reportView = _.WoD.getReportView(true);
+            if (kampfbericht || reportView === "fight") { // Einzelseite
                 OutputAnchor.init();
                 OutputAnchor.runSafe(async function () {
                     // cur_rep_id für Dungeons, report bei Schlachten
@@ -96,9 +108,10 @@
                     var [levelData, levelNr, errors] = await _this.readKampfberichtAndStoreIntoReport(document, _this.thisReport, reportId);
                     OutputAnchor.reportWarnings(errors);
                     if (levelData) {
+                        await OutputAnchor.reportMissingSkillInfos([levelData], true);
                         let roundCount = levelData.areas.reduce((sum, area) => sum + area.rounds.length, 0);
 
-                        var hinweisText = ": " + roundCount + " Runden";
+                        var hinweisText = roundCount + " Runden";
                         if (levelData.areas.length > 0) {
                             hinweisText += " [" + _.util.arrayMap(levelData.areas, area => area.rounds.length).join(", ") + "]";
                         }
@@ -106,14 +119,14 @@
                         if (reportProgress.missingReports.length > 0) {
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                         }
-                        OutputAnchor.setTitle(hinweisText);
+                        OutputAnchor.setTitleMessage(hinweisText);
                         Mod.thisLevelDatas = [];
                         Mod.thisLevelDatas[levelNr - 1] = levelData;
                         await MyStorage.getReportStatsDB().setValue(_this.thisReport);
                     }
                 });
             }
-            if (kampfstatistik || WoD.istSeite_Kampfstatistik()) { // Statistikseite (keine Zwischenspeicherung nur Anzeige)
+            if (kampfstatistik || reportView === "stats") { // Statistikseite (keine Zwischenspeicherung nur Anzeige)
                 OutputAnchor.init();
                 OutputAnchor.runSafe(async function () {
                     const reportData = _.WoD.getFullReportBaseData();
@@ -131,14 +144,16 @@
                     if (_this.thisReport.levelCount) {
                         const reportProgress = Mod.getReportProgress();
 
-                        var hinweisText = ": " + reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
+                        var hinweisText = reportProgress.roundCount + " Runden (" + reportProgress.allRoundNumbers.join(", ") + ")";
                         if (reportProgress.foundReportCount < reportProgress.levelCount) {
                             hinweisText += ". Es fehlen noch die Reports für folgende Level: " + reportProgress.missingReports.join(", ") + " (Bitte entsprechende Level aufrufen)";
                         }
-                        OutputAnchor.setTitle(hinweisText);
+                        OutputAnchor.setTitleMessage(hinweisText);
                         Mod.thisLevelDatas = _this.thisReport.levelDatas;
+                        await OutputAnchor.reportMissingSkillInfos(_this.thisReport.levelDatas);
+
                     } else {
-                        OutputAnchor.setTitle(": Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)")
+                        OutputAnchor.setTitleMessage("Es fehlen noch alle Level-Reports!" + " (Bitte entsprechende Level aufrufen)", true);
                     }
                     const settings = await MySettings.getFresh();
                     if (!settings.get(MySettings.SETTING.LAST_VALIDATION) || new Date(settings.get(MySettings.SETTING.LAST_VALIDATION)) < new Date().setDate(new Date().getDate() - 1)) {
@@ -189,9 +204,7 @@
             } else { // Dungeon
                 levelNr = container.getElementsByName("current_level")[0].value;
                 let navigationBar = container.getElementsByClassName("navigation levels")[0];
-                if (navigationBar) {
-                    report.levelCount = navigationBar.children.length - 1;
-                }
+                if (navigationBar) report.levelCount = navigationBar.children.length - 1;
             }
             console.log("Read Kampfbericht: " + reportId + " lvl" + levelNr);
             const [levelData, errors] = await _.ReportParser.parseKampfbericht(container, true);
@@ -268,29 +281,43 @@
     }
 
     class OutputAnchor {
+        static #outerAnchor;
         static #foundError;
         static #warnings = [];
-        static #header;
+        static #headerMessage;
+        static #preContent;
         static #content;
         static #collapsible;
+        static #warningMessage;
 
         // erzeugt den Punkt wo wir uns mit der UI ranhängen können
         static init() {
+            if (this.#outerAnchor) this.#outerAnchor.remove();
+
             // Ausgabe
             let headings = document.getElementsByTagName("h2");
             if (WoD.istSeite_AbenteuerUebungsplatz()) { // im Abenteuer
                 headings = document.getElementsByTagName("h1");
             }
+            this.#outerAnchor = document.createElement("div");
+            this.#outerAnchor.classList.add("nowod");
+            const collapsibleContainer = document.createElement("div");
+            collapsibleContainer.hidden = true;
+
+            const header = document.createElement("div");
+            this.#headerMessage = document.createElement("span");
+            this.#headerMessage.innerHTML = " ...";
+            this.#warningMessage = document.createElement("span");
+            const title = document.createElement("span");
+            title.innerHTML = "Erweiterte Kampfstatistiken: ";
+            header.append(title);
+            header.append(this.#headerMessage);
+            this.#preContent = document.createElement("div");
             this.#content = document.createElement("div");
-            this.#content.classList.add("nowod");
-            this.#content.hidden = true;
-            this.#header = document.createElement("div");
-            this.#header.classList.add("nowod");
-            this.#header.innerHTML = "Erweiterte Kampfstatistiken";
             var firstClick = true;
             const _this = this;
             this.#collapsible = util.createCollapsible("20px", true, function (hide) {
-                _this.#content.hidden = hide;
+                collapsibleContainer.hidden = hide;
                 if (_this.#foundError) {
                     _this.#content.innerHTML = _this.getHTMLFromError(_this.#foundError);
                 } else if (firstClick) {
@@ -311,8 +338,15 @@
                     _this.#content.append(document.createElement("br"));
                 }
             });
-            headings[0].parentNode.insertBefore(this.#header, headings[0].nextSibling);
-            headings[0].parentNode.insertBefore(_this.#content, this.#header.nextSibling);
+
+            headings[0].parentNode.insertBefore(this.#outerAnchor, headings[0].nextSibling);
+            this.#outerAnchor.append(header);
+            this.#outerAnchor.append(collapsibleContainer);
+            header.append(this.#collapsible);
+            header.append(this.#warningMessage);
+            this.#collapsible.style.display = "none";
+            collapsibleContainer.append(this.#preContent);
+            collapsibleContainer.append(this.#content);
         }
 
         static createWurfrechner() {
@@ -387,13 +421,185 @@
             }
         }
 
-        static setTitle(titleMessage) {
-            this.#header.innerHTML = "Erweiterte Kampfstatistiken" + titleMessage;
-            this.#header.append(this.#collapsible);
+        static async reportMissingSkillInfos(levelDatas, canRefresh) {
+            const missingSkillInfos = {
+                skills: [],
+                noskills: [],
+            };
+
+            const copyOver = function (from, to) {
+                if (from) {
+                    for (const [key, list] of Object.entries(from)) {
+                        const toList = to[key] || [];
+                        toList.concat(list);
+                        to[key] = toList;
+                    }
+                }
+            }
+
+            for (const levelData of levelDatas) {
+                copyOver(levelData.skills, missingSkillInfos.skills);
+                copyOver(levelData.noskills, missingSkillInfos.noskills);
+            }
+
+            if (Object.keys(missingSkillInfos.skills).length === 0 && Object.keys(missingSkillInfos.noskills).length === 0) return;
+            let count = 0;
+            const userInfoPanel = document.createElement("div");
+            const title = document.createElement("div");
+            title.innerHTML = "Benutzerdefinierte Fertigkeits-Informationen: (bitte anklicken oder ergänzen)";
+            title.title = "Zu einigen Aktionen konnten nicht automatische alle Informationen bestimmt werden.";
+            userInfoPanel.append(title);
+            if (missingSkillInfos.skills) {
+                for (const [skillName, list] of Object.entries(missingSkillInfos.skills)) {
+                    const aHref = _.WoD.createSkillLink(skillName, win => {
+                        let count = 0;
+                        const interval = setInterval(async function () {
+                            count++;
+                            const skill = await _.WoDSkillsDb.getSkill(skillName);
+                            if (skill) {
+                                const img = document.createElement("img");
+                                img.src = _.UI.WOD_SIGNS.YES;
+                                aHref.append(img);
+                                clearInterval(interval);
+                            } else if (count > 100) {
+                                clearInterval(interval);
+                            }
+                        }, 100);
+                    }, "statViewItem");
+                    aHref.style.display = "block";
+                    userInfoPanel.append(aHref);
+                    count++;
+                }
+            }
+            if (missingSkillInfos.noskills) {
+                const unknownSkillDb = _.WoDStorages.getSkillsUnknownDb();
+                const tableContent = [];
+                for (const [noSkillId, list] of Object.entries(missingSkillInfos.noskills)) {
+                    const unknownEntry = await unknownSkillDb.getValue(noSkillId);
+                    console.log("DDDD", unknownEntry);
+                    const angriffstypContainer = document.createElement("span");
+                    let createAngriffsartSelect;
+                    const wurfContainer = document.createElement("span");
+                    let createWurfSelect;
+                    let fehlend = false;
+
+                    // 1: automatisch abgeleitet (konstant)
+                    // 2: vom Benutzer gesetzt
+                    // 0: unbestimmt
+                    const typType = (unknownEntry.auto && unknownEntry.auto.typ) ? 1 : ((unknownEntry.user && unknownEntry.user.typ) ? 2 : 0);
+                    const typValue = unknownEntry.typ;
+                    const typSelect = document.createElement("select");
+                    typSelect.innerHTML = "<option></option>";
+                    for (const cur of Object.values(_.WoDSkillsDb.TYP)) {
+                        if (cur === "Verschlechterung") continue;
+                        let text = cur;
+                        if (cur === "Angriff") text = "Angriff / Verschlechterung";
+                        let selected = typValue === cur ? "selected" : "";
+                        typSelect.innerHTML += "<option " + selected + " value='" + cur + "'>" + text + "</option>";
+                    }
+                    typSelect.onchange = async function () {
+                        createAngriffsartSelect();
+                        createWurfSelect();
+                        const userBestimmung = unknownEntry.user || (unknownEntry.user = {});
+                        unknownEntry.typ = userBestimmung.typ = typSelect.value;
+                        await _.WoDStorages.getSkillsUnknownDb().setValue(unknownEntry);
+                    }
+                    if (typType === 1) {
+                        typSelect.disabled = true;
+                        typSelect.title = "Wurde automatisch bestimmt";
+                    } else {
+                        typSelect.title = "";
+                    }
+                    if (!typValue) fehlend = true;
+
+                    createAngriffsartSelect = function () {
+                        angriffstypContainer.innerHTML = "";
+                        const angriffstypValue = unknownEntry.angriffstyp;
+                        if (_.WoDSkillsDb.isAngriff(unknownEntry.typ)) {
+                            const angriffstypType = (unknownEntry.auto && unknownEntry.auto.angriffstyp) ? 1 : ((unknownEntry.user && unknownEntry.user.angriffstyp) ? 2 : 0);
+                            const angriffstypSelect = document.createElement("select");
+                            angriffstypSelect.innerHTML = "<option></option>";
+                            for (const cur of Object.values(_.WoDSkillsDb.ANGRIFFSTYP)) {
+                                let selected = angriffstypValue === cur ? "selected" : "";
+                                angriffstypSelect.innerHTML += "<option " + selected + ">" + cur + "</option>";
+                            }
+                            if (angriffstypType === 1) {
+                                angriffstypSelect.disabled = true;
+                                angriffstypSelect.title = "Wurde automatisch bestimmt";
+                            }
+                            angriffstypSelect.onchange = async function () {
+                                const userBestimmung = unknownEntry.user || (unknownEntry.user = {});
+                                unknownEntry.angrifsstyp = userBestimmung.angrifsstyp = angriffstypValue.value;
+                                await _.WoDStorages.getSkillsUnknownDb().setValue(unknownEntry);
+                            }
+                            angriffstypContainer.append(angriffstypSelect);
+                            if (!angriffstypValue) fehlend = true;
+                        }
+                    }
+                    createAngriffsartSelect();
+
+                    createWurfSelect = function () {
+                        wurfContainer.innerHTML = "";
+                        if (_.WoDSkillsDb.isAngriff(unknownEntry.typ) && !unknownEntry.wurf) { // Würfe scheinen nicht ermittelt werden zu können.
+                            const wurfSelect = document.createElement("input");
+                            wurfSelect.type = "text";
+                            const value = unknownEntry.user && unknownEntry.user.wurf;
+                            if (value) wurfSelect.value = value;
+                            wurfSelect.size = 4;
+                            wurfSelect.maxLength = 5;
+                            wurfContainer.append(wurfSelect);
+                            wurfSelect.onchange = function () {
+                                // TODO: speichern
+                            }
+                            if (!value) fehlend = true;
+                        }
+                    }
+                    createWurfSelect();
+
+                    const identifier = document.createElement("div");
+                    identifier.innerHTML = noSkillId;
+                    const wholeTable = document.createElement("table");
+                    //wholeTable.style.width = "100%";
+                    wholeTable.style.display = "none";
+                    for (const cur of list) {
+                        const tr = document.createElement("tr");
+                        tr.innerHTML = cur.line;
+                        tr.className = "row0";
+                        wholeTable.append(tr);
+                    }
+                    identifier.onclick = function () {
+                        wholeTable.style.display = (wholeTable.style.display === "none" ? "" : "none");
+                    }
+                    tableContent.push([identifier, typSelect, angriffstypContainer, wurfContainer]);
+                    tableContent.push([{data: wholeTable, colSpan: 4}]);
+                    if (fehlend) count++;
+                }
+                const table = _.UI.createTable(tableContent)
+                //table.style.width = "100%";
+                userInfoPanel.append(table);
+            }
+            userInfoPanel.className = "message_info";
+            this.#preContent.append(userInfoPanel);
+            if (canRefresh) {
+                const reloadButton = _.UI.createRealButton("Aktualisieren", function () {
+                    Mod.recalculateStats();
+                });
+                _.Libs.betterInput(reloadButton);
+                userInfoPanel.append(reloadButton);
+            }
+            if (count) { // Warnung nur anzeigen, wenn wirklich noch was fehlt
+                this.#warningMessage.innerHTML = _.UI.SIGNS.WARN + "<sup style='font-size:0.6em;'>" + count + "</sup>";
+                this.#warningMessage.title = "Es konnten nicht alle Informationen zu den Fertigkeiten bestimmt werden!";
+            }
+        }
+
+        static setTitleMessage(titleMessage, preventCollapsible) {
+            this.#headerMessage.innerHTML = titleMessage;
+            this.#collapsible.style.display = preventCollapsible ? "none" : "";
         }
 
         static logRuntimeError(error) {
-            this.setTitle("<span title='" + error + "'>⚠️ Ein Fehler ist aufgetreten, es konnten diesmal leider keine Statistiken erstellt werden!</span>");
+            this.setTitleMessage("<span title='" + error + "'>️" + _.UI.SIGNS.ERROR + " Ein Fehler ist aufgetreten, es konnten diesmal leider keine Statistiken erstellt werden!</span>");
             this.#foundError = error;
             if (error.additionals) {
                 console.error("Ein Fehler wurde abgefangen!", error, ...error.additionals);
@@ -1452,7 +1658,7 @@
                 //toBBCodeButton.title = "Einfach anklicken und der BBCode wird in die Zwischenablage kopiert. Dann einfach mit Strg+V irgendwo reinkopieren."
 
                 const toBBCodeDone = document.createElement("img");
-                toBBCodeDone.src = "/wod/css/img/smiley/yes.png";
+                toBBCodeDone.src = _.UI.WOD_SIGNS.YES;
                 toBBCodeDone.style.height = "10px";
                 toBBCodeDone.style.display = "block";
                 toBBCodeDone.style.margin = "auto";
@@ -1523,7 +1729,7 @@
                 const yesButtonDiv = document.createElement("div");
                 yesButtonDiv.style.display = "inline-block";
                 yesButtonDiv.style.width = "50%";
-                const yesButton = util.createImgButton("20px", "/wod/css/img/smiley/yes.png", function () {
+                const yesButton = util.createImgButton("20px", _.UI.WOD_SIGNS.YES, function () {
                     multiSelectionContainer.parentElement.removeChild(multiSelectionContainer);
                     var result = [];
                     var options = multiSelection.options;
@@ -1759,29 +1965,6 @@
     }
 
     class WoD {
-        //  testet, ob wir uns auf der Berichtseite befinden
-        static istSeite_Kampfbericht() {
-            var result = false;
-            var heading = document.getElementsByTagName("h1")[0];
-            var text = heading.firstChild.data;
-
-            if (text.indexOf("Kampfbericht:") !== -1) result = true;
-            //console.log("Kampfbericht-Seite");
-
-            return result;
-        }
-
-        //  testet, ob wir uns auf der Statistik-Seite befinden
-        static istSeite_Kampfstatistik() {
-            var result = false;
-            var heading = document.getElementsByTagName("h1")[0];
-            var text = heading.firstChild.data;
-
-            if (text.indexOf("Kampfstatistik") !== -1) result = true;
-            //console.log("Kampfstatistik-Seite");
-
-            return result;
-        }
 
         //  testet, ob wir uns auf dem Abenteuer-Übungsplatz befinden
         static istSeite_AbenteuerUebungsplatz() {
@@ -1874,7 +2057,7 @@
             for (const reportId of await reportStatsDB.getAllKeys({
                 index: ["ts"],
                 keyMatchBefore: [compareDate.getTime()],
-            })) { // werden nie so viele werden
+            })) {
                 await reportStatsDB.deleteValue(reportId);
             }
         }

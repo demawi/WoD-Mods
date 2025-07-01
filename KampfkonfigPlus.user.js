@@ -26,7 +26,8 @@
     const _UI = demawiRepository.import("UI");
 
     class Mod {
-
+        static dbname = "wodDB";
+        static version = GM.info.script.version;
         static async startMod() {
             await demawiRepository.startMod();
             WodKonfig.addButtons();
