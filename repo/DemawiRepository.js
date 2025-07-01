@@ -2220,6 +2220,16 @@ class demawiRepository {
                 ["Demosan-", "Lion-"],
                 [],
             ],
+            [ // Barbar Lendenschurz
+                ["Blutiger"],
+                [],
+                ["des Berserkers"],
+            ],
+            [ // Felle (z.B. "Handschuhe aus edlem Luchsfell" (Vollständig)
+                ["Handschuhe", "Mütze", "Weste"],
+                ["schäbig", "", "gut", "edlem"], // Stufe
+                ["Bärenfell", "Luchsfell", "Jaguarfell", "Wolfsfell", "Pantherfell", "Kaninchenfell"],
+            ],
             [ // Gebetsstab / Seherstab mit Suffix (für Prohpet)
                 ["Vergessen", "", "Gesegnet", "Geweiht", "Geheiligt", "Göttergeschmiedet"],
                 ["Aiara-", "Akbeth-", "Rashon-"],
@@ -2274,7 +2284,7 @@ class demawiRepository {
         static createItem(itemName) {
             if (!this.isValidItemName(itemName)) {
                 console.error("ItemName ist nicht korrekt: '" + itemName + "'");
-                throw new Error("ItemName ist korrekt: '" + itemName + "'"); // TODO: nur temorär aktiv
+                throw new Error("ItemName ist korrekt: '" + itemName + "'"); // TODO: nur temorär aktiv!?
                 return;
             }
             const now = new Date().getTime();
@@ -3192,6 +3202,103 @@ class demawiRepository {
             return result;
         }
 
+        /**
+         * Versucht soweit alle Elemente die nicht zum Main-Content gehören rauszufiltern.
+         * Wir greifen nicht alleinig den Main_Content ab, um auch CSS und "the_form" etc. mit zu bekommen
+         * Stellt sicher, dass alle URLs relativ zur Domain definiert sind.
+         */
+        static getPlainMainContent(functionAfterClone) {
+            const myDocument = document.cloneNode(true);
+
+            let gadgetTable = myDocument.querySelector("#gadgettable tbody");
+            if (gadgetTable) { // existiert in nem Popup nicht
+                _.util.forEachSafe(gadgetTable.children, curTR => {
+                    if (!curTR.querySelector("div#main_content")) {
+                        curTR.remove();
+                    } else { //
+                        _.util.forEachSafe(curTR.children, curTD => {
+                            if (!curTD.querySelector("div#main_content")) {
+                                curTD.remove();
+                            }
+                        });
+                    }
+                });
+            }
+            gadgetTable = myDocument.querySelector("#gadgettable-center-gadgets");
+            if (gadgetTable) { // existiert in nem Popup nicht
+                _.util.forEachSafe(gadgetTable.children, curTR => {
+                    if (!curTR.querySelector("div#main_content")) {
+                        curTR.remove();
+                    }
+                });
+            }
+
+            if (myDocument.querySelector("#gadgettable-left-td")) {
+                throw new Error("Bereinigung fehlgeschlagen!")
+            }
+
+            const removeClassNodes = function (node, className) {
+                for (const cur of node.querySelectorAll("." + className + ":not(." + className + " ." + className + ")")) {
+                    cur.remove();
+                }
+            }
+            removeClassNodes(myDocument.documentElement, "nowod");
+            removeClassNodes(myDocument.documentElement, "tutorial");
+            removeClassNodes(myDocument.documentElement, "intro_open");
+
+            const tooltip = myDocument.getElementsByClassName("tooltip")[0];
+            if (tooltip) tooltip.remove();
+
+            // Stellt sicher, dass auch immer der Pfad mit bei einer URL-Angabe mit dabei ist.
+            // Wenn die Datei exportiert wird, wird die Pfadangabe ja ebenfalls "vergessen".
+            this.ensureAllUrlsHavePathname(myDocument);
+            for (const aElem of myDocument.querySelectorAll("a")) {
+                const onclick = aElem.getAttribute("onclick")
+                if (onclick && onclick.startsWith("return wo(")) {
+                    aElem.setAttribute("onclick", "return wo(this.href);");
+                }
+            }
+
+            if (functionAfterClone) functionAfterClone(myDocument);
+            return myDocument;
+        }
+
+        /**
+         * Stellt sicher, dass alle gängigen URLs relativ zur Domain definiert sind.
+         */
+        static ensureAllUrlsHavePathname(myDocument) {
+            const pathName = window.location.pathname;
+            const path = pathName.substring(0, pathName.lastIndexOf("/"));
+            this.rewriteAllUrls(myDocument, url => {
+                if (!url) return url;
+                if (url === "") return "";
+                if (url.startsWith("http") || url.startsWith("/") || url.startsWith("data:") || url.startsWith("#")) return url;
+                // Übrig bleiben alle relativ definierten Pfade. Hier müssen wir den Pfad auch anhängen
+                return path + "/" + url;
+            })
+        }
+
+        static rewriteAllUrls(myDocument, converter) {
+            for (const cur of myDocument.getElementsByTagName("a")) {
+                const value = converter(cur.getAttribute("href"));
+                if (value) cur.href = value;
+            }
+
+            for (const cur of myDocument.getElementsByTagName("img")) {
+                const value = converter(cur.getAttribute("src"));
+                if (value) cur.src = value;
+            }
+
+            for (const cur of myDocument.getElementsByTagName("script")) {
+                const value = converter(cur.getAttribute("src"));
+                if (value) cur.src = value;
+            }
+
+            for (const cur of myDocument.getElementsByTagName("link")) {
+                const value = converter(cur.getAttribute("href"));
+                if (value) cur.href = value;
+            }
+        }
     }
 
     /**
@@ -3470,7 +3577,8 @@ class demawiRepository {
         }
 
         static WOD_SIGNS = {
-            YES: "/wod/css/img/smiley/yes.png",
+            YES: "/wod/css/img/smiley/yes.png", // grüner Haken
+            NO: "/wod/css/img/smiley/no.png", // rotes X
         }
 
         static createButton(htmlContent, callback) {
@@ -5083,9 +5191,9 @@ class demawiRepository {
             sourceItem.ts = now;
             sourceItem.world[myWorld] = now;
 
-            link = link.innerHTML;
-            sourceItem.details = document.getElementById("details").innerHTML;
-            sourceItem.link = link;
+            delete sourceItem.details; // nur für alte Versionen
+            delete sourceItem.link; // nur für alte Versionen
+            sourceItem.src = _.WoDParser.getPlainMainContent().querySelector(".main_content").innerHTML;
 
             await itemSourcesDb.setValue(sourceItem);
             const item = await this.parseSourceItem(sourceItem, myWorld, now);
@@ -5123,21 +5231,32 @@ class demawiRepository {
 
         static async parseSourceItem(itemSource) {
             const item = await this.getItemDB().getValue(itemSource.id) || _.WoDItemDb.createItem(itemSource.name);
-            item.details = itemSource.details; // nur temporär fürs parsen
-            item.link = itemSource.link; // nur temporär fürs parsen
-            await this.#writeItemData(item);
-            delete item.details;
-            delete item.link;
-
+            await this.#writeItemData(item, itemSource);
             return item;
         }
 
         // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
-        static async #writeItemData(item) {
+        static async #writeItemData(item, itemSource) {
+            const itemHTMLElement = document.createElement("div");
+            itemHTMLElement.innerHTML = itemSource.src;
+
+            const einschraenkungAnwendungen = this.#findRestriction(itemSource.src, /Die Anwendungen dieses Gegenstandes beziehen sich nur auf die Anwendung des Gegenstandes als (.*)\./);
+            const einschraenkungWirkungen = this.#findRestriction(itemSource.src, /Die Boni auf den Betroffenen wirken nur bei Anwendung dieses Gegenstandes als (.*)\./);
+
             try {
-                this.writeItemData(item);
-                this.writeItemDataEffects(item);
+                this.writeItemData(item, itemHTMLElement);
+                this.writeItemDataEffects(item, itemHTMLElement);
                 item.dv = _.ItemParserDataVersion;
+
+                if (einschraenkungAnwendungen) {
+                    console.log("Einschränkung Anwendungen:", einschraenkungAnwendungen);
+                    item.data.anw.onlyFor = einschraenkungAnwendungen;
+                }
+                if (einschraenkungWirkungen) {
+                    console.log("Einschränkung Wirkung:", einschraenkungWirkungen);
+                    item.effects.target.onlyFor = einschraenkungWirkungen;
+                }
+
             } catch (error) {
                 console.log(error);
                 //alert(error);
@@ -5145,9 +5264,16 @@ class demawiRepository {
             }
         }
 
-        static writeItemData(item) {
-            const div = document.createElement("div");
-            div.innerHTML = item.details;
+        static #findRestriction(src, matching) {
+            let result = src.match(matching);
+            if (!result) return;
+            const elem = document.createElement("div");
+            elem.innerHTML = result[1];
+            return elem.textContent.trim();
+        }
+
+        static writeItemData(item, itemHTMLElement) {
+            const div = itemHTMLElement.querySelector("#details");
             const data = {};
             item.data = data;
             const tableTRs = div.querySelectorAll('tr');
@@ -5236,7 +5362,28 @@ class demawiRepository {
                         break;
                     }
                     case "Anwendungen insgesamt": {
-                        data.isVG = tr.children[1].textContent.trim() !== "unbegrenzt";
+                        const value = tr.children[1].textContent.trim();
+                        if(value !== "unbegrenzt") {
+                            data.isVG = true;
+                            data.anw = data.anw || {};
+                            data.anw.dungeon = Number(value);
+                        }
+                        break;
+                    }
+                    case "Anwendungen pro Dungeon": {
+                        const value = tr.children[1].textContent.trim();
+                        if(value !== "unbegrenzt") {
+                            data.anw = data.anw || {};
+                            data.anw.dungeon = Number(value);
+                        }
+                        break;
+                    }
+                    case "Anwendungen pro Kampf": {
+                        const value = tr.children[1].textContent.trim();
+                        if(value !== "unbegrenzt") {
+                            data.anw = data.anw || {};
+                            data.anw.kampf = Number(value);
+                        }
                         break;
                     }
                     case "Fertigkeiten": {
@@ -5254,9 +5401,8 @@ class demawiRepository {
             }
         }
 
-        static writeItemDataEffects(item) {
-            const div = document.createElement("div");
-            div.innerHTML = item.link;
+        static writeItemDataEffects(item, itemHTMLElement) {
+            const div = itemHTMLElement.querySelector("#link");
             if (this.hasSetOrGemBonus(div)) {
                 item.irregular = true;
             } else {

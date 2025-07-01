@@ -3234,7 +3234,7 @@
                 const absoluteTime = _.WoD.getTimeString(titleSplit[0].trim());
                 titleElem.innerHTML = absoluteTime + " - " + title;
             }
-            return util.getPlainMainContent(titleFormatter);
+            return _.WoDParser.getPlainMainContent(titleFormatter);
         }
     }
 
@@ -3248,82 +3248,6 @@
 
         static hatClassName(node, className) {
             return node.classList && node.classList.contains(className);
-        }
-
-        /**
-         * Versucht soweit alle Elemente die nicht zum Main-Content gehören rauszufiltern.
-         * Wir greifen nicht alleinig den Main_Content ab, um auch CSS und "the_form" etc. mit zu bekommen
-         * Stellt sicher, dass alle URLs relativ zur Domain definiert sind.
-         */
-        static getPlainMainContent(functionAfterClone) {
-            const myDocument = document.cloneNode(true);
-
-            let gadgetTable = myDocument.querySelector("#gadgettable tbody");
-            if (gadgetTable) { // existiert in nem Popup nicht
-                _.util.forEachSafe(gadgetTable.children, curTR => {
-                    if (!curTR.querySelector("div#main_content")) {
-                        curTR.remove();
-                    } else { //
-                        _.util.forEachSafe(curTR.children, curTD => {
-                            if (!curTD.querySelector("div#main_content")) {
-                                curTD.remove();
-                            }
-                        });
-                    }
-                });
-            }
-            gadgetTable = myDocument.querySelector("#gadgettable-center-gadgets");
-            if (gadgetTable) { // existiert in nem Popup nicht
-                _.util.forEachSafe(gadgetTable.children, curTR => {
-                    if (!curTR.querySelector("div#main_content")) {
-                        curTR.remove();
-                    }
-                });
-            }
-
-            if (myDocument.querySelector("#gadgettable-left-td")) {
-                throw new Error("Bereinigung fehlgeschlagen!")
-            }
-
-            const removeClassNodes = function (node, className) {
-                for (const cur of node.querySelectorAll("." + className + ":not(." + className + " ." + className + ")")) {
-                    cur.remove();
-                }
-            }
-            removeClassNodes(myDocument.documentElement, "nowod");
-            removeClassNodes(myDocument.documentElement, "tutorial");
-            removeClassNodes(myDocument.documentElement, "intro_open");
-
-            const tooltip = myDocument.getElementsByClassName("tooltip")[0];
-            if (tooltip) tooltip.remove();
-
-            // Stellt sicher, dass auch immer der Pfad mit bei einer URL-Angabe mit dabei ist.
-            // Wenn die Datei exportiert wird, wird die Pfadangabe ja ebenfalls "vergessen".
-            this.ensureAllUrlsHavePathname(myDocument);
-            for (const aElem of myDocument.querySelectorAll("a")) {
-                const onclick = aElem.getAttribute("onclick")
-                if (onclick && onclick.startsWith("return wo(")) {
-                    aElem.setAttribute("onclick", "return wo(this.href);");
-                }
-            }
-
-            if (functionAfterClone) functionAfterClone(myDocument);
-            return myDocument;
-        }
-
-        /**
-         * Stellt sicher, dass alle gängigen URLs relativ zur Domain definiert sind.
-         */
-        static ensureAllUrlsHavePathname(myDocument) {
-            const pathName = window.location.pathname;
-            const path = pathName.substring(0, pathName.lastIndexOf("/"));
-            this.rewriteAllUrls(myDocument, url => {
-                if (!url) return url;
-                if (url === "") return "";
-                if (url.startsWith("http") || url.startsWith("/") || url.startsWith("data:") || url.startsWith("#")) return url;
-                // Übrig bleiben alle relativ definierten Pfade. Hier müssen wir den Pfad auch anhängen
-                return path + "/" + url;
-            })
         }
 
         /**
@@ -3349,29 +3273,6 @@
             util.forEach(myDocument.getElementsByTagName("link"), a => {
                 const value = converter(a.getAttribute("href"));
                 if (value) a.href = a.href;
-            });
-        }
-
-
-        static rewriteAllUrls(myDocument, converter) {
-            util.forEach(myDocument.getElementsByTagName("a"), a => {
-                const value = converter(a.getAttribute("href"));
-                if (value) a.href = value;
-            });
-
-            util.forEach(myDocument.getElementsByTagName("img"), a => {
-                const value = converter(a.getAttribute("src"));
-                if (value) a.src = value;
-            });
-
-            util.forEach(myDocument.getElementsByTagName("script"), a => {
-                const value = converter(a.getAttribute("src"));
-                if (value) a.src = value;
-            });
-
-            util.forEach(myDocument.getElementsByTagName("link"), a => {
-                const value = converter(a.getAttribute("href"));
-                if (value) a.href = value;
             });
         }
 
