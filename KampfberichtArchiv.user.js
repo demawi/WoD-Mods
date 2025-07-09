@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.13.0.0
+// @version        0.13.0.1
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -2863,7 +2863,7 @@
             const locationDB = _.WoDStorages.getLocationDb();
             const debug = locationName === "aAtreanijsh";
             const flexibleLength = locationName === "Atreanijsh";
-            const location = await locationDB.getValue(locationName) || this.createLocation(locationName);
+            const location = await locationDB.getValue(locationName) || _.WoDLocationDb.createLocation(locationName);
             const versions = location.versions || (location.versions = []);
             const result = [];
             let needUpdate = false;
