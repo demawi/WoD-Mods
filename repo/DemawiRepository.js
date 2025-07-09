@@ -1226,6 +1226,8 @@ class demawiRepository {
 
         static #supported = ["Tampermonkey", "Greasemonkey"];
 
+        static mode;
+
         /**
          * 4 Modes:
          * - Script-Execution with Local-Domain (cant proxy)
@@ -1241,7 +1243,10 @@ class demawiRepository {
                 alert(GM.info.script.name + "\nScriptEngine: '" + GM.info.scriptHandler + "' wird aktuell nicht unterstützt.\nBitte kontaktiere den Entwickler für eine entsprechende Unterstützung.");
                 return [false];
             }
-            if (this.cantProxy()) return [true, "l"];
+            if (this.cantProxy()) {
+                this.mode = "local";
+                return [true, "l"];
+            }
             if (window.origin.endsWith("//world-of-dungeons.de")) { // Main-Domain-Check, hier wird generell kein weiterer Script-Code ausgeführt
                 if (window.location.href.includes("messenger=true")) { // With ProxyMarker
                     this.actAsCSProxyResponder();
@@ -1268,6 +1273,7 @@ class demawiRepository {
                 }
                 return [false];
             }
+            this.mode = "www";
             return [true, "p"];
         }
 
@@ -5742,7 +5748,8 @@ class demawiRepository {
 
     static startMod(zusatz) {
         if (!window.location.href.includes("silent=true")) {
-            console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (zusatz ? " " + zusatz : ""), GM.info);
+            const mode = _.CSProxy.mode;
+            console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (mode ? " Mode: " + mode : "") + (zusatz ? " " + zusatz : ""), GM.info);
         }
     }
 
