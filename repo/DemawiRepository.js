@@ -5749,7 +5749,7 @@ class demawiRepository {
     static startMod(zusatz) {
         if (!window.location.href.includes("silent=true")) {
             const mode = _.CSProxy.mode;
-            console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (mode ? " DB-Mode: " + mode : "") + (zusatz ? " " + zusatz : ""));
+            console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
         }
     }
 
