@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.0.5.1";
+    static version = "1.0.5.2";
 
     /**
      * Indexed-DB Framework.
@@ -135,10 +135,10 @@ class demawiRepository {
                 }, this.storageId, this.indexedDb.dbname, dbObjectId);
             }
 
-            async count() {
-                return this.indexedDb.executeProxyCall(async function (storageId, dbname) {
-                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).count();
-                }, this.storageId, this.indexedDb.dbname);
+            async count(query) {
+                return this.indexedDb.executeProxyCall(async function (storageId, dbname, query) {
+                    return await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).count(query);
+                }, this.storageId, this.indexedDb.dbname, query);
             }
 
             async getAll(query, iterationFnOpt) {
@@ -721,13 +721,14 @@ class demawiRepository {
             /**
              * Liefert ein Array über alle vorhandenen Objekte.
              */
-            async count() {
-                const thisObject = this;
+            async count(query) { // TODO: with query
+                const _this = this;
                 return new Promise(async (resolve, reject) => {
-                    const connection = await thisObject.indexedDb.getConnection();
+                    const connection = await _this.indexedDb.getConnection();
                     const transaction = connection.transaction(this.storageId, "readonly");
                     const objectStore = transaction.objectStore(this.storageId);
-                    const request = objectStore.count();
+                    const [target, keyRange] = await this.constructor.QueryOps.getTargetAndKeyRange(_this, objectStore, query);
+                    const request = target.count(keyRange);
                     request.onsuccess = function (event) {
                         const result = event.target.result;
                         resolve(result);
@@ -915,6 +916,20 @@ class demawiRepository {
 
             static QueryOps = class QueryOps {
 
+                static async getTargetAndKeyRange(objectStorage, objectStore, query) {
+                    query = query || {};
+                    let target = objectStore;
+                    if (query.index) target = await objectStorage.constructor.TargetOps.getQueryTarget(objectStorage, target, query);
+                    const keyRange = await this.getOptionalKeyRange(objectStorage, target, query);
+                    return [target, keyRange];
+                }
+
+                static async getOptionalKeyRange(objectStorage, target, query) {
+                    let keyRange;
+                    if (query.keyMatch || query.keyMatchAfter || query.keyMatchBefore) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchAfter, query.keyMatchBefore, query.keyMatchAfterOpen, query.keyMatchBeforeOpen);
+                    return keyRange;
+                }
+
                 /**
                  * @param retrieveFnName was wird als Resultat erwartet nur die Primärschlüssel oder die Objekte selbst.
                  * @returns {Promise<any>}
@@ -927,7 +942,7 @@ class demawiRepository {
                     const dbName = objectStorage.indexedDb.dbname;
                     const storageId = objectStorage.storageId;
                     query.db = [dbName, storageId, retrieveFnName];
-                    if (!ignoreWarning && !isGetAllKeys && !iterationOpt && !query.index) {
+                    if (!ignoreWarning && !isGetAllKeys && !iterationOpt && Object.keys(query) <= 1) {
                         console.warn(retrieveFnName + " ohne Parameter kann bei großen Datenbanken zu Problemen führen ", query);
                     }
                     const connection = await objectStorage.indexedDb.getConnection();
@@ -953,8 +968,7 @@ class demawiRepository {
                         if (query.debug) console.log("SearchType: Batch", target.keyPath, _.util.cloneObject(query));
                         resultPromise = new objectStorage.constructor.BatchSearch(objectStorage, idbObjectStore, target, query, iterationOpt, retrieveFnName).batchIt();
                     } else {
-                        let keyRange;
-                        if (query.keyMatch || query.keyMatchAfter || query.keyMatchBefore) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchAfter, query.keyMatchBefore, query.keyMatchAfterOpen, query.keyMatchBeforeOpen);
+                        const keyRange = await this.getOptionalKeyRange(objectStorage, target, query);
                         if (iterationOpt && isGetAllKeys) { // Wird aktuell immer komplett abgefragt
                             if (query.order) throw new Error("getAllKeys wird aktuell nicht mit 'query.order' unterstützt!");
                             if (query.debug) console.log("SearchType: " + retrieveFnName, target.keyPath, keyRange, _.util.cloneObject(query));
@@ -1235,7 +1249,7 @@ class demawiRepository {
                 } else return [false];
             }
             if (this.ensureIframeWrap()) return [false];
-            const rootWindow = this.getRootWindow();
+            const rootWindow = _.WindowManager.getRootWindow();
             const version = rootWindow._demrepv;
             if (version !== _.version) { // Die Version hat sich geändert, alles nochmal laden.
                 // Fall 1: Mod hat sich nach dem ersten Laden der Seite aktualisiert
@@ -1255,13 +1269,6 @@ class demawiRepository {
                 return [false];
             }
             return [true, "p"];
-        }
-
-        static getRootWindow(win) {
-            win = win || window;
-            if (win.opener) return this.getRootWindow(win.opener);
-            if (win.top && win.top !== win) return this.getRootWindow(win.top);
-            return win;
         }
 
         static isTampermonkey() {
@@ -1612,6 +1619,46 @@ class demawiRepository {
         }
     }
 
+    static WindowManager = class {
+
+        static isMarked(tag, win) {
+            win = win || unsafeWindow;
+            return win._demrep && win._demrep[tag];
+        }
+
+        static getMark(tag, win) {
+            win = win || unsafeWindow;
+            return win._demrep && win._demrep[tag];
+        }
+
+        static mark(tag, value, win) {
+            value = value || true;
+            win = win || unsafeWindow;
+            (win._demrep || (win._demrep = {}))[tag] = value;
+        }
+
+        /**
+         * Führt die Funktion (pro 'tagId') in diesem unsafeWindow nur einmalig aus, auch wenn mehrere Mods diese aufrufen.
+         * Das Resultat wird über ein Promise an alle ausgeliefert.
+         */
+        static async onlyOnce(tagId, asyncFunction) {
+            let functionMark = this.getMark(tagId);
+            if (functionMark) return functionMark;
+            functionMark = new Promise((resolve, reject) => {
+                resolve(asyncFunction());
+            });
+            this.mark(tagId, functionMark);
+            return functionMark;
+        }
+
+        static getRootWindow(win) {
+            win = win || window;
+            if (win.opener) return this.getRootWindow(win.opener);
+            if (win.top && win.top !== win) return this.getRootWindow(win.top);
+            return win;
+        }
+    }
+
     static Settings = class Settings {
         static async getHandler(settingsDef) {
             const settingsHandler = new _.Settings(settingsDef);
@@ -1742,6 +1789,13 @@ class demawiRepository {
 
         static getSkillsDb() {
             return this.#getCreateObjectStore("skill", "id");
+        }
+
+        /**
+         * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
+         */
+        static getLocationDb() {
+            return this.#getCreateObjectStore("location", "name");
         }
 
         static getSkillsSourceDb() {
@@ -2250,9 +2304,14 @@ class demawiRepository {
                 ["Nicolit-Beinschienen", "Nicolit-Panzerhandschuhe", "Nicolit-Panzerstiefel"],
                 ["des furchtlosen Kriegers", "des weisen Magiers", "des standhaften Beschützers", "der helfenden Hand"]
             ],
-            [ // Abgrund-Quest
-                ["Abweisende", "Passgenaue", "Kantige", "Strahlende"], // Typ
-                [""], // "Magma/Tiefen", "muschellamellen/quallenseide"
+            [ // Abgrund-Quest: Muschellamellen
+                ["Abweisende", "Kantige", "Passgenaue"], // Typ
+                [""], // "Magma/Tiefen"
+                ["der Aufmerksamkeit", "der Austrahlung", "der Durchsetzungsstärke", "der Geistesgegenwart", "der Geschwindikeit", "der Gesundheit", "der Gewandheit", "der Kraft"],
+            ],
+            [ // Abgrund-Quest: Quallenseide
+                ["Passgenaue", "Strahlende"], // Typ
+                [""], // "Magma/Tiefen"
                 ["der Aufmerksamkeit", "der Austrahlung", "der Durchsetzungsstärke", "der Geistesgegenwart", "der Geschwindikeit", "der Gesundheit", "der Gewandheit", "der Kraft"],
             ],
             [ // Abgrund-Quest-Perlen
@@ -2292,14 +2351,76 @@ class demawiRepository {
                 id: itemName.toLowerCase(),
                 name: itemName,
                 ts: now,
+                nodata: 1,
                 world: {
-                    [_.WoD.getMyWorld()]: now,
+                    [_.WoD.getMyWorld()]: {
+                        ts: now,
+                        valid: 1,
+                    }
                 }
             }
         }
 
         static isValidItemName(itemName) {
             return !!itemName.match(/^[\p{Letter}0-9 ():,'.+?!-]*$/u);
+        }
+
+        static couldBeValid(sourceItem, myWorldId) {
+            const myWorldInfo = sourceItem.world[myWorldId];
+            if (!myWorldInfo) return true;
+            return myWorldInfo.valid;
+        }
+    }
+
+    static WoDLocationDb = class {
+
+        static createLocation(locationName) {
+            return {
+                name: locationName,
+                versions: [],
+            }
+        }
+
+        /**
+         * @param baseLocationName
+         * @param dungeonId sofern vorhanden z.B. über den Kampfkonfig-Konfiguratione
+         * @param questName
+         */
+        static async reportLocationId(baseLocationName, dungeonId, questName) {
+            const locationDb = _.WoDStorages.getLocationDb();
+            let location = await locationDb.getValue(baseLocationName);
+            if (!location) location = this.createLocation(baseLocationName);
+            if (!location.id) {
+                location.id = dungeonId;
+                if (questName) location.quest = questName;
+                await locationDb.setValue(location);
+            }
+        }
+
+        static async getVersionCount(baseLocName, location) {
+            location = location || await _.WoDStorages.getLocationDb().getValue(baseLocName);
+            if (!location || !location.versions) return 0;
+            return Object.keys(location.versions).length;
+        }
+
+        static async hasMoreThanOneVersion(baseLocName, location) {
+            return await this.getVersionCount(baseLocName, location) > 1;
+        }
+
+        static async getFullLocName(baseLocName, versionNr) {
+            const location = await _.WoDStorages.getLocationDb().getValue(baseLocName);
+            let locName = baseLocName;
+            if (await this.hasMoreThanOneVersion(baseLocName, location)) {
+                if (versionNr) locName += " (v" + versionNr + ")";
+                else locName += " (v?)";
+                let prefix = location.quest;
+                if (!prefix) prefix
+                location.schlacht;
+                if (prefix) {
+                    locName = prefix + ": " + location.quest;
+                }
+            }
+            return locName;
         }
     }
 
@@ -2341,14 +2462,21 @@ class demawiRepository {
             // ad-hoc load
             const content = await _.util.loadViaXMLRequest(this.getSkillUrlAlsPopup(skillName));
             const doc = await _.util.getDocumentFor(content);
-            return this.onSkillPage(doc);
+            return this.onSkillPageDirect(doc);
         }
 
         static isAngriff(skillTyp) {
             return skillTyp === _.WoDSkillsDb.TYP.ANGRIFF || skillTyp === _.WoDSkillsDb.TYP.VERSCHLECHTERUNG;
         }
 
-        static async onSkillPage(doc, content) {
+        static async onSkillPage() {
+            const _this = this;
+            return _.WindowManager.onlyOnce("onSkillPage", async function () {
+                return await _this.onSkillPageDirect();
+            });
+        }
+
+        static async onSkillPageDirect(doc, content) {
             doc = doc || document;
             const skillName = doc.getElementsByTagName("h1")[0].textContent.trim().substring(11).trim();
             const now = new Date().getTime();
@@ -2516,6 +2644,29 @@ class demawiRepository {
         }
 
         static worldIds = Object.fromEntries(Object.entries(this.worldNames).map(([a, b]) => [a, b.toLowerCase()]).map(a => a.reverse()))
+
+        // mit Abkürzungen
+        static KLASSEN = {
+            "Barbar": "Bb",
+            "Barde": "Bd",
+            "Dieb": "Di",
+            "Gaukler": "Ga",
+            "Gelehrter": "Ge",
+            "Gestaltwandler": "Gw",
+            "Gladiator": "Gl",
+            "Hasardeur": "Ha",
+            "Jäger": "Jä",
+            "Klingenmagier": "Km",
+            "Magier": "Ma",
+            "Mönch": "Mö",
+            "Paladin": "Pa",
+            "Prophet": "Ph",
+            "Priester": "Pr",
+            "Quacksalber": "Qu",
+            "Ritter": "Ri",
+            "Schamane": "Sm",
+            "Schütze": "Sü",
+        }
 
         static VIEW = {
             TOMBOLA: "tombola",
@@ -3377,7 +3528,8 @@ class demawiRepository {
                         if (node.classList.contains("rep_monster")) {
                             return ["", "[beast:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
                         } else if (node.href.includes("item.php")) {
-                            const urlParams = new URLSearchParams(node.href);
+                            const urlParams = new URL(node.href).searchParams;
+                            console.log("Found URL-Params", node.href, new URL(node.href).searchParams, new URL(node.href).searchParams.get("name"), decodeURIComponent(new URL(node.href).searchParams));
                             return ["", "[item:" + decodeURIComponent(urlParams.get("name")) + "]", ""];
                         } else if (node.href.includes("/skill/")) {
                             return ["", "[skill:" + decodeURIComponent(node.href.match(/\/skill\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
@@ -3574,6 +3726,7 @@ class demawiRepository {
         static SIGNS = {
             WARN: "⚠️",
             ERROR: "💥",
+            MISSING: "�",
         }
 
         static WOD_SIGNS = {
@@ -4392,6 +4545,7 @@ class demawiRepository {
             constructor(damageLineElement) {
                 const stringLine = damageLineElement.textContent;
                 var matching = stringLine.match(/^(\d*) \[\+(\d*)\]/);
+
                 if (matching) {
                     this.value = Number(matching[1]);
                     this.ruestung = Number(matching[2]);
@@ -4409,15 +4563,18 @@ class demawiRepository {
                     }
                 }
                 if (damageLineElement.tagName === "SPAN") { // hat Anfälligkeit
-                    const dmgVorher = damageLineElement.getAttribute("onmouseover").match(/verursacht: <b>(\d*)<\/b>/)[1];
-                    let dmgNachher = damageLineElement.getAttribute("onmouseover").match(/Anfälligkeit.* <b>(\d*)<\/b>/);
-                    if (dmgNachher) {
-                        dmgNachher = dmgNachher[1];
-                    } else {
-                        dmgNachher = damageLineElement.getAttribute("onmouseover").match(/Unempfindlichkeit.* <b>(\d*)<\/b>/)[1];
-                        dmgNachher = -Number(dmgNachher);
+                    const mouseoverText = damageLineElement.getAttribute("onmouseover");
+                    if (mouseoverText) {
+                        const dmgVorher = mouseoverText.match(/verursacht: <b>(\d*)<\/b>/)[1];
+                        let dmgNachher = mouseoverText.match(/Anfälligkeit.* <b>(\d*)<\/b>/);
+                        if (dmgNachher) {
+                            dmgNachher = dmgNachher[1];
+                        } else {
+                            dmgNachher = mouseoverText.match(/Unempfindlichkeit.* <b>(\d*)<\/b>/)[1];
+                            if (dmgNachher) dmgNachher = -Number(dmgNachher);
+                        }
+                        this.resistenz = Number(dmgVorher) - Number(dmgNachher) - this.ruestung;
                     }
-                    this.resistenz = Number(dmgVorher) - Number(dmgNachher) - this.ruestung;
                 }
             }
 
@@ -4675,7 +4832,7 @@ class demawiRepository {
                         lineNr++;
                     } else {
                         if (lineNr > 1) { // Nachfolgende DamageLines direkt auswerten
-                            if (curElement.tagName === "A") { // Schaden an einem Gegenstand
+                            if (curElement.tagName && (curElement.tagName === "A" || curElement.querySelector("a"))) { // Schaden an einem Gegenstand
                                 lineNr = -1; // solange ignorieren bis eine neue Entität kommt
                             } else {
                                 const damage = new Damage(curElement);
@@ -4910,6 +5067,9 @@ class demawiRepository {
                             } else if (curText.includes(" verseucht ")) {
                                 fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
                                 fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.KRANKHEIT;
+                            } else if (false && curText.includes(" entschärft ")) {
+                                fertigkeit.typ = _.WoDSkillsDb.TYP.ANGRIFF;
+                                fertigkeit.angriffstyp = _.WoDSkillsDb.ANGRIFFSTYP.FALLE_ENTSCHAERFEN;
                             }
                             break;
                         default:
@@ -5146,27 +5306,45 @@ class demawiRepository {
         }
 
         static async reportNonExistingItem(itemName) {
-            let item = await this.getItemSourceDB().getValue(itemName.toLowerCase());
-            if (!item || !item.details) {
-                item = _.WoDItemDb.createItem(itemName);
-                if (!item) return;
-                item.invalid = true;
+            let itemSource = await this.getItemSourceDB().getValue(itemName.toLowerCase());
+            if (!itemSource || !itemSource.details) {
+                itemSource = _.WoDItemDb.createItem(itemName);
+                if (!itemSource) return; // no valid name
             }
-            item.ts = new Date().getTime();
+            const now = new Date().getTime();
+            itemSource.ts = now;
             const myWorld = _.WoD.getMyWorld();
-            delete item.world[myWorld];
-            if (Object.keys(item.world).length === 0) {
-                await this.getItemDB().deleteValue(item.id);
-                delete item.link;
-                delete item.details;
-                item.invalid = true;
-                await this.getItemSourceDB().deleteValue(item.id);
+            if (myWorld) {
+                const worldInfos = itemSource.world[myWorld] || (itemSource.world[myWorld] = {});
+                worldInfos.ts = now;
+                worldInfos.valid = 0;
             }
-            await this.getItemSourceDB().setValue(item);
+            let foundValid = false;
+            for (const curWorldInfo of Object.values(itemSource.world)) {
+                if (curWorldInfo.valid) {
+                    foundValid = true;
+                    break;
+                }
+            }
+
+            if (!foundValid) {
+                await this.getItemDB().deleteValue(itemSource.id);
+                delete itemSource.link;
+                delete itemSource.details;
+                delete itemSource.src;
+            }
+            await this.getItemSourceDB().setValue(itemSource);
         }
 
         static async onItemPage() {
-            var link = document.getElementById("link");
+            const _this = this;
+            return _.WindowManager.onlyOnce("onItemPage", async function () {
+                return await _this.#onItemPage();
+            });
+        }
+
+        static async #onItemPage() {
+            let link = document.getElementById("link");
             if (!link) {
                 if (document.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
                     const itemName = document.querySelector("form input[name='name']").value;
@@ -5189,16 +5367,18 @@ class demawiRepository {
             const myWorld = _.WoD.getMyWorld();
             const now = new Date().getTime();
             sourceItem.ts = now;
-            sourceItem.world[myWorld] = now;
-
+            sourceItem.world[myWorld] = {
+                valid: 1,
+                ts: now,
+            }
             delete sourceItem.details; // nur für alte Versionen
             delete sourceItem.link; // nur für alte Versionen
             sourceItem.src = _.WoDParser.getPlainMainContent().querySelector(".main_content").innerHTML;
-
+            delete sourceItem.nodata;
             await itemSourcesDb.setValue(sourceItem);
-            const item = await this.parseSourceItem(sourceItem, myWorld, now);
-            item.ts = now;
-            item.world[myWorld] = now;
+
+            // Daten-Übernahme
+            const item = await this.parseSourceItem(sourceItem);
             await itemDB.setValue(item);
             console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
 
@@ -5231,6 +5411,8 @@ class demawiRepository {
 
         static async parseSourceItem(itemSource) {
             const item = await this.getItemDB().getValue(itemSource.id) || _.WoDItemDb.createItem(itemSource.name);
+            item.ts = itemSource.ts;
+            item.world = itemSource.world;
             await this.#writeItemData(item, itemSource);
             return item;
         }
@@ -5241,18 +5423,20 @@ class demawiRepository {
             itemHTMLElement.innerHTML = itemSource.src;
 
             const einschraenkungAnwendungen = this.#findRestriction(itemSource.src, /Die Anwendungen dieses Gegenstandes beziehen sich nur auf die Anwendung des Gegenstandes als (.*)\./);
-            const einschraenkungWirkungen = this.#findRestriction(itemSource.src, /Die Boni auf den Betroffenen wirken nur bei Anwendung dieses Gegenstandes als (.*)\./);
+            const einschraenkungWirkungen = this.#findRestriction(itemSource.src, /Die Boni auf den Betroffenen wirken nur bei Anwendung dieses Gegenstandes als (.*)\./) || this.#findRestriction(itemSource.src, /Die Auswirkungen auf den Betroffenen des Gegenstandes beziehen sich ausschließlich auf die Nutzung als (.*)\./);
+            const resetPoint = itemSource.src.includes("Vorsicht: Resetpunkt benötigt, um diesen Gegenstand abzulegen!");
+            if (resetPoint) item.needReset = 1;
 
             try {
                 this.writeItemData(item, itemHTMLElement);
                 this.writeItemDataEffects(item, itemHTMLElement);
                 item.dv = _.ItemParserDataVersion;
 
-                if (einschraenkungAnwendungen) {
+                if (einschraenkungAnwendungen) { // Gegenstandsklasse
                     console.log("Einschränkung Anwendungen:", einschraenkungAnwendungen);
                     item.data.anw.onlyFor = einschraenkungAnwendungen;
                 }
-                if (einschraenkungWirkungen) {
+                if (einschraenkungWirkungen) { // Gegenstandsklasse
                     console.log("Einschränkung Wirkung:", einschraenkungWirkungen);
                     item.effects.target.onlyFor = einschraenkungWirkungen;
                 }
@@ -5320,7 +5504,7 @@ class demawiRepository {
                     case "Voraussetzungen":
                         let bedingungen = {};
                         let freieBedingungen = Array();
-                        for (const elem of tr.children[1].children) {
+                        for (const elem of tr.children[1].childNodes) {
                             if (elem.tagName === "BR") continue;
                             let line = elem.textContent.trim();
                             if (line === "") continue;
@@ -5363,7 +5547,7 @@ class demawiRepository {
                     }
                     case "Anwendungen insgesamt": {
                         const value = tr.children[1].textContent.trim();
-                        if(value !== "unbegrenzt") {
+                        if (value !== "unbegrenzt") {
                             data.isVG = true;
                             data.anw = data.anw || {};
                             data.anw.dungeon = Number(value);
@@ -5372,7 +5556,7 @@ class demawiRepository {
                     }
                     case "Anwendungen pro Dungeon": {
                         const value = tr.children[1].textContent.trim();
-                        if(value !== "unbegrenzt") {
+                        if (value !== "unbegrenzt") {
                             data.anw = data.anw || {};
                             data.anw.dungeon = Number(value);
                         }
@@ -5380,7 +5564,7 @@ class demawiRepository {
                     }
                     case "Anwendungen pro Kampf": {
                         const value = tr.children[1].textContent.trim();
-                        if(value !== "unbegrenzt") {
+                        if (value !== "unbegrenzt") {
                             data.anw = data.anw || {};
                             data.anw.kampf = Number(value);
                         }
@@ -5557,7 +5741,9 @@ class demawiRepository {
     }
 
     static startMod(zusatz) {
-        console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (zusatz ? " " + zusatz : ""), GM.info);
+        if (!window.location.href.includes("silent=true")) {
+            console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + ")" + (zusatz ? " " + zusatz : ""), GM.info);
+        }
     }
 
     static getModName() {

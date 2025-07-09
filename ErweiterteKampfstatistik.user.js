@@ -438,10 +438,12 @@
             }
 
             for (const levelData of levelDatas) {
-                copyOver(levelData.skills, missingSkillInfos.skills);
-                copyOver(levelData.noskills, missingSkillInfos.noskills);
+                const missingSkillInfosFromLevel = levelData && levelData.missingSkillInfos;
+                if (missingSkillInfosFromLevel) {
+                    copyOver(missingSkillInfosFromLevel.skills, missingSkillInfos.skills);
+                    copyOver(missingSkillInfosFromLevel.noskills, missingSkillInfos.noskills);
+                }
             }
-
             if (Object.keys(missingSkillInfos.skills).length === 0 && Object.keys(missingSkillInfos.noskills).length === 0) return;
             let count = 0;
             const userInfoPanel = document.createElement("div");
@@ -1064,7 +1066,7 @@
                                             fromMe: wantHeroes === !!curAction.unit.id.isHero,
                                             atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
                                             fromGroup: wantHeroes === !!curAction.unit.id.isHero,
-                                            atGroup: wantHeroes === !!util.arraySearch(action.targets, target => _ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            atGroup: wantHeroes === !!util.arraySearch(action.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
                                             cmp: "nxt", // nur fürs debugging
                                         }
                                     }

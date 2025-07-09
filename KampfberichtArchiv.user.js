@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.12.0.9
+// @version        0.13.0.0
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -38,6 +38,7 @@
         WoDParser: demawiRepository.import("WoDParser"),
         WoDLootDb: demawiRepository.import("WoDLootDb"),
         WoDSkillsDb: demawiRepository.import("WoDSkillsDb"),
+        WoDLocationDb: demawiRepository.import("WoDLocationDb"),
         util: demawiRepository.import("util"),
         UI: demawiRepository.import("UI"),
         File: demawiRepository.import("File"),
@@ -244,7 +245,7 @@
     }
 
     class FilterQuery {
-        static FAVORIT_MANUELL = "Manuell";
+        static FAVORIT_MANUELL = "Vom Benutzer";
         static FAVORIT_AUTO_ALL = "Auto (gruppenübergreifend)";
         static FAVORIT_AUTO_GROUP = "Auto (Je Gruppe)";
 
@@ -510,7 +511,7 @@
                 if (!dungeonStat) {
                     dungeonStat = {space: 0};
                     dungeonStats[locName] = dungeonStat;
-                    const location = await MyStorage.location.getValue(locName);
+                    const location = await _.WoDStorages.getLocationDb().getValue(locName);
                     dungeonStat.versions = location && location.versions ? Object.keys(location.versions).length : 0;
                 }
                 if (report.srcs) {
@@ -606,16 +607,11 @@
                 if (!reportId) continue;
                 let reportMeta = await reportDBMeta.getValue(reportId);
                 if (!isArchiv && !reportMeta) {
-                    reportMeta = {
-                        reportId: reportId,
-                        loc: {
-                            name: curTR.children[1].textContent.trim(),
-                        },
-                        ts: _.WoD.getTimestampFromString(curTR.children[0].textContent.trim()) / 60000,
-                        gruppe: _.WoD.getMyGroupName(),
-                        gruppe_id: _.WoD.getMyGroupId(),
-                        world: _.WoD.getMyWorld(),
-                    }
+                    reportMeta = Report.createNewReportEntry(reportId, curTR.children[1].textContent.trim(),
+                        _.WoD.getMyGroupName(),
+                        _.WoD.getMyGroupId(),
+                        _.WoD.getMyWorld(),
+                        _.WoD.getTimestampFromString(curTR.children[0].textContent.trim()) / 60000)
                     await MyStorage.reportArchive.setValue(reportMeta);
                 }
                 await DungeonAuswahl.addDungeonStats(curTR.children[1], reportMeta.loc.name);
@@ -1321,21 +1317,25 @@
 
     class Ausruestung {
         static async start() {
-            const naechsterDungeonName = _.WoDParser.getNaechsterDungeonName();
+            let naechsterDungeonName = _.WoDParser.getNaechsterDungeonName();
             if (!naechsterDungeonName) return;
             // const ausruestungsTabelleKomplett = document.querySelectorAll("table:has(table #ausruestungstabelle_0):not(table:has(table table #ausruestungstabelle_0))")[0];
             const ausruestungsTabelle = document.querySelector("#ausruestungstabelle_2").parentElement.parentElement;
 
             let items;
+            let locVersion;
             await MyStorage.reportArchive.getAll({
                 index: ["loc.name"],
                 keyMatch: [naechsterDungeonName],
                 order: "prev",
                 batchSize: 10,
-            }, async item => {
-                items = await MyStorage.reportArchiveItems.getValue(item.reportId);
+            }, async report => {
+                locVersion = report.loc.v;
+                items = await MyStorage.reportArchiveItems.getValue(report.reportId);
                 if (items) return false; // quit iteration
             })
+
+            naechsterDungeonName = _.WoDLocationDb.getFullLocName(naechsterDungeonName, locVersion) || naechsterDungeonName;
 
             if (!items) return;
             const myHeroId = _.WoD.getMyHeroId();
@@ -1362,7 +1362,7 @@
                 }
             }
             if (genutzteGegenstaende.length === 0) genutzteGegenstaende.push([undefined, "Es wurde nichts verbraucht"]);
-            const table = _.UI.createContentTable(genutzteGegenstaende, ["#", "Beim letzten Besuch in diesem Dungeons verbraucht"]);
+            const table = _.UI.createContentTable(genutzteGegenstaende, ["#", "Verbrauch beim letzten Mal ("+naechsterDungeonName+")"]);
             table.classList.add("nowod");
             //ausruestungsTabelleKomplett.parentElement.insertBefore(table, ausruestungsTabelleKomplett);
             ausruestungsTabelle.append(table);
@@ -1384,7 +1384,7 @@
                 await this.addDungeonStats(tr.children[1], dungeonName);
                 const dungeonId = tr.querySelector("div[id^='CombatDungeonConfigSelector']").id.split("|")[1]
                 //console.log("Zuweisung: " + dungeonName + " => " + dungeonId);
-                await Location.reportLocationId(dungeonName, dungeonId);
+                await _.WoDLocationDb.reportLocationId(dungeonName, dungeonId);
             }
         }
 
@@ -1445,7 +1445,7 @@
                 if (dungeonName) {
                     const questName = document.querySelector("h1").textContent.substring(6).trim();
                     console.log("Elem: '" + questName + ": " + dungeonName + "' => " + dungeonId, dungeonSelector, elem);
-                    await Location.reportLocationId(dungeonName, dungeonId, questName);
+                    await _.WoDLocationDb.reportLocationId(dungeonName, dungeonId, questName);
                 }
             }
         }
@@ -1497,7 +1497,8 @@
                 const matcher = key.match(/^(\D+)(\d+)[|]?.*$/);
                 const world = matcher[1];
                 const ts = Number(matcher[2]) * 60000; // Timestamp ist in Minuten gespeichert
-                content.push([value.loc, ts, value.quelle ? value.quelle : {
+                const fullLocName = await _.WoDLocationDb.getFullLocName(value.loc, value.locv);
+                content.push([fullLocName, ts, value.quelle ? value.quelle : {
                     data: "-",
                     style: "text-align:center;"
                 }, value.stufe ? {
@@ -2357,9 +2358,24 @@
 
     class Report {
 
+        static createNewReportEntry(reportId, locName, gruppe, gruppe_id, world, ts) {
+            return {
+                reportId: reportId,
+                loc: {
+                    name: locName,
+                },
+                ts: ts,
+                gruppe: gruppe,
+                gruppe_id: gruppe_id,
+                world: world,
+                fav: {none: 1},
+            }
+        }
+
         static addFavorit(report, tagName) {
             if (!report.fav) report.fav = {};
             report.fav[tagName] = 1;
+            delete report.fav.none;
         }
 
         static deleteFavorit(report, tagName) {
@@ -2742,31 +2758,8 @@
 
     class Location {
 
-        static async reportLocationId(dungeonName, dungeonId, questName) {
-            let location = await MyStorage.location.getValue(dungeonName);
-            if (!location) location = this.createLocation(dungeonName);
-            if (!location.id) {
-                location.id = dungeonId;
-                if (questName) location.quest = questName;
-                await MyStorage.location.setValue(location);
-            }
-        }
-
-        static createLocation(locationName) {
-            return {
-                name: locationName,
-                versions: [],
-            }
-        }
-
-        static async getVersionCount(locationName) {
-            const location = await MyStorage.location.getValue(locationName);
-            if (!location || !location.versions) return 0;
-            return Object.keys(location.versions).length;
-        }
-
         static async hasMoreThanOneVersion(report) {
-            return await this.getVersionCount(report.loc.name) > 1;
+            return await _.WoDLocationDb.hasMoreThanOneVersion(report.loc.name);
         }
 
         /**
@@ -2833,7 +2826,7 @@
             let isComplete;
 
             if (loc.v_) { // Vorläufige Versionszweisung prüfen ob sie noch aktuell sein kann. Ist sie sofern keine weitere Version hinzugefügt wurde
-                const versionCount = await Location.getVersionCount(loc.name);
+                const versionCount = await _.WoDLocationDb.getVersionCount(loc.name);
                 if (loc.v_.cnt === versionCount) return loc.v_.vs; // es ist keine weitere Version hinzugekommen
                 versionId = loc.v_.vId;
                 isComplete = false;
@@ -2852,7 +2845,7 @@
                 delete loc.v_;
                 await MyStorage.reportArchive.setValue(report);
             } else {
-                const versionCount = await Location.getVersionCount(loc.name);
+                const versionCount = await _.WoDLocationDb.getVersionCount(loc.name);
                 /**
                  * Sollten neue Versionen hinzugefügt werden, muss anhand der versionId erneut gesucht werden.
                  */
@@ -2867,9 +2860,10 @@
         }
 
         static async getMatchingVersions(locationName, versionId) {
+            const locationDB = _.WoDStorages.getLocationDb();
             const debug = locationName === "aAtreanijsh";
             const flexibleLength = locationName === "Atreanijsh";
-            const location = await MyStorage.location.getValue(locationName) || this.createLocation(locationName);
+            const location = await locationDB.getValue(locationName) || this.createLocation(locationName);
             const versions = location.versions || (location.versions = []);
             const result = [];
             let needUpdate = false;
@@ -2878,12 +2872,12 @@
                 result.push(curMatchingIndex + 1);
             }
             if (result.length > 0) {
-                if (needUpdate) await MyStorage.location.setValue(location);
+                if (needUpdate) await locationDB.setValue(location);
                 return result;
             }
             // keine Version gefunden wir legen eine neue an
             versions.push(versionId);
-            await MyStorage.location.setValue(location);
+            await locationDB.setValue(location);
             return [versions.length];
         }
 
@@ -3160,10 +3154,6 @@
              * Quell-Dateien der Kampfberichte
              */
             this.reportArchiveSources = indexedDb.createObjectStorage("reportArchiveSources", "reportId");
-            /**
-             * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
-             */
-            this.location = indexedDb.createObjectStorage("location", "name");
 
             this.itemLoot = indexedDb.createObjectStorage("itemLoot", "id");
             this.item = indexedDb.createObjectStorage("item", "id");

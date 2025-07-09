@@ -21,7 +21,7 @@
     const _ = {
         Storages: demawiRepository.import("Storages"),
         WoDStorages: demawiRepository.import("WoDStorages"),
-        WoDItemDb:  demawiRepository.import("WoDItemDb"),
+        WoDItemDb: demawiRepository.import("WoDItemDb"),
         WoDLootDb: demawiRepository.import("WoDLootDb"),
         BBCodeExporter: demawiRepository.import("BBCodeExporter"),
         File: demawiRepository.import("File"),
@@ -62,7 +62,7 @@
             const item = await this.findNext();
             if (item) {
                 const iframe = document.createElement("iframe");
-                iframe.src = _.WoD.getItemUrl(item.name);
+                iframe.src = _.WoD.getItemUrl(item.name)+"&silent=true";
                 iframe.style.display = "none";
                 document.body.append(iframe);
             }
@@ -77,19 +77,23 @@
                 }
             }
 
+            const myWorldId = _.WoD.getMyWorld();
+            const _this = this;
             let result;
             // Es ist wahrscheinlicher solche Einträge bei Neueinträgen zu finden
             await MyStorage.getItemSourceDB().getAll({
                 index: "ts",
                 order: "prev",
             }, function (sourceItem) {
-                if (!sourceItem.invalid && !sourceItem.details) {
+                if (!sourceItem.src && _.WoDItemDb.couldBeValid(sourceItem, myWorldId)) {
                     result = sourceItem;
                     return false;
                 }
             });
             return result;
         }
+
+
     }
 
     // Überprüft auf einer Webseite die Gegenstandslinks und fügt den Namen bei Bedarf der ItemDB hinzu.
@@ -124,12 +128,13 @@
                 observer.disconnect();
                 const allHrefs = document.querySelectorAll("a");
                 var missingItemsFound = 0;
+                const myWorldId = _.WoD.getMyWorld();
                 await _.util.forEachSafe(allHrefs, async itemLinkElement => {
                     const itemName = _.ItemParser.getItemNameFromElement(itemLinkElement);
                     if (!itemName) return;
                     const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
-                    if (sourceItem && sourceItem.invalid) return;
-                    if (!sourceItem || !sourceItem.details) missingItemsFound++;
+                    if(sourceItem && !_.WoDItemDb.couldBeValid(sourceItem, myWorldId)) return;
+                    if (!sourceItem || !sourceItem.src) missingItemsFound++;
                     await MyStorage.indexItem(itemName, itemLinkElement, sourceItem);
                 });
                 missingSpanOverall.innerHTML = missingItemsFound + "�";
@@ -181,16 +186,12 @@
                 searchContainerTitle.append(toBBCodeButton);
 
                 async function updateMissingButton() {
-                    const allItems = await MyStorage.getItemSourceDB().getAll();
-                    var itemsToLoad = 0;
-                    var allItemCount = 0;
-                    for (const item of allItems) {
-                        if (item.invalid) continue;
-                        if (!item.details || item.irregular) {
-                            itemsToLoad++;
-                        }
-                        allItemCount++;
-                    }
+                    const allItemCount = await MyStorage.getItemSourceDB().count();
+                    const myWorld = _.WoD.getMyWorld();
+                    const itemsToLoad = await MyStorage.getItemSourceDB().count({
+                        index: ["nodata", "world." + myWorld + ".valid"],
+                        keyMatch: [_.Storages.MATCHER.NUMBER.ANY, 1], // still valid but not loaded yet
+                    });
                     missingSearchLabel.innerText = "Fehlend [" + itemsToLoad + "/" + allItemCount + "]";
                 }
 
@@ -282,7 +283,7 @@
                     const itemResult = Array();
                     for (const item of items) {
                         if (item.invalid) continue;
-                        if (missingSearch.checked && !item.details || missingSearch.checked && item.details && item.irregular || itemDBSearch.checked && item.data && ItemSearch.matches(item)) {
+                        if (missingSearch.checked && !item.src || missingSearch.checked && item.src && item.irregular || itemDBSearch.checked && item.data && ItemSearch.matches(item)) {
                             itemResult.push(item);
                         }
                     }
@@ -400,9 +401,9 @@
                 toHTML: function (obj) {
                     if (obj.typ === "alle") return "alle";
                     if (obj.typ === "nur") {
-                        return obj.def.map(a => ItemSearch.SearchDomains.KLASSEN[a]).join(", ");
+                        return obj.def.map(a => _.WoD.KLASSEN[a]).join(", ");
                     }
-                    return Object.keys(ItemSearch.SearchDomains.KLASSEN).filter(a => !obj.def.includes(a)).map(a => ItemSearch.SearchDomains.KLASSEN[a]).join(", ");
+                    return Object.keys(_.WoD.KLASSEN).filter(a => !obj.def.includes(a)).map(a => _.WoD.KLASSEN[a]).join(", ");
                 }
             }
             static "Stufe" = {
@@ -684,7 +685,7 @@
 
         static SuchKriterien = class SuchKriterien {
             static "Klasse" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...Object.keys(ItemSearch.SearchDomains.KLASSEN)]);
+                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...Object.keys(_.WoD.KLASSEN)]);
                 container.append(select1);
                 return {
                     matches: function (item) {
@@ -1005,27 +1006,7 @@
                     this.TALENTKLASSEN = WoD.getAuswahlliste("item_?any_skillclass");
                 }
             }
-
-            static KLASSEN = {
-                "Barbar": "Bb",
-                "Barde": "Bd",
-                "Dieb": "Di",
-                "Gaukler": "Ga",
-                "Gelehrter": "Ge",
-                "Gestaltwandler": "Gw",
-                "Gladiator": "Gl",
-                "Hasardeur": "Ha",
-                "Jäger": "Jä",
-                "Klingenmagier": "Km",
-                "Magier": "Ma",
-                "Mönch": "Mö",
-                "Paladin": "Pa",
-                "Priester": "Pr",
-                "Quacksalber": "Qu",
-                "Ritter": "Ri",
-                "Schamane": "Sm",
-                "Schütze": "Sü",
-            }
+            
             static SCHADENSBONITYP = ["Alle Trigger: (a) egal, kein (z)", "Trigger-Additiv: kein (a), kein (z)", "Trigger-Anwendung: (a), kein (z)", "Anwendung: (a), (z) egal", "Anwendung: (a), (z)", "Additiv: kein (a), (z) egal", "Additiv: (a) egal, (z)", "Additiv: kein (a), (z)"];
             static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle entschärfen"];
             static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen", "Hinterhalt"];
@@ -1269,11 +1250,12 @@
         }
 
         static async indexItem(itemName, itemA, sourceItem) {
-            const missingMeElement = itemA.parentElement.querySelector(".missingMe");
-            if (!sourceItem || !sourceItem.details) {
+            const missingMeElement = itemA.parentElement.className === "missingWrapper" && itemA.parentElement.querySelector(".missingMe");
+            if (!sourceItem || !sourceItem.src) {
                 if (!missingMeElement) {
                     if (!itemA.parentElement.classList.contains("missingWrapper")) {
-                        const missingWrapper = document.createElement("span");
+                        const missingWrapper = document.createElement("div");
+                        missingWrapper.style.display = "inline";
                         missingWrapper.className = "missingWrapper";
                         itemA.parentElement.insertBefore(missingWrapper, itemA);
                         missingWrapper.append(itemA);
@@ -1290,8 +1272,9 @@
                     }
                     missingSpan.classList.add("nowod");
                     missingSpan.style.color = "red";
-                    missingSpan.innerHTML = "�";
+                    missingSpan.innerHTML = _.UI.SIGNS.MISSING;
                     missingSpan.className = "missingMe";
+                    missingSpan.title = "Gegenstand ist der Item-Datenbank noch nicht bekannt!";
                     itemA.parentElement.append(missingSpan);
                 }
             } else {
