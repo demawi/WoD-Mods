@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.13.0.1
+// @version        0.13.0.2
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -211,7 +211,7 @@
                         reportMeta.success = successReport;
                     }
                     if (!reportMeta.success.levels) reportMeta.success.levels = {};
-                    reportMeta.success.levels[1] = navigationLevels.children.length - 1;
+                    reportMeta.success.levels[1] = navigationLevels.querySelectorAll("input").length;
                 }
                 if (!reportSource.levels) reportSource.levels = [];
                 if (!reportMeta.srcs.levels) reportMeta.srcs.levels = [];

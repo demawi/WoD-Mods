@@ -3,7 +3,7 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.21.0.3
+// @version        0.21.0.4
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
@@ -204,7 +204,7 @@
             } else { // Dungeon
                 levelNr = container.getElementsByName("current_level")[0].value;
                 let navigationBar = container.getElementsByClassName("navigation levels")[0];
-                if (navigationBar) report.levelCount = navigationBar.children.length - 1;
+                if (navigationBar) report.levelCount = navigationBar.querySelectorAll("input").length;
             }
             console.log("Read Kampfbericht: " + reportId + " lvl" + levelNr);
             const [levelData, errors] = await _.ReportParser.parseKampfbericht(container, true);
