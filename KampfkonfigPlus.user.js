@@ -19,11 +19,7 @@
 (function () {
     'use strict';
 
-    const _WoD = demawiRepository.import("WoD");
-    const _File = demawiRepository.import("File");
-    const _JSON2 = demawiRepository.import("JSON2");
-    const _util = demawiRepository.import("util");
-    const _UI = demawiRepository.import("UI");
+    const _ = demawiRepository;
 
     class Mod {
         static dbname = "wodDB";
@@ -56,13 +52,13 @@
         }
 
         static async importKonfig() {
-            const data = await _File.createUploadForRead();
+            const data = await _.File.createUploadForRead();
             const objectFactory = {
                 // WoDSkill und WoItem werden vollständig aus dem WodEnvironment geholt
                 "WodSkill": object => this.getSkillReferenceLookup(object, objectFactory),
                 "WodItem": object => this.getItemReferenceLookup(object, objectFactory)
             };
-            const newCfg = _JSON2.parse(data, objectFactory);
+            const newCfg = _.JSON2.parse(data, objectFactory);
             console.log("Config geladen: ", newCfg);
             this.refreshView(newCfg);
         }
@@ -125,7 +121,7 @@
         static exportKonfig(profileName) {
             const result = this.getWodConfig();
             console.log("Konfig exportiert: ", result);
-            const resultStr = _JSON2.stringify(result, object => {
+            const resultStr = _.JSON2.stringify(result, object => {
                 // in dem WodSkill-Objekt werden auch alle Items aufgelistet die damit verwendet werden können
                 // diese wollen wir hier nicht speichern. Diese werden beim Import wieder aus dem aktuellen Ausrüstungsstand geladen.
                 if (object && object.constructor && object.constructor.name === "WodSkill") {

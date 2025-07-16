@@ -23,21 +23,7 @@
 (function () {
     'use strict';
 
-    const _ = {
-        Storages: demawiRepository.import("Storages"),
-        WoDStorages: demawiRepository.import("WoDStorages"),
-        WoDSkillsDb: demawiRepository.import("WoDSkillsDb"),
-        BBCodeExporter: demawiRepository.import("BBCodeExporter"),
-        WoD: demawiRepository.import("WoD"),
-        WoDParser: demawiRepository.import("WoDParser"),
-        ReportParser: demawiRepository.import("ReportParser"),
-        util: demawiRepository.import("util"),
-        Libs: demawiRepository.import("Libs"),
-        UI: demawiRepository.import("UI"),
-        Dices: demawiRepository.import("Dices"),
-        CSProxy: demawiRepository.import("CSProxy"),
-        Settings: demawiRepository.import("Settings"),
-    }
+    const _ = demawiRepository;
 
     class Mod {
         static modname = "KampfberichtStatistiken";

@@ -18,19 +18,7 @@
 (function () {
     'use strict';
 
-    const _ = {
-        Storages: demawiRepository.import("Storages"),
-        WoDStorages: demawiRepository.import("WoDStorages"),
-        WoDItemDb: demawiRepository.import("WoDItemDb"),
-        WoDLootDb: demawiRepository.import("WoDLootDb"),
-        BBCodeExporter: demawiRepository.import("BBCodeExporter"),
-        File: demawiRepository.import("File"),
-        WoD: demawiRepository.import("WoD"),
-        util: demawiRepository.import("util"),
-        UI: demawiRepository.import("UI"),
-        ItemParser: demawiRepository.import("ItemParser"),
-        CSProxy: demawiRepository.import("CSProxy"),
-    }
+    const _ = demawiRepository;
 
 
     class Mod {
@@ -41,6 +29,33 @@
             const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
             if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
+
+            if (false) {
+                console.log("YYYYYYYYY")
+                await MyStorage.getItemSourceDB().getAll(false, async function (itemSource) {
+                    const newItemIndex = {
+                        id: itemSource.id,
+                        name: itemSource.name, // ggf. vorläufiger Name
+                        data: itemSource.src ? 1 : 0,
+                        world: itemSource.world,
+                        ts: itemSource.ts,
+                    }
+                    await MyStorage.getItemIndexDB().setValue(newItemIndex);
+                });
+                console.log("ZZZZZZZZZZZ")
+            }
+
+            if (false) {
+                await MyStorage.getItemIndexDB().getAll(false, async function (itemIndex) {
+                    if (!_.WoDItemDb.isValidItemName(itemIndex.name)) {
+                        console.log("Not valid itemName", itemIndex.name);
+                        const id = itemIndex.id;
+                        await MyStorage.getItemIndexDB().deleteValue(id);
+                        await MyStorage.getItemSourceDB().deleteValue(id);
+                        await MyStorage.getItemDB().deleteValue(id);
+                    }
+                });
+            }
 
             await demawiRepository.startMod();
             await MyStorage.init();
@@ -53,40 +68,37 @@
             if (page === "items.php" || page === "trade.php") await ItemSearchUI.start();
 
             // Links zu Items finden und markieren. Nahezu überall.
-            if (page !== "item.php") await ItemTracking.start();
+            if (page !== "item.php") {
+                await ItemTracking.start();
+                await ItemAutoLoader.start();
+            }
+
         }
     }
 
     class ItemAutoLoader {
         static async start() {
+            if (window.opener) return;
             const item = await this.findNext();
             if (item) {
                 const iframe = document.createElement("iframe");
-                iframe.src = _.WoD.getItemUrl(item.name)+"&silent=true";
+                iframe.src = _.WoD.getItemUrl(item.name) + "&silent=true";
                 iframe.style.display = "none";
                 document.body.append(iframe);
             }
         }
 
         static async findNext() {
-            if (false) for (const curKey of await MyStorage.getItemSourceDB().getMissingEntries("ts")) {
-                const cur = await MyStorage.getItemSourceDB().getValue(curKey);
-                if (!cur.ts) {
-                    cur.ts = new Date().getTime();
-                    await MyStorage.getItemSourceDB().setValue(cur);
-                }
-            }
-
             const myWorldId = _.WoD.getMyWorld();
-            const _this = this;
             let result;
             // Es ist wahrscheinlicher solche Einträge bei Neueinträgen zu finden
-            await MyStorage.getItemSourceDB().getAll({
-                index: "ts",
+            await MyStorage.getItemIndexDB().getAll({
+                index: ["data", "world." + myWorldId + ".valid", "ts"],
+                keyMatch: [0, 1, _.Storages.MATCHER.NUMBER.ANY],
                 order: "prev",
-            }, function (sourceItem) {
-                if (!sourceItem.src && _.WoDItemDb.couldBeValid(sourceItem, myWorldId)) {
-                    result = sourceItem;
+            }, function (itemIndex) {
+                if (_.WoDItemDb.couldBeValid(itemIndex, myWorldId)) {
+                    result = itemIndex;
                     return false;
                 }
             });
@@ -130,12 +142,12 @@
                 var missingItemsFound = 0;
                 const myWorldId = _.WoD.getMyWorld();
                 await _.util.forEachSafe(allHrefs, async itemLinkElement => {
-                    const itemName = _.ItemParser.getItemNameFromElement(itemLinkElement);
+                    const [itemName] = _.ItemParser.getItemNameFromElement(itemLinkElement);
                     if (!itemName) return;
-                    const sourceItem = await MyStorage.getItemSourceDB().getValue(itemName);
-                    if(sourceItem && !_.WoDItemDb.couldBeValid(sourceItem, myWorldId)) return;
-                    if (!sourceItem || !sourceItem.src) missingItemsFound++;
-                    await MyStorage.indexItem(itemName, itemLinkElement, sourceItem);
+                    const itemIndex = await MyStorage.getItemIndexDB().getValue(itemName);
+                    if (itemIndex && !_.WoDItemDb.couldBeValid(itemIndex, myWorldId)) return;
+                    if (!itemIndex || !itemIndex.data) missingItemsFound++;
+                    await MyStorage.indexItem(itemName, itemLinkElement, itemIndex);
                 });
                 missingSpanOverall.innerHTML = missingItemsFound + "�";
                 if (missingItemsFound === 0) {
@@ -161,7 +173,6 @@
             }, 1000);
             await checkSiteForItems();
 
-            ItemAutoLoader.start();
         }
     }
 
@@ -186,13 +197,23 @@
                 searchContainerTitle.append(toBBCodeButton);
 
                 async function updateMissingButton() {
-                    const allItemCount = await MyStorage.getItemSourceDB().count();
+                    const allItemCount = await MyStorage.getItemIndexDB().count();
                     const myWorld = _.WoD.getMyWorld();
-                    const itemsToLoad = await MyStorage.getItemSourceDB().count({
-                        index: ["nodata", "world." + myWorld + ".valid"],
-                        keyMatch: [_.Storages.MATCHER.NUMBER.ANY, 1], // still valid but not loaded yet
+                    const itemsToLoadValidsValids = await MyStorage.getItemIndexDB().count({
+                        index: ["data", "world." + myWorld + ".valid"],
+                        keyMatch: [0, 1], // still valid for this world but not loaded yet
                     });
-                    missingSearchLabel.innerText = "Fehlend [" + itemsToLoad + "/" + allItemCount + "]";
+                    const itemsToLoadNonValids = await MyStorage.getItemIndexDB().count({
+                        index: ["data", "world." + myWorld + ".valid"],
+                        keyMatch: [0, 0], // still valid for this world but not loaded yet
+                    });
+                    const itemDataCount = await MyStorage.getItemIndexDB().count({
+                        index: ["data"],
+                    });
+                    if (allItemCount - itemDataCount !== 0) console.error("ItemIndizes besitzen kein 'data'-flag!");
+                    const notInWorldIndex = (allItemCount - itemsToLoadValidsValids - itemsToLoadNonValids);
+                    //console.log("AAA", allItemCount, itemsToLoadValidsValids, itemsToLoadNonValids, notInWorldIndex, itemDataCount);
+                    missingSearchLabel.innerText = "Fehlend [" + (allItemCount - notInWorldIndex - itemsToLoadNonValids) + "/" + allItemCount + "]";
                 }
 
                 updateMissingButton(); // kein await benötigt
@@ -272,18 +293,20 @@
                 }
 
                 var sortOrderColumnDef;
+                const myWorld = _.WoD.getMyWorld();
 
                 async function getItemResult() {
                     var items;
-                    if (itemDBSearch.checked) {
+                    const search4Items = itemDBSearch.checked;
+                    if (search4Items) {
                         items = await MyStorage.getItemDB().getAll();
                     } else {
-                        items = await MyStorage.getItemSourceDB().getAll();
+                        items = await MyStorage.getItemIndexDB().getAll();
                     }
                     const itemResult = Array();
                     for (const item of items) {
-                        if (item.invalid) continue;
-                        if (missingSearch.checked && !item.src || missingSearch.checked && item.src && item.irregular || itemDBSearch.checked && item.data && ItemSearch.matches(item)) {
+                        if (!search4Items && !_.WoDItemDb.couldBeValid(item, myWorld)) continue;
+                        if (missingSearch.checked && !item.data || search4Items && item.data && ItemSearch.matches(item)) {
                             itemResult.push(item);
                         }
                     }
@@ -1006,7 +1029,7 @@
                     this.TALENTKLASSEN = WoD.getAuswahlliste("item_?any_skillclass");
                 }
             }
-            
+
             static SCHADENSBONITYP = ["Alle Trigger: (a) egal, kein (z)", "Trigger-Additiv: kein (a), kein (z)", "Trigger-Anwendung: (a), kein (z)", "Anwendung: (a), (z) egal", "Anwendung: (a), (z)", "Additiv: kein (a), (z) egal", "Additiv: (a) egal, (z)", "Additiv: kein (a), (z)"];
             static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle entschärfen"];
             static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen", "Hinterhalt"];
@@ -1224,8 +1247,13 @@
             }
             this.item = adjust(this.indexedDb.createObjectStorage("item", "id"));
             this.itemSources = adjust(this.indexedDb.createObjectStorage("itemSources", "id"));
+            this.itemIndex = adjust(this.indexedDb.createObjectStorage("itemIndex", "id"));
         }
 
+
+        static getItemIndexDB() {
+            return this.itemIndex;
+        }
 
         static getItemSourceDB() {
             return this.itemSources;
@@ -1249,9 +1277,9 @@
             return result;
         }
 
-        static async indexItem(itemName, itemA, sourceItem) {
+        static async indexItem(itemName, itemA, itemIndex) {
             const missingMeElement = itemA.parentElement.className === "missingWrapper" && itemA.parentElement.querySelector(".missingMe");
-            if (!sourceItem || !sourceItem.src) {
+            if (!itemIndex || !itemIndex.data) {
                 if (!missingMeElement) {
                     if (!itemA.parentElement.classList.contains("missingWrapper")) {
                         const missingWrapper = document.createElement("div");
@@ -1272,6 +1300,8 @@
                     }
                     missingSpan.classList.add("nowod");
                     missingSpan.style.color = "red";
+                    missingSpan.style.fontSize = "0.9em";
+                    missingSpan.style.marginLeft = "3px";
                     missingSpan.innerHTML = _.UI.SIGNS.MISSING;
                     missingSpan.className = "missingMe";
                     missingSpan.title = "Gegenstand ist der Item-Datenbank noch nicht bekannt!";
@@ -1282,9 +1312,9 @@
                     itemA.parentElement.removeChild(missingMeElement);
                 }
             }
-            if (!sourceItem) {
+            if (!itemIndex) {
                 const newItem = _.WoDItemDb.createItem(itemName);
-                await this.itemSources.setValue(newItem);
+                await this.itemIndex.setValue(newItem);
             }
         }
     }

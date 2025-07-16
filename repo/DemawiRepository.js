@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.0.5.2";
+    static version = "1.0.5.5";
 
     /**
      * Indexed-DB Framework.
@@ -926,7 +926,9 @@ class demawiRepository {
 
                 static async getOptionalKeyRange(objectStorage, target, query) {
                     let keyRange;
-                    if (query.keyMatch || query.keyMatchAfter || query.keyMatchBefore) keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchAfter, query.keyMatchBefore, query.keyMatchAfterOpen, query.keyMatchBeforeOpen);
+                    if (query.keyMatch || query.keyMatchAfter || query.keyMatchBefore) {
+                        keyRange = await this.#getQueryKeyRange(objectStorage, target, query, query.keyMatch, query.keyMatchAfter, query.keyMatchBefore, query.keyMatchAfterOpen, query.keyMatchBeforeOpen);
+                    }
                     return keyRange;
                 }
 
@@ -971,16 +973,16 @@ class demawiRepository {
                         const keyRange = await this.getOptionalKeyRange(objectStorage, target, query);
                         if (iterationOpt && isGetAllKeys) { // Wird aktuell immer komplett abgefragt
                             if (query.order) throw new Error("getAllKeys wird aktuell nicht mit 'query.order' unterstützt!");
-                            if (query.debug) console.log("SearchType: " + retrieveFnName, target.keyPath, keyRange, _.util.cloneObject(query));
+                            if (query.debug) console.log("SearchType: " + retrieveFnName, _.util.cloneObject(query), target, keyRange);
                             resultPromise = this.awaitRequest(target[retrieveFnName](keyRange));
                         } else if (iterationOpt) {
-                            if (query.debug) console.log("SearchType: openCursorIteration", target.keyPath, keyRange, _.util.cloneObject(query));
-                            resultPromise = this.#openCursorIteration(target.openCursor(keyRange, query.order), iterationOpt, query.limit, retrieveFnName);
+                            if (query.debug) console.log("SearchType: openCursorIteration", _.util.cloneObject(query), target, keyRange);
+                            resultPromise = this.#openCursorIteration(target.openCursor(keyRange, query.order), iterationOpt, query.limit, retrieveFnName, keyRange, query);
                         } else if (query.order) {
-                            if (query.debug) console.log("SearchType: openCursor", target.keyPath, keyRange, _.util.cloneObject(query));
-                            resultPromise = this.#openCursorFetch(target.openCursor(keyRange, query.order), query.limit, retrieveFnName);
+                            if (query.debug) console.log("SearchType: openCursor", _.util.cloneObject(query), target, keyRange);
+                            resultPromise = this.#openCursorFetch(target.openCursor(keyRange, query.order), query.limit, retrieveFnName, keyRange, query);
                         } else {
-                            if (query.debug) console.log("SearchType: " + retrieveFnName, target.keyPath, keyRange, _.util.cloneObject(query));
+                            if (query.debug) console.log("SearchType: " + retrieveFnName, _.util.cloneObject(query), target, keyRange);
                             resultPromise = this.awaitRequest(target[retrieveFnName](keyRange, query.limit));
                         }
                     }
@@ -1007,6 +1009,12 @@ class demawiRepository {
                  * Ersetzt potenzielle Wildcards durch minimals/maximalst mögliche (String-/Number-) Werte und liefert eine {IDBKeyRange}-Definition zurück.
                  * keyRangeSingle muss alleine angegeben werden. Ansonsten können keyRangeFromOpt und keyRangeToOpt zusammen oder nur einer von beiden angegeben werden.
                  * @returns {IDBKeyRange}
+                 *
+                 * Key-Match-Regeln zur Optimierung:
+                 * 1. Feste Werte (lower-Wert=upper-Wert) sollten immer an den Anfang des keyMatch-Arrays.
+                 * 2. Danach folgt, das was weiter am meisten den Suchbereich einschränkt. (Ausser wir wollen anders sortieren)
+                 * 3. Erst möglichst spät die Wildcards. (Ausser wir wollen anders sortieren)
+                 * Bzgl. Optimierung und Suchreihenfolge muss ggf. abgewägt werden.
                  */
                 static async #getQueryKeyRange(objectStorage, target, query, keyMatch, keyMatchAfter, keyMatchBefore, keyMatchAfterOpen, keyMatchBeforeOpen) {
                     if (query.keyMatch instanceof IDBKeyRange) return keyMatch;
@@ -1030,7 +1038,7 @@ class demawiRepository {
                         for (let i = 0, l = (keyMatchAfter || keyMatchBefore).length; i < l; i++) {
                             const low = keyMatchAfter && keyMatchAfter[i];
                             const high = keyMatchBefore && keyMatchBefore[i];
-                            if (low) {
+                            if (low !== undefined) {
                                 if (typeof low !== "object") {
                                     lowerBound.push(low);
                                 } else if (this.#checkWildcard(low, _.Storages.MATCHER.NUMBER.ANY)) {
@@ -1041,7 +1049,7 @@ class demawiRepository {
                                     throw new Error("Wert kann nicht in eine KeyRange aufelöst werden ", low);
                                 }
                             }
-                            if (high) {
+                            if (high !== undefined) {
                                 if (typeof high !== "object") {
                                     upperBound.push(high);
                                 } else if (this.#checkWildcard(high, _.Storages.MATCHER.NUMBER.ANY)) {
@@ -1080,61 +1088,101 @@ class demawiRepository {
                 }
 
                 /**
-                 * Ruft die iterations-Methode auf, sollte diese 'false' zurückliefern wird die Schleife abgebrochen.
-                 * Ansonsten wird bis zum optionalen limit oder bis zum Ende weitergemacht.
+                 * Sammelt das ganze Resultat in einem Array und liefert dieses einmalig aus.
                  */
-                static async #openCursorIteration(request, iteration, limit, retrieveFnName) {
+                static async #openCursorFetch(request, limit, retrieveFnName, keyRange, query) {
                     limit = limit || Number.MAX_VALUE;
                     const _this = this;
                     return new Promise((result, reject) => {
-                        let i = 0;
+                        const results = [];
+                        let idx = 0;
                         request.onsuccess = function (event) {
                             const cursor = event.target.result;
-                            // können kein await auf die Iteration setzen, da ansonsten die Transaktion des Cursors beendet wird.
-                            if (!cursor || i >= limit || _this.#checkIteration(iteration, cursor, retrieveFnName, i) === false) {
-                                result(); // just finish promise
+                            if (!cursor || idx >= limit) {
+                                result(results);
                             } else {
-                                i++;
+                                const value = _this.#getResultForCursor(cursor, keyRange, retrieveFnName);
+                                if (value) {
+                                    results.push(value);
+                                    idx++;
+                                }
                                 cursor.continue();
                             }
                         };
                     });
                 }
 
-                static #checkIteration(fn, cursor, retrieveFnName, index) {
-                    const value = this.#getResultForCursor(cursor, retrieveFnName);
-                    const result = fn(value, index);
-                    // TODO: wieder scharf schalten, wenn es an allen Stellen gefixt ist
-                    // if (result instanceof Promise) throw new Error("Eine Iterations-Funktion darf kein Promise liefern!");
+                /**
+                 * Ruft die iterations-Methode auf, sollte diese 'false' zurückliefern wird die Schleife abgebrochen.
+                 * Ansonsten wird bis zum optionalen limit oder bis zum Ende weitergemacht.
+                 */
+                static async #openCursorIteration(request, iteration, limit, retrieveFnName, keyRange, query) {
+                    limit = limit || Number.MAX_VALUE;
+                    const _this = this;
+                    return new Promise((result, reject) => {
+                        let idx = 0;
+                        request.onsuccess = function (event) {
+                            const cursor = event.target.result;
+                            // können kein await auf die Iteration setzen, da ansonsten die Transaktion des Cursors beendet wird.
+                            if (!cursor || idx >= limit || _this.#checkIteration(iteration, cursor, keyRange, retrieveFnName, idx) === false) {
+                                result(); // just finish promise
+                            } else {
+                                idx++;
+                                cursor.continue();
+                            }
+                        };
+                    });
+                }
+
+                static #checkIteration(fn, cursor, keyRange, retrieveFnName, idx) {
+                    const value = this.#getResultForCursor(cursor, keyRange, retrieveFnName);
+                    if (!value) return;
+                    const result = fn(value, idx);
+                    if (result instanceof Promise) throw new Error("Eine Nicht-Async Iterations-Funktion darf kein Promise liefern!");
                     return result;
                 }
 
-                static #getResultForCursor(cursor, retrieveFnName) {
+                static #getResultForCursor(cursor, keyRange, retrieveFnName) {
+                    if (keyRange && !this.#isCursorInMultiRange(cursor, keyRange)) return;
                     if (retrieveFnName === "getAll") return cursor.value;
                     if (retrieveFnName === "getAllKeys") return cursor.primaryKey;
                     if (retrieveFnName === "cursor") return cursor;
                 }
 
                 /**
-                 * Sammelt das ganze Resultat in einem Array und liefert dieses einmalig aus.
+                 * Prüft, ob auch wirklich jeder Key-Parameter insich in der angeforderten Range ist.
+                 * Die IndexDb prüft generell nur 1-dimensional, wo z.B. (1,0) in Range(lower=[0,1], upper=[1,1]) enthalten ist, obwohl wir uns für den zweiten Parameter lediglich die "1" anfordern.
+                 * Hier trifft bereits der erste Parameter die Entscheidung, dass es enthalten ist, der zweite wird gar nicht erst geprüft.
                  */
-                static async #openCursorFetch(request, limit, retrieveFnName) {
-                    limit = limit || Number.MAX_VALUE;
-                    const _this = this;
-                    return new Promise((result, reject) => {
-                        const results = [];
-                        let i = 0;
-                        request.onsuccess = function (event) {
-                            const cursor = event.target.result;
-                            if (cursor && i < limit) {
-                                results.push(_this.#getResultForCursor(cursor, retrieveFnName));
-                                i++;
-                                cursor.continue();
-                            } else {
-                                result(results);
+                static #isCursorInMultiRange(cursor, keyRange) {
+                    if (!cursor.key.entries) return true; // cursor.key ist kein array insofern ist der key nur 1-dimensional, hier müssen wir nichts prüfen.
+                    const cursorKeyEntries = cursor.key.entries();
+                    if (cursorKeyEntries.length === 1) return true;
+                    if (keyRange.lower) {
+
+                        if (keyRange.lowerOpen) {
+                            for (const [idx, curKey] of cursorKeyEntries) {
+                                if (curKey <= keyRange.lower[idx]) return false;
                             }
-                        };
-                    });
+                        } else {
+                            for (const [idx, curKey] of cursorKeyEntries) {
+                                if (curKey < keyRange.lower[idx]) return false;
+                            }
+                        }
+                    }
+
+                    if (keyRange.upper) {
+                        if (keyRange.upperOpen) {
+                            for (const [idx, curKey] of cursorKeyEntries) {
+                                if (curKey >= keyRange.upper[idx]) return false;
+                            }
+                        } else {
+                            for (const [idx, curKey] of cursorKeyEntries) {
+                                if (curKey > keyRange.upper[idx]) return false;
+                            }
+                        }
+                    }
+                    return true;
                 }
 
                 static awaitRequest(idbRequest) {
@@ -1297,8 +1345,11 @@ class demawiRepository {
             if (!isLogin && window.top === window && !window.opener) { // keinLogin und benötigt Wrap => wrap
                 if (!document.querySelector("#iframeWrap")) this.#ensureIframeWrapDoIt();
                 return true;
-            } else if (isLogin && window.top !== window) { // Login und Wrap gefunden => unwrap
-                window.top.location.href = window.location.href;
+            } else if (isLogin) {
+                if (window.top !== window) { // Login und Wrap gefunden => unwrap
+                    window.top.location.href = window.location.href;
+                }
+                return true;
             }
         }
 
@@ -1777,6 +1828,10 @@ class demawiRepository {
             return this.#indexedDb = _.Storages.IndexedDbProxy.getDb(dbname, modname, messengerPromise);
         }
 
+        static getItemIndexDb() {
+            return this.#getCreateObjectStore("itemIndex", "id");
+        }
+
         static getItemDb() {
             return this.#getCreateObjectStore("item", "id");
         }
@@ -2121,9 +2176,10 @@ class demawiRepository {
             const title = document.querySelector("h1");
             if (title.textContent.trim() === "Meine Helden") {
                 const myWorld = _.WoD.getMyWorld();
+                const playerName = _.WoD.getMyUserName();
                 const meineHelden = _.WoDParser.getMyHerosFromOverview();
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
-                await this.getWorldSeason(myWorld, meineHelden, true); // report World-Season
+                await this.getWorldSeason(myWorld, meineHelden, true, playerName); // report World-Season
             }
         }
 
@@ -2171,10 +2227,12 @@ class demawiRepository {
         }
 
         static async getCurrentWorldSeasonNr(doc) {
-            const worldId = _.WoD.getMyWorld(doc);
             const heroId = _.WoD.getMyHeroId(doc);
+            if (!heroId) return; // ohne heroId kein Resultat
+            const worldId = _.WoD.getMyWorld(doc);
             const heroStufe = _.WoD.getMyStufe(doc);
-            return await this.getWorldSeasonNr(worldId, {[heroId]: heroStufe}, document === doc);
+            const playerName = _.WoD.getMyUserName(doc);
+            return await this.getWorldSeasonNr(worldId, {[heroId]: heroStufe}, document === doc, playerName);
         }
 
         static #createNewWorldSeason(myheroIdsMitStufen) {
@@ -2182,8 +2240,8 @@ class demawiRepository {
             return {time: [now, now], myheroes: myheroIdsMitStufen};
         }
 
-        static async getWorldSeasonNr(worldId, myheroIdsMitStufen, aktualisiereZeit) {
-            const [season, seasonNr] = await this.getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit);
+        static async getWorldSeasonNr(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName) {
+            const [season, seasonNr] = await this.getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName);
             return seasonNr;
         }
 
@@ -2197,13 +2255,16 @@ class demawiRepository {
             await worldDb.setValue(world);
         }
 
-        static async getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit) {
+        /**
+         * Playername kann im Forum nicht ermittelt werden und ist somit undefined
+         */
+        static async getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName) {
             const worldDb = _.WoDStorages.getWorldDb();
             let world = await worldDb.getValue(worldId);
             const now = new Date().getTime();
             if (!world) {
                 const newSeason = this.#createNewWorldSeason(myheroIdsMitStufen);
-                world = {id: worldId, seasons: [newSeason]};
+                world = {id: worldId, seasons: [newSeason], player: playerName};
                 await worldDb.setValue(world);
                 return [newSeason, 1];
             }
@@ -2212,15 +2273,23 @@ class demawiRepository {
             if (foundSeason) {
                 this.#copyOver(myheroIdsMitStufen, foundSeason.myheroes);
                 if (aktualisiereZeit) foundSeason.time[1] = now;
+                if (playerName) world.player = playerName;
                 await worldDb.setValue(world);
                 return [foundSeason, foundSeasonNr];
             } else { // Welt-Reset entdeckt
-                console.log("World-Reset entdeckt !!!!!", worldId, myheroIdsMitStufen, aktualisiereZeit);
-                return; // TODO: wieder rausnehmen
-                const newSeason = this.#createNewWorldSeason(myheroIdsMitStufen);
-                world.seasons.push(newSeason);
-                await worldDb.setValue(world);
-                return [newSeason, world.seasons.length];
+                console.log("World-Reset entdeckt !!!!!", worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, world);
+                let confirm;
+                if (playerName && world.player !== playerName) {
+                    confirm = window.confirm(GM.info.script.name + ": Der Spielername hat sich geändert '" + world.player + "' => '" + playerName + "'!!\n\nFür den neuen Spieler konnte keine laufende Saison ermittelt werden.\nSoll eine neue Saison angelegt werden?");
+                } else {
+                    confirm = window.confirm(GM.info.script.name + ": Ein World-Rest wurde entdeckt, wollen sie die neue Saison starten?");
+                }
+                if (confirm) {
+                    const newSeason = this.#createNewWorldSeason(myheroIdsMitStufen);
+                    world.seasons.push(newSeason);
+                    await worldDb.setValue(world);
+                    return [newSeason, world.seasons.length];
+                }
             }
         }
 
@@ -2346,10 +2415,12 @@ class demawiRepository {
         /**
          * Wird für geparste als auch für Source-Items gleichermaßen genutzt.
          */
-        static createItem(itemName) {
+        static createItem(itemName, silent) {
             if (!this.isValidItemName(itemName)) {
-                console.error("ItemName ist nicht korrekt: '" + itemName + "'");
-                throw new Error("ItemName ist korrekt: '" + itemName + "'"); // TODO: nur temorär aktiv!?
+                if (!silent) {
+                    console.error("ItemName ist nicht korrekt: '" + itemName + "'");
+                    throw new Error("ItemName ist nicht korrekt: '" + itemName + "'"); // TODO: nur temorär aktiv!?
+                }
                 return;
             }
             const now = new Date().getTime();
@@ -2357,7 +2428,7 @@ class demawiRepository {
                 id: itemName.toLowerCase(),
                 name: itemName,
                 ts: now,
-                nodata: 1,
+                data: 0,
                 world: {
                     [_.WoD.getMyWorld()]: {
                         ts: now,
@@ -2367,12 +2438,32 @@ class demawiRepository {
             }
         }
 
+        static isVGName(itemName) {
+            return !!itemName.match(/\(\d+\/\d+\)/);
+        }
+
+        static getItemVGBaseName(itemName) {
+            const myMatch = itemName.match(/^(.*) \(\d+\/\d+\)$/);
+            if (!myMatch) return;
+            return myMatch[1];
+        }
+
+        /**
+         * @return [vgBaseName, amount, max]
+         */
+        static getItemVGInfos(itemName) {
+            const myMatch = itemName.match(/^(.*) \((\d+)\/(\d+)\)$/);
+            if (!myMatch) return [];
+            return [myMatch[1], myMatch[2], myMatch[3]];
+        }
+
         static isValidItemName(itemName) {
+            if (itemName.length < 1) return false;
             return !!itemName.match(/^[\p{Letter}0-9 ():,'.+?!-]*$/u);
         }
 
-        static couldBeValid(sourceItem, myWorldId) {
-            const myWorldInfo = sourceItem.world[myWorldId];
+        static couldBeValid(itemIndex, myWorldId) {
+            const myWorldInfo = itemIndex.world && itemIndex.world[myWorldId];
             if (!myWorldInfo) return true;
             return myWorldInfo.valid;
         }
@@ -2420,11 +2511,8 @@ class demawiRepository {
                 if (versionNr) locName += " (v" + versionNr + ")";
                 else locName += " (v?)";
                 let prefix = location.quest;
-                if (!prefix) prefix
-                location.schlacht;
-                if (prefix) {
-                    locName = prefix + ": " + location.quest;
-                }
+                if (!prefix) prefix = location.schlacht;
+                if (prefix) locName = prefix + ": " + locName;
             }
             return locName;
         }
@@ -2505,6 +2593,7 @@ class demawiRepository {
                 world: _.WoD.getMyWorld(),
                 ts: now
             };
+            console.log("Skill wurde der Datenbank hinzugefügt", skillSource, skill);
             await _.WoDStorages.getSkillsSourceDb().setValue(skillSource);
             await _.WoDStorages.getSkillsDb().setValue(skill);
             return skill;
@@ -2568,6 +2657,9 @@ class demawiRepository {
                         if (value !== "-") {
                             skill.manabasis = Number(value.match(/\((\d*)\)/)[1]);
                         }
+                        break;
+                    case "Gewinn an HP":
+                        skill.gainHP = value;
                         break;
                     case "Gewinn an MP":
                         skill.gainMP = value;
@@ -2801,11 +2893,21 @@ class demawiRepository {
         }
 
         static getMyHeroId(doc) {
-            return _.WoD.getValueFromMainForm("session_hero_id", doc) || this.getMyHeroIdFromUrl(doc);
+            doc = doc || document;
+            return _.WoD.getValueFromMainForm("session_hero_id", doc) || this.getMyHeroIdFromUrl(doc) || this.getHeroIdByFallback2(doc);
         }
 
         static getMyHeroIdFromUrl(doc) {
-            return new URL(window.location.href).searchParams.get("session_hero_id");
+            return this.getMyHeroIdFromGivenUrl(new URL(window.location.href));
+        }
+
+        static getMyHeroIdFromGivenUrl(url) {
+            return url.searchParams.get("session_hero_id");
+        }
+
+        static getHeroIdByFallback2(doc) {
+            doc = doc || document;
+            return this.getMyHeroIdFromGivenUrl(new URL(doc.querySelector(".prevHeroLink").href, document.baseURI));
         }
 
         /**
@@ -3532,7 +3634,7 @@ class demawiRepository {
                 case "A":
                     if (node.href.startsWith("http")) {
                         if (node.classList.contains("rep_monster")) {
-                            return ["", "[beast:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
+                            return ["", "[npc:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
                         } else if (node.href.includes("item.php")) {
                             const urlParams = new URL(node.href).searchParams;
                             console.log("Found URL-Params", node.href, new URL(node.href).searchParams, new URL(node.href).searchParams.get("name"), decodeURIComponent(new URL(node.href).searchParams));
@@ -3615,10 +3717,9 @@ class demawiRepository {
             addRule('.select2-selection, .select2-dropdown { background: ' + bg + ' !important; } ');
             addRule('.select2-selection span { color: ' + c + ' !important; } ');
             addRule('.select2-dropdown li[aria-selected="true"] { background-color: rgba(255, 255, 255, 0.25) !important; } ');
-            addRule('.select2-results__option { padding: 0px !important; padding-left: 5px !important;} ');
+            addRule('.select2-results__option { padding: 0px !important; padding-left: 5px !important; min-height:20px !important;} ');
             addRule('.button_image_info { width: 20px; } ');
             addRule('.select2-container--default .select2-selection--single { border-color: #999999 !important;}')
-            // select2_compact
             //addRule('.select2-selection__rendered { font-size: 14px; } ');
             addRule('.select2-results__options { max-height: ' + (window.screen.height * 0.4) + 'px !important; } ');
             addRule('.select2-container, .select2-selection--single, .select2-selection__rendered, .select2-selection__arrow { height: 20px !important; line-height: 20px !important; } ');
@@ -3642,12 +3743,21 @@ class demawiRepository {
             inputElement.style.fontSize = "14px";
         }
 
-        static betterSelect(selectField) {
+        static betterSelect(selectField, cfg) {
+            cfg = cfg || {};
+            cfg.dropdownAutoWidth = true;
+            cfg.width = "auto";
             setTimeout(function () {
-                $(selectField).select2({
-                    dropdownAutoWidth: true,
-                    width: 'auto',
-                    //placeholder: "Bitte wählen"
+                $(selectField).select2(cfg);
+            }, 0);
+        }
+
+        static betterSelect2(selectField, cfg) {
+            cfg = cfg || {};
+            cfg.dropdownAutoWidth = true;
+            setTimeout(function () {
+                $(selectField).select2(cfg).parent().find(".select2-container").each(function () {
+                    $(this).width($(this).width() * 1.05 + 10);
                 });
             }, 0);
         }
@@ -3740,6 +3850,12 @@ class demawiRepository {
             NO: "/wod/css/img/smiley/no.png", // rotes X
         }
 
+        static createSpinner() {
+            const spinner = document.createElement("i");
+            spinner.className = "fa fa-spinner fa-spin";
+            return spinner;
+        }
+
         static createButton(htmlContent, callback) {
             const button = document.createElement("span");
             button.classList.add("nowod");
@@ -3825,6 +3941,23 @@ class demawiRepository {
             return table;
         }
 
+        static swapElements(elem1, elem2) {
+            var parent2 = elem2.parentNode;
+            var next2 = elem2.nextSibling;
+            if (next2 === elem1) { // special case for obj1 is the next sibling of obj2
+                parent2.insertBefore(elem1, elem2);
+            } else {
+                elem1.parentNode.insertBefore(elem2, elem1);
+                if (next2) parent2.insertBefore(elem1, next2);
+                else parent2.appendChild(elem1);
+            }
+        }
+
+        static insertAtIndex(parent, child, idx) {
+            const target = parent.children[idx];
+            if (!target) parent.append(child);
+            else parent.insertBefore(child, target);
+        }
     }
 
     /**
@@ -4178,10 +4311,19 @@ class demawiRepository {
             // Please note that calling sort on an array will modify that array.
             // you might want to clone your array first.
 
-            for (var i = 0; i < a.length; ++i) {
+            for (let i = 0; i < a.length; ++i) {
                 if (a[i] !== b[i]) return false;
             }
             return true;
+        }
+
+        static deepEqual(x, y) {
+            const _this = this;
+            return (x && y && typeof x === 'object' && typeof y === 'object') ?
+                (Object.keys(x).length === Object.keys(y).length) &&
+                Object.keys(x).reduce(function (isEqual, key) {
+                    return isEqual && _this.deepEqual(x[key], y[key]);
+                }, true) : (x === y);
         }
 
         static arrayRemove(list, value) {
@@ -5282,25 +5424,36 @@ class demawiRepository {
     static ItemParserDataVersion = 5;
     static ItemParser = class {
 
+        /**
+         *
+         * @returns {(string|number)[]}
+         */
         static getItemNameFromElement(aElement) {
             const curHref = aElement.href;
             var itemName;
             var index = curHref.indexOf("item.php?");
-            if (index > 0) {
+            let type;
+            if (index > 0) { // Ingame Referenz
                 itemName = curHref.match(/name=(.*?)&/);
-            } else {
+                type = 1;
+            } else { // Forum-Referenz
                 index = curHref.indexOf("/item/");
                 if (index > 0) {
                     itemName = curHref.match(/item\/(.*?)&/);
+                    type = 2;
                 }
             }
-            if (!itemName) return;
+            if (!itemName) return [];
             itemName = decodeURIComponent(itemName[1].replaceAll("+", " "));
             if (!_.WoDItemDb.isValidItemName(itemName)) {
                 console.warn("Nicht korrekten ItemNamen entdeckt: '" + itemName + "'");
-                return;
+                return [];
             }
-            return itemName;
+            return [itemName, type];
+        }
+
+        static getItemIndexDB() {
+            return _.WoDStorages.getItemIndexDb();
         }
 
         static getItemSourceDB() {
@@ -5312,34 +5465,30 @@ class demawiRepository {
         }
 
         static async reportNonExistingItem(itemName) {
-            let itemSource = await this.getItemSourceDB().getValue(itemName.toLowerCase());
-            if (!itemSource || !itemSource.details) {
-                itemSource = _.WoDItemDb.createItem(itemName);
-                if (!itemSource) return; // no valid name
+            let itemIndex = await this.getItemIndexDB().getValue(itemName.toLowerCase());
+            if (!itemIndex) {
+                itemIndex = _.WoDItemDb.createItem(itemName, true);
+                if (!itemIndex) { // no valid name
+                    await this.getItemSourceDB().deleteValue(itemName.toLowerCase());
+                    return;
+                }
             }
             const now = new Date().getTime();
-            itemSource.ts = now;
+            itemIndex.ts = now;
             const myWorld = _.WoD.getMyWorld();
             if (myWorld) {
-                const worldInfos = itemSource.world[myWorld] || (itemSource.world[myWorld] = {});
+                const worldInfos = itemIndex.world[myWorld] || (itemIndex.world[myWorld] = {});
                 worldInfos.ts = now;
                 worldInfos.valid = 0;
             }
             let foundValid = false;
-            for (const curWorldInfo of Object.values(itemSource.world)) {
+            for (const curWorldInfo of Object.values(itemIndex.world)) {
                 if (curWorldInfo.valid) {
                     foundValid = true;
                     break;
                 }
             }
-
-            if (!foundValid) {
-                await this.getItemDB().deleteValue(itemSource.id);
-                delete itemSource.link;
-                delete itemSource.details;
-                delete itemSource.src;
-            }
-            await this.getItemSourceDB().setValue(itemSource);
+            await this.getItemIndexDB().setValue(itemIndex);
         }
 
         static async onItemPage() {
@@ -5366,27 +5515,36 @@ class demawiRepository {
                 return itemName;
             }
 
-            const itemSourcesDb = this.getItemSourceDB();
+            const itemSourcesDB = this.getItemSourceDB();
             const itemDB = this.getItemDB();
+            const itemIndexDB = this.getItemIndexDB();
 
-            const sourceItem = await itemSourcesDb.getValue(itemName.toLowerCase()) || _.WoDItemDb.createItem(itemName);
+            const itemIndex = await itemIndexDB.getValue(itemName.toLowerCase()) || _.WoDItemDb.createItem(itemName);
             const myWorld = _.WoD.getMyWorld();
             const now = new Date().getTime();
-            sourceItem.ts = now;
-            sourceItem.world[myWorld] = {
+            itemIndex.ts = now;
+            itemIndex.data = 1;
+            itemIndex.world[myWorld] = {
                 valid: 1,
                 ts: now,
             }
-            delete sourceItem.details; // nur für alte Versionen
-            delete sourceItem.link; // nur für alte Versionen
-            sourceItem.src = _.WoDParser.getPlainMainContent().querySelector(".main_content").innerHTML;
-            delete sourceItem.nodata;
-            await itemSourcesDb.setValue(sourceItem);
+
+            const itemSource = await itemSourcesDB.getValue(itemName.toLowerCase()) || {
+                id: itemIndex.id,
+            };
+            itemSource.world = myWorld;
+            itemSource.ts = now;
+            delete itemSource.details; // nur für alte Versionen
+            delete itemSource.link; // nur für alte Versionen
+            delete itemSource.nodata; // nur für alte Versionen
+            itemSource.src = _.WoDParser.getPlainMainContent().querySelector(".main_content").innerHTML;
+            await itemSourcesDB.setValue(itemSource);
+            await itemIndexDB.setValue(itemIndex);
 
             // Daten-Übernahme
-            const item = await this.parseSourceItem(sourceItem);
+            const item = await this.parseSourceItem(itemSource, itemName);
             await itemDB.setValue(item);
-            console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", sourceItem, item);
+            console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", itemSource, item);
 
             // Maintenance: Auf alte dataversions prüfen
             const needRewrite = await _.WoDStorages.getItemDb().getAllKeys({
@@ -5398,7 +5556,7 @@ class demawiRepository {
                 const migration = _.Migration.start("Items werden neu geschrieben", needRewrite.length);
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...");
                 for (const curItemId of needRewrite) {
-                    const sourceItem = await itemSourcesDb.getValue(curItemId);
+                    const sourceItem = await itemSourcesDB.getValue(curItemId);
                     if (sourceItem) {
                         //const curItem = await this.getItemDB().getValue(curItemId);
                         const item = await this.parseSourceItem(sourceItem);
@@ -5415,8 +5573,8 @@ class demawiRepository {
             return linkElement.getElementsByClassName("gem_bonus_also_by_gem").length > 0 || linkElement.getElementsByClassName("gem_bonus_only_by_gem").length > 0;
         }
 
-        static async parseSourceItem(itemSource) {
-            const item = await this.getItemDB().getValue(itemSource.id) || _.WoDItemDb.createItem(itemSource.name);
+        static async parseSourceItem(itemSource, itemName) {
+            const item = await this.getItemDB().getValue(itemSource.id) || _.WoDItemDb.createItem(itemName);
             item.ts = itemSource.ts;
             item.world = itemSource.world;
             await this.#writeItemData(item, itemSource);
@@ -5748,7 +5906,7 @@ class demawiRepository {
 
     static startMod(zusatz) {
         if (!window.location.href.includes("silent=true")) {
-            const mode = _.CSProxy.mode;
+            const mode = _.CSProxy.mode || "local";
             console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
         }
     }

@@ -30,23 +30,7 @@
 (function () {
     'use strict';
 
-    const _ = {
-        Storages: demawiRepository.import("Storages"),
-        WoDStorages: demawiRepository.import("WoDStorages"),
-        WoD: demawiRepository.import("WoD"),
-        WoDWorldDb: demawiRepository.import("WoDWorldDb"),
-        WoDParser: demawiRepository.import("WoDParser"),
-        WoDLootDb: demawiRepository.import("WoDLootDb"),
-        WoDSkillsDb: demawiRepository.import("WoDSkillsDb"),
-        WoDLocationDb: demawiRepository.import("WoDLocationDb"),
-        util: demawiRepository.import("util"),
-        UI: demawiRepository.import("UI"),
-        File: demawiRepository.import("File"),
-        Libs: demawiRepository.import("Libs"),
-        Settings: demawiRepository.import("Settings"),
-        ItemParser: demawiRepository.import("ItemParser"),
-        CSProxy: demawiRepository.import("CSProxy"),
-    }
+    const _ = demawiRepository;
 
     class Mod {
         static modname = "KampfberichtArchiv";
@@ -1320,7 +1304,9 @@
             let naechsterDungeonName = _.WoDParser.getNaechsterDungeonName();
             if (!naechsterDungeonName) return;
             // const ausruestungsTabelleKomplett = document.querySelectorAll("table:has(table #ausruestungstabelle_0):not(table:has(table table #ausruestungstabelle_0))")[0];
-            const ausruestungsTabelle = document.querySelector("#ausruestungstabelle_2").parentElement.parentElement;
+            const tabelle2 = document.querySelector("#ausruestungstabelle_2");
+            if (!tabelle2) return; // nur wenn verfügbar
+            const ausruestungsTabelle = tabelle2.parentElement.parentElement;
 
             let items;
             let locVersion;
@@ -1330,12 +1316,12 @@
                 order: "prev",
                 batchSize: 10,
             }, async report => {
-                locVersion = report.loc.v;
+                locVersion = await Report.getVersion(report);
                 items = await MyStorage.reportArchiveItems.getValue(report.reportId);
                 if (items) return false; // quit iteration
             })
 
-            naechsterDungeonName = _.WoDLocationDb.getFullLocName(naechsterDungeonName, locVersion) || naechsterDungeonName;
+            naechsterDungeonName = await _.WoDLocationDb.getFullLocName(naechsterDungeonName, locVersion) || naechsterDungeonName;
 
             if (!items) return;
             const myHeroId = _.WoD.getMyHeroId();
@@ -1362,7 +1348,7 @@
                 }
             }
             if (genutzteGegenstaende.length === 0) genutzteGegenstaende.push([undefined, "Es wurde nichts verbraucht"]);
-            const table = _.UI.createContentTable(genutzteGegenstaende, ["#", "Verbrauch beim letzten Mal ("+naechsterDungeonName+")"]);
+            const table = _.UI.createContentTable(genutzteGegenstaende, ["#", "Verbrauch beim letzten Mal (" + naechsterDungeonName + ")"]);
             table.classList.add("nowod");
             //ausruestungsTabelleKomplett.parentElement.insertBefore(table, ausruestungsTabelleKomplett);
             ausruestungsTabelle.append(table);
@@ -1609,16 +1595,17 @@
             const dungeonsFoundPrimary = {};
             const maxResults = ArchivSearch.searchQuery.maxResults;
             let count = 0;
-            const index = ["ts"];
-            const indexSelect = [_.Storages.MATCHER.NUMBER.ANY];
             if (false && this.searchQuery.dungeonSelection && this.searchQuery.dungeonSelection.length === 1) {
                 // Kann so aktuell nicht verwendet werden, da ansonsten die Filter-Möglichkeiten nicht mehr ordentlich gefüllt werden können.
+                // TODO: sollte mit einer Meta-Datenbank optimiert werden
+                const index = ["ts"];
+                const indexSelect = [_.Storages.MATCHER.NUMBER.ANY];
                 index.push("loc.name");
                 index.push(this.searchQuery.dungeonSelection[0]);
             }
             await MyStorage.getReportDBMeta().getAll({
-                index: index,
-                keyMatch: indexSelect,
+                index: ["ts"],
+                keyMatch: [_.Storages.MATCHER.NUMBER.ANY],
                 order: "prev",
                 //noBatch: true,
                 //debug: 2,
