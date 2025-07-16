@@ -95,7 +95,7 @@
             panel.style.textAlign = "right";
             this.loadoutNamePanel = document.createElement("div");
             this.loadoutNamePanel.title = "Das aktuelle Loadout, welches beim Neuladen der Seite verwendet wird";
-            this.loadoutNamePanel.style.marginRight = "20px";
+            this.loadoutNamePanel.style.marginBottom = "2px";
             this.loadOutSelect = document.createElement("select");
 
             this.warningPanel = document.createElement("div");
