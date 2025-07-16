@@ -1272,7 +1272,7 @@ class demawiRepository {
      */
     static CSProxy = class CSProxy {
 
-        static #supported = ["Tampermonkey", "Greasemonkey"];
+        static #supported = ["Tampermonkey", "Greasemonkey", "Violentmonkey"];
 
         static mode;
 
@@ -1323,10 +1323,6 @@ class demawiRepository {
             }
             this.mode = "www";
             return [true, "p"];
-        }
-
-        static isTampermonkey() {
-            return GM.info.scriptHandler === "Tampermonkey";
         }
 
         /**
@@ -2768,6 +2764,22 @@ class demawiRepository {
             "Ritter": "Ri",
             "Schamane": "Sm",
             "Schütze": "Sü",
+        }
+
+        static VOELKER = {
+            "Bergzwerg": "BZ",
+            "Dinturan": "Di",
+            "Gnerk": "Gne",
+            "Gnom": "Gno",
+            "Grenzländer": "GL",
+            "Halbling": "HL",
+            "Hügelzwerg": "HZ",
+            "Kerasi": "Ke",
+            "Mag-Mor-Elf": "MME",
+            "Nebelwicht": "Ne",
+            "Rashani": "Ra",
+            "Tirem-Ag-Elf": "TAE",
+            "Waldmensch": "Wa",
         }
 
         static VIEW = {
