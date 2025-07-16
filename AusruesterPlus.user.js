@@ -73,7 +73,7 @@
         static updateProfileName() {
             const currentLoadoutName = EquipConfig.getCurrentLoadoutName();
             if (currentLoadoutName) {
-                this.loadoutNamePanel.innerHTML = "Zuletzt genutzt: " + currentLoadoutName;
+                this.loadoutNamePanel.innerHTML = "Aktuell geladen: " + currentLoadoutName;
             } else {
                 this.loadoutNamePanel.innerHTML = "";
             }
@@ -93,7 +93,7 @@
 
             const panel = document.createElement("div");
             panel.style.textAlign = "right";
-            this.loadoutNamePanel = document.createElement("span");
+            this.loadoutNamePanel = document.createElement("div");
             this.loadoutNamePanel.title = "Das aktuelle Loadout, welches beim Neuladen der Seite verwendet wird";
             this.loadoutNamePanel.style.marginRight = "20px";
             this.loadOutSelect = document.createElement("select");
