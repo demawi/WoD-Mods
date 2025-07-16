@@ -1985,17 +1985,21 @@ class demawiRepository {
             return count;
         }
 
-        static async reportLootTombola(itemName, timestampInMinutes) {
+        static async reportLootTombola(itemName, timestampInMinutes, stufe, anzahl, quelle) {
             itemName = itemName.toLowerCase();
             const world = _.WoD.getMyWorld();
+            const worldSeason = _.WoD.getMyWorldSeasonNr();
             const item = await this.#getLootItem(itemName);
 
             const locationName = "Tombola";
             const itemLoot = item.loot || (item.loot = {});
-            itemLoot[world + timestampInMinutes + "|Tombola"] = {
-                count: 1,
+            const reportedLoot = itemLoot[world + timestampInMinutes + "|Tombola"] = {
+                count: anzahl,
                 loc: locationName,
+                season: worldSeason,
             }
+            if (stufe) reportedLoot.stufe = stufe;
+            if (quelle) reportedLoot.quelle = quelle;
             // Allgemeins .locs
             const locationLoot = item.locs[locationName] || (item.locs[locationName] = {});
             locationLoot.ts = timestampInMinutes;

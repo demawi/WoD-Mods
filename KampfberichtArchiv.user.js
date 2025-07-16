@@ -1445,7 +1445,7 @@
                 if (itemA) {
                     const tsMsecs = _.WoD.getTimestampFromString(cur.children[0].textContent);
                     const itemName = itemA.textContent.trim();
-                    await this.putToLoot(itemA, tsMsecs);
+                    await this.putToLoot(itemA, tsMsecs, undefined, 1);
                     await _.WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
                 }
             }
@@ -1454,13 +1454,14 @@
         static async onTombolaPage() {
             const itemA = document.querySelector(".content_block a");
             if (itemA) {
-                await this.putToLoot(itemA, new Date().getTime(), _.WoD.getMyStufe());
+                await this.putToLoot(itemA, new Date().getTime(), _.WoD.getMyStufe(), 1);
             }
         }
 
-        static async putToLoot(itemA, tsMsecs, stufe) {
+        static async putToLoot(itemA, tsMsecs, stufe, anzahl) {
             const itemName = itemA.textContent.trim();
-            await _.WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000);
+            const myHeroName = _.WoD.getMyHeroName();
+            await _.WoDLootDb.reportLootTombola(itemName, tsMsecs / 60000, stufe, anzahl, myHeroName);
         }
     }
 
