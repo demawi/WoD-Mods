@@ -2179,7 +2179,7 @@ class demawiRepository {
                 const playerName = _.WoD.getMyUserName();
                 const meineHelden = _.WoDParser.getMyHerosFromOverview();
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
-                await this.getWorldSeason(myWorld, meineHelden, true, playerName); // report World-Season
+                await this.getWorldSeason(myWorld, meineHelden, true, playerName, true); // report World-Season
             }
         }
 
@@ -2241,7 +2241,7 @@ class demawiRepository {
         }
 
         static async getWorldSeasonNr(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName) {
-            const [season, seasonNr] = await this.getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName);
+            const [season, seasonNr] = await this.getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, false);
             return seasonNr;
         }
 
@@ -2255,10 +2255,14 @@ class demawiRepository {
             await worldDb.setValue(world);
         }
 
+        static worldSeasonAlerted = false;
+        static worldResetFallback = false;
+
         /**
          * Playername kann im Forum nicht ermittelt werden und ist somit undefined
+         * @returns {Promise<({season, seasonNr: number[]}|number)[]|*[]>}
          */
-        static async getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName) {
+        static async getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, istHeldenAnsichtUebermittlung) {
             const worldDb = _.WoDStorages.getWorldDb();
             let world = await worldDb.getValue(worldId);
             const now = new Date().getTime();
@@ -2277,6 +2281,15 @@ class demawiRepository {
                 await worldDb.setValue(world);
                 return [foundSeason, foundSeasonNr];
             } else { // Welt-Reset entdeckt
+                if (!istHeldenAnsichtUebermittlung) { // World-Reset vorerst verhindern, das geht dann nur über die "Meine Helden"-Seite.
+                    if (!this.worldSeasonAlerted && _.WoD.getView() !== _.WoD.VIEW.HEROES) {
+                        alert("Es wurde ein noch unbekannter Held in der Saison erkannt. Zur vollständigen Saisonbestimmung bitte einmalig die 'Meine Helden'-Seite aufrufen!");
+                        this.worldSeasonAlerted = true;
+                    }
+                    const lastSeasonNr = world.seasons.length;
+                    return [world.seasons[lastSeasonNr], lastSeasonNr];
+                }
+
                 console.log("World-Reset entdeckt !!!!!", worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, world);
                 let confirm;
                 if (playerName && world.player !== playerName) {
