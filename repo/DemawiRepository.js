@@ -4230,6 +4230,24 @@ class demawiRepository {
 
     }
 
+    static Mod = class {
+
+        static start(zusatz) {
+            if (!window.location.href.includes("silent=true")) {
+                const mode = _.CSProxy.mode || "local";
+                console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
+            }
+        }
+
+        /**
+         * Prüfen, ob eine lokale Datei eingebunden wird: dann wissen wir der Entwickler sitzt vor dem Rechner :)
+         */
+        static isLocalTest() {
+            return GM.info.scriptMetaStr.includes("file://");
+        }
+
+    }
+
     /**
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
@@ -5909,10 +5927,7 @@ class demawiRepository {
     }
 
     static startMod(zusatz) {
-        if (!window.location.href.includes("silent=true")) {
-            const mode = _.CSProxy.mode || "local";
-            console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
-        }
+        _.Mod.start(zusatz);
     }
 
     static getModName() {

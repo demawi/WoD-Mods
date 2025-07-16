@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.14.0
+// @version        0.14.1
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -419,7 +419,6 @@
             //await this.rewriteReportArchiveItems();
 
             await Maintenance.checkMaintenance();
-            console.log("Checked Maintenance");
             this.title = document.getElementsByTagName("h1")[0];
 
             const wodContent = document.getElementsByClassName("content_table")[0];
@@ -2240,7 +2239,7 @@
             if (settings.get(MySettings.SETTING.AUTO_LOESCHEN)) {
                 // Täglich einmal
                 if (!settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK) || new Date(settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK)) < new Date().setDate(new Date().getDate() - 1)) {
-                    console.log("Auto Löschen wird ausgeführt!");
+                    console.log("[Löschautomatik] wird ausgeführt...");
                     const settings = await MySettings.get();
                     const anzahlTage = settings.get(MySettings.SETTING.AUTO_LOESCHEN_TAGE);
                     let date = new Date();
@@ -2249,9 +2248,16 @@
                         index: ["ts", "fav.none"],
                         keyMatchBefore: [date.getTime(), Number.MAX_VALUE],
                     }, async function (report) {
-                        console.log("Lösche ", report.reportId);
+                        if (!_.Mod.isLocalTest()) {
+                            console.log("[Löschautomatik] Lösche Quell-Dateien für:", report.reportId);
+                            await MyStorage.reportArchiveSources.deleteValue(report.reportId);
+                            delete report.srcs;
+                            await MyStorage.reportArchive.setValue(report);
+                        } else {
+                            console.log("[Löschautomatik-Fake] Lösche Quell-Dateien für:", report.reportId);
+                        }
                     });
-                    alert("Archiv-Löschungen wurden geprüft!");
+                    console.log("[Löschautomatik] beendet!");
 
                     settings.set(MySettings.SETTING.AUTO_LOESCHEN_CHECK, new Date().getTime());
                     await settings.save();
@@ -3278,7 +3284,7 @@
             let myDocument = nodeOrDocument.cloneNode(true);
 
             // wir können ensureAllUrlsAreAbsolute scheinbar nicht nutzen, wenn man das Dokument on-the-fly aus einem String erzeugt.
-            this.rewriteAllUrls(myDocument, url => {
+            _.WoDParser.rewriteAllUrls(myDocument, url => {
                 if (!url) return url;
                 if (url === "") return "";
                 if (url.startsWith("http") || url.startsWith("data:")) return url;
