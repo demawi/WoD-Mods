@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.0.5.5";
+    static version = "1.1.0";
 
     /**
      * Indexed-DB Framework.
