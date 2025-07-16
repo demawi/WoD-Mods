@@ -12,7 +12,7 @@
 // @include        http*://*/wod/spiel/*dungeon/combat_report.php*
 // @include        http*://*/wod/spiel/event/play.php*
 // @include        http*://*/wod/spiel/event/eventlist.php*
-// @require        https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/repo/DemawiRepositoryOld1.js?version=1
+// @require        repo/DemawiRepositoryOld1.js?version=1
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
