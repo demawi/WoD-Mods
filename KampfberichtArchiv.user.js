@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.14.3
+// @version        0.14.4
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -2246,7 +2246,7 @@
                     date.setDate(date.getDate() - anzahlTage);
                     await MyStorage.reportArchive.getAll({
                         index: ["ts", "fav.none"],
-                        keyMatchBefore: [date.getTime(), Number.MAX_VALUE],
+                        keyMatchBefore: [date.getTime()/60000, Number.MAX_VALUE],
                     }, async function (report) {
                         if (!_.Mod.isLocalTest()) {
                             console.log("[Löschautomatik] Lösche Quell-Dateien für:", report.reportId);
@@ -2254,7 +2254,7 @@
                             delete report.srcs;
                             await MyStorage.reportArchive.setValue(report);
                         } else {
-                            console.log("[Löschautomatik-Fake] Lösche Quell-Dateien für:", report.reportId);
+                            console.log("[Löschautomatik-Fake] Lösche Quell-Dateien für:", report.ts, report.reportId);
                         }
                     });
                     console.log("[Löschautomatik] beendet!");

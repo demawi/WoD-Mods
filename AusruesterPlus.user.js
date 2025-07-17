@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.1
+// @version        0.8.2
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
@@ -57,12 +57,14 @@
         static markerPanel_Loadout_Server;
         static markerPanel_UI_Server;
 
+        static row2Panel;
+
         static warningPanel;
         static loadOutSelect;
         static loadButton;
         static saveButton;
         static renameButton;
-        static saveUnderButton;
+        static newButton;
         static vgSyncButton;
         static saveAndLoadButton;
         static deleteButton;
@@ -204,12 +206,12 @@
                 }
             }
 
-            this.saveUnderButton = document.createElement("button");
-            this.saveUnderButton.type = "button";
-            this.saveUnderButton.innerHTML = " Neu+";
-            this.saveUnderButton.style.lineHeight = "1em";
-            this.saveUnderButton.style.display = "none";
-            this.saveUnderButton.onclick = async function () {
+            this.newButton = document.createElement("button");
+            this.newButton.type = "button";
+            this.newButton.innerHTML = " Neu+";
+            this.newButton.style.lineHeight = "1em";
+            this.newButton.style.display = "none";
+            this.newButton.onclick = async function () {
                 const savedLoadoutName = await saveCurrent(true);
                 if (savedLoadoutName) {
                     updateSelect(savedLoadoutName);
@@ -286,15 +288,17 @@
             panel.append(this.markerPanel_Loadout_Server);
             panel.append(this.markerPanel_UI_Server);
             panel.append(this.loadOutSelect);
+            panel.append(this.activButton);
             panel.append(this.loadButton);
+
             //this.markerPanel_UI_Server.style.display = "inline-block";
             //this.markerPanel_UI_Server.style.marginBottom = "5px";
             panel.append(document.createElement("br"));
-            let subpanel = document.createElement("div");
+            let subpanel = this.row2Panel = document.createElement("div");
             subpanel.style.marginTop = "2px"
             //subpanel.style.marginBottom = "2px"
             panel.append(subpanel);
-            subpanel.append(this.activButton);
+            subpanel.append(_.UI.createElem("span", "UI: "));
             subpanel.append(this.saveButton);
             subpanel.append(this.saveAndLoadButton);
             subpanel.append(this.vgSyncButton);
@@ -302,7 +306,7 @@
             subpanel.style.marginTop = "2px";
             subpanel.style.marginBottom = "2px";
             panel.append(subpanel);
-            subpanel.append(this.saveUnderButton);
+            subpanel.append(this.newButton);
             subpanel.append(this.renameButton);
             subpanel.append(this.deleteButton);
             //panel.style.marginLeft = "0px";
@@ -316,10 +320,10 @@
             title.style.display = "inline-block";
             title.parentElement.insertBefore(panel, title.nextSibling);
 
-            this.saveButton.title = "Angezeigte Ausrüstung im Loadout speichern";
-            this.saveUnderButton.title = "Angezeigte Ausrüstung als Loadout unter einem abgefragten Namen speichern.";
+            this.newButton.title = "Angezeigte Ausrüstung als Loadout unter einem abgefragten Namen speichern.";
             this.saveAndLoadButton.title = ""; // wird dynamisch bestimmt
             this.loadButton.title = ""; // wird dynamisch bestimmt
+            this.saveButton.title = ""; // wird dynamisch bestimmt
             this.vgSyncButton.title = "Anhand der hinterlegten VG-Konfig im Loadout die Tasche befüllen.";
 
             // Einzig auf Loadout bezogen
@@ -339,23 +343,30 @@
             this.hasChange_Loadout_Server = !this.hasSelectedLoadout() || await EquipConfig.differs_Loadout_Server(selectedLoadoutName);
             this.hasChange_UI_Server = await EquipConfig.differs_UI_Server();
             console.log("DIFF", selectedLoadoutName, "UI<>Loadout:" + this.hasChange_UI_Loadout, "Loadout<>Server:" + this.hasChange_Loadout_Server, "UI<>Server:" + this.hasChange_UI_Server);
+
+            // 2nd Row
+            this.row2Panel.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none";
             this.saveButton.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none";
-            this.renameButton.style.display = this.hasSelectedLoadout() ? "" : "none";
-            this.saveUnderButton.style.display = ""; // ist immer möglich
             this.saveAndLoadButton.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none"; // && this.hasChange_UI_Server
+
+            this.renameButton.style.display = this.hasSelectedLoadout() ? "" : "none";
             this.loadButton.style.display = this.hasSelectedLoadout() && (this.hasChange_Loadout_Server || hasVGsConfigured) ? "" : "none";
-            console.log("LLLLL", EquipConfig.getSelectedLoadout())
             this.vgSyncButton.style.display = "none"; // & hasVGsConfigured && !this.hasChange_UI_Loadout ? "" : "none";
+            this.newButton.style.display = ""; // ist immer möglich
+
+            const prefix = this.hasChange_UI_Server ? " unverifiziert" : "";
             if (this.getCurrentSelectedLoadoutName() !== EquipConfig.getCurrentLoadoutName()) {
-                this.saveButton.innerHTML = this.marker_Left + " Überschreiben";
+                this.saveButton.innerHTML = this.marker_Left + prefix + " Überschreiben";
+                this.saveButton.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
             } else {
-                this.saveButton.innerHTML = this.marker_Left + " Speichern";
+                this.saveButton.innerHTML = this.marker_Left + prefix + " Speichern";
+                this.saveButton.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
             }
             if (this.getCurrentSelectedLoadoutName() !== EquipConfig.getCurrentLoadoutName()) {
-                this.saveAndLoadButton.innerHTML = this.marker_Left + " Überschreiben + Ausrüsten " + this.marker_Right;
+                this.saveAndLoadButton.innerHTML = this.marker_Left + prefix + " Überschreiben + Ausrüsten " + this.marker_Right;
                 this.saveAndLoadButton.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             } else {
-                this.saveAndLoadButton.innerHTML = this.marker_Left + " Speichern + Ausrüsten " + this.marker_Right;
+                this.saveAndLoadButton.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
                 this.saveAndLoadButton.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             }
             if (this.hasChange_UI_Loadout && this.hasChange_UI_Server) {
@@ -415,6 +426,8 @@
 
     class SelectOptimizer {
 
+        static slotElements;
+
         static async init() {
             const _this = this;
             await _.Libs.useJQueryUI();
@@ -434,19 +447,43 @@
             }
 
             // instanceId -> Veredelungen
-            const gemImages = this.getAllSlotImages();
+            this.slotElements = this.getSlotElements();
 
             const theForm = FormHandler.getTheForm();
             const allSlots = FormHandler.getAllExistingSlots();
             for (const [slotName, slotIdx] of allSlots) {
                 const selectField = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
-                this.addSlotImagesToSelect(gemImages, selectField);
+                this.addSlotImagesToSelect(selectField);
                 this.rearrangeOptions(selectField);
                 selectField.onchange = async function () {
                     VGKonfig.onEquipSelectChange(slotName, slotIdx);
                     EquipConfig.onEquipSlotChanged(slotName, slotIdx, false);
                     await ControlBar.onDataChange();
                     FormHandler.sortInOrder(slotName);
+                    for (const cur of selectField.parentElement.querySelectorAll("img")) {
+                        if (cur.tagName === "IMG" && cur.src.includes("/gem_")) {
+                            cur.remove();
+                        }
+                    }
+                    const firstZustandImgElem = selectField.parentElement.children[0];
+                    firstZustandImgElem.src = "/wod/css//skins/skin-8/images/icons/zustand_leer.gif";
+                    const curItemId = FormHandler.getSelectedValue(selectField);
+                    if (curItemId) {
+                        const parent = selectField.parentElement;
+                        const lastElem = parent.querySelector("input[type='submit']");
+                        const slotImages = _this.getSlotImagesSrcs(curItemId);
+                        if (slotImages) {
+                            for (const cur of slotImages) {
+                                const img = document.createElement("img");
+                                img.src = cur;
+                                parent.insertBefore(img, lastElem);
+                            }
+                        }
+                    }
+                    selectField.nextSibling.style.boxShadow = "0px 0px 3px 3px rgba(0, 255, 0, 0.5)";
+                    setTimeout(function () {
+                        selectField.nextSibling.style.boxShadow = "";
+                    }, 1000);
                 }
                 _.Libs.betterSelect2(selectField, {templateResult: _this.addSlotImgs});
                 VGKonfig.onEquipSelectChange(slotName, slotIdx); // Initial
@@ -478,21 +515,29 @@
             }
         }
 
-        static getAllSlotImages() {
-            const imageMap = {};
+        static getSlotElements() {
+            const result = {};
             const trs = document.getElementsByName('ITEMS_LOCATION')[0].getElementsByTagName('tr');
             for (const curTr of trs) {
                 const id = Number(curTr.childNodes[0].innerHTML);
-                const imgs = curTr.childNodes[3].querySelectorAll('img');
-                imageMap[id] = "";
-                for (const curImg of imgs) {
-                    imageMap[id] += "<img src='" + curImg.src + "'/>";
-                }
+                result[id] = curTr;
             }
-            return imageMap;
+            return result;
         }
 
-        static addSlotImagesToSelect(src_obj, select) {
+        static getSlotImagesSrcs(itemId) {
+            const slotInfoTR = this.slotElements[itemId];
+            if (slotInfoTR) {
+                let slotImages = [];
+                const imgs = slotInfoTR.childNodes[3].querySelectorAll('img');
+                for (const curImg of imgs) {
+                    slotImages.push(curImg.src);
+                }
+                return slotImages;
+            }
+        }
+
+        static addSlotImagesToSelect(select) {
             let selectedId;
             for (const [idx, option] of Object.entries(select.options)) {
                 if (Number(idx) === 0) {
@@ -504,7 +549,8 @@
                     } else {
                         curId = Number(option.value);
                     }
-                    if (src_obj[curId]) option.setAttribute("slotImgs", src_obj[curId]);
+                    const slotImages = this.getSlotImagesSrcs(curId);
+                    if (slotImages) option.setAttribute("slotImgs", slotImages.map(src => "<img src='" + src + "'/>").join(""));
                 }
             }
         }
@@ -1082,6 +1128,13 @@
             return option.text;
         }
 
+        static getSelectedValue(selectField) {
+            const value = Number(selectField.value);
+            if (value === 0) return -Number(selectField.options[0].value);
+            if (value < 0) return;
+            return value;
+        }
+
         static getSlotIdx(selectField) {
             return selectField.name.match(/^LocationEquip\[go_(\w*)\]\[(\d*)\].*/)[2];
         }
@@ -1261,7 +1314,7 @@
 
             for (const slotName of this.getAllSlotNames()) {
                 const wantedEquip = equip[slotName];
-                if (this.isMultiSlot(slotName)) {
+                if (Array.isArray(equip[slotName])) {
                     const slotIds = [];
                     if (wantedEquip) {
                         for (const [idx, cur] of wantedEquip.entries()) {
