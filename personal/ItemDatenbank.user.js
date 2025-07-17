@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Item-Datenbank
-// @version        0.12.2
+// @version        0.12.3
 // @author         demawi
 // @namespace      demawi
 // @description    Datenbank der Items und Suche

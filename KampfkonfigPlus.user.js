@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfkonfig Plus
-// @version        1.1.2
+// @version        1.1.3
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Kampfkonfigs. Aktuell nur JSON-Export/Import.

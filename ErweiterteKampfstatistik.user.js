@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
+// @version        0.21.4
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.21.3
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
