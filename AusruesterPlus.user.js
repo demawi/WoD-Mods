@@ -70,7 +70,7 @@
         static deleteButton;
 
         static marker_Right = "⮞"; // Commit changes to server
-        static marker_Left = "⮜"; // Commit changes to indexedDb
+        static marker_Left = "⮝"; // ⮜Commit changes to indexedDb
 
         static updateProfileName() {
             const currentLoadoutName = EquipConfig.getCurrentLoadoutName();
@@ -1256,7 +1256,7 @@
         }
 
         /**
-         * Genau dies Equip anlegen und nichts anderes.
+         * Genau dies Equip anlegen und nichts anderes. Und an den Server senden.
          * Um exakt zu funktionieren, muss die Seite aktuell sein, da man auch explizit Gegenstände ablegen muss.
          */
         static applyEquip(loadout) {
@@ -1268,6 +1268,7 @@
                         equip[slotName].push({id: itemId});
                     }
                 } else {
+                    //const list = equip[slotName] = [];
                     equip[slotName] = {id: itemIds[0]};
                 }
             }
