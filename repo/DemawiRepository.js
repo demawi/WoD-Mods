@@ -2293,9 +2293,9 @@ class demawiRepository {
                 console.log("World-Reset entdeckt !!!!!", worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, world);
                 let confirm;
                 if (playerName && world.player !== playerName) {
-                    confirm = window.confirm(GM.info.script.name + ": Der Spielername hat sich geändert '" + world.player + "' => '" + playerName + "'!!\n\nFür den neuen Spieler konnte keine laufende Saison ermittelt werden.\nSoll eine neue Saison angelegt werden?");
+                    confirm = window.confirm(GM.info.script.name + ": Der Spielername hat sich geändert '" + world.player + "' => '" + playerName + "'!!\n\nFür den neuen Spieler konnte keine laufende Saison ermittelt werden.\nSoll eine neue Saison angelegt werden? (Aktuelle Saison: " + world.seasons.length + ")");
                 } else {
-                    confirm = window.confirm(GM.info.script.name + ": Ein World-Rest wurde entdeckt, wollen sie die neue Saison starten?");
+                    confirm = window.confirm(GM.info.script.name + ": Ein World-Rest wurde entdeckt, wollen sie die neue Saison starten? (Aktuelle Saison: " + world.seasons.length + ")");
                 }
                 if (confirm) {
                     const newSeason = this.#createNewWorldSeason(myheroIdsMitStufen);
@@ -2900,6 +2900,12 @@ class demawiRepository {
         static getValueFromMainForm(valueType, doc, first) {
             const form = _.WoD.getMainForm(doc, first);
             return form && form[valueType] && form[valueType].value;
+        }
+
+        static isReallyMyGroupOnReportStatsView() {
+            const myGroupName = this.getMyGroupName();
+            let statGroupName = document.querySelector("h1").textContent.match(/Kampfstatistik:\s(.*)+/)[1];
+            return myGroupName === statGroupName;
         }
 
         static getMyWorld(doc) {
@@ -3883,6 +3889,12 @@ class demawiRepository {
             const spinner = document.createElement("i");
             spinner.className = "fa fa-spinner fa-spin";
             return spinner;
+        }
+
+        static createElem(type, innerHTML) {
+            const result = document.createElement(type);
+            result.innerHTML = innerHTML;
+            return result;
         }
 
         static createButton(htmlContent, callback) {
