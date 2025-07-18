@@ -57,32 +57,35 @@
         static markerPanel_Loadout_Server;
         static markerPanel_UI_Server;
 
-        static row2Panel;
+        static ui2XXXPanel;
 
         static warningPanel;
         static loadOutSelect;
-        static loadButton;
-        static saveButton;
+        static applyLoadout2ServerButton;
+        static applyUi2ServerButton;
+        static applyUi2Loadout;
         static renameButton;
         static newButton;
         static vgSyncButton;
-        static saveAndLoadButton;
+        static applyUi2Loadout2Server;
         static deleteButton;
 
-        static marker_Right = "⮞"; // Commit changes to server
+        static marker_Right = "⮞"; // ↷Commit changes to server
         static marker_Left = "⮝"; // ⮜Commit changes to indexedDb
 
         static updateProfileName() {
             const currentLoadoutName = EquipConfig.getCurrentLoadoutName();
             if (currentLoadoutName) {
                 this.loadoutNamePanel.innerHTML = "Aktuell geladen: " + currentLoadoutName;
+                this.nameIt.innerHTML = currentLoadoutName;
             } else {
                 this.loadoutNamePanel.innerHTML = "";
+                this.nameIt.innerHTML = "UI";
             }
 
-            this.markerPanel_UI_Loadout.innerHTML = this.hasChange_UI_Loadout ? "🛢" : "<img src='" + _.UI.WOD_SIGNS.YES + "' />";
-            this.markerPanel_Loadout_Server.innerHTML = this.hasChange_Loadout_Server ? "🖧" : "<img src='" + _.UI.WOD_SIGNS.YES + "' />";
-            this.markerPanel_UI_Server.innerHTML = this.hasChange_UI_Server ? "💻" : "<img src='" + _.UI.WOD_SIGNS.YES + "' />";
+            this.markerPanel_UI_Loadout.innerHTML = this.hasChange_UI_Loadout ? "*" : "✓";
+            this.markerPanel_Loadout_Server.innerHTML = this.hasChange_Loadout_Server ? "*" : "✓";
+            this.markerPanel_UI_Server.innerHTML = this.hasChange_UI_Server ? "*" : "✓";
             this.markerPanel_UI_Loadout.title = this.hasChange_UI_Loadout ? "UI<>Loadout. Das Loadout wurde noch nicht für später gespeichert!" : "UI=Loadout. Das gewählte Loadout stimmt mit der aktuellen Auswahl der UI überein!";
             this.markerPanel_Loadout_Server.title = this.hasChange_Loadout_Server ? "Loadout<>Server. Das Loadout ist aktuell noch nicht ausgerüstet!" : "Loadout=Server. Das gewählte Loadout stimmt mit der aktuellen Auswahl der UI überein!";
             this.markerPanel_UI_Server.title = this.hasChange_UI_Server ? "UI<>Server. UI und Server unterscheiden sich" : "UI=Server. Die gewählte Ausrüstung entspricht dem Stand des Servers";
@@ -103,14 +106,28 @@
             this.warningPanel = document.createElement("div");
             this.warningPanel.style.color = "#FF5555";
 
-            this.markerPanel_UI_Loadout = document.createElement("span");
-            this.markerPanel_UI_Loadout.style.marginLeft = "3px";
-            //this.markerPanel_UI_Loadout.style.marginRight = "0px";
             this.markerPanel_Loadout_Server = document.createElement("span");
-            //this.markerPanel_Loadout_Server.style.marginLeft = "0px";
+            this.markerPanel_Loadout_Server.style.width = "10px";
+            this.markerPanel_Loadout_Server.style.cursor = "help";
+            this.markerPanel_Loadout_Server.style.textAlign = "center";
+            this.markerPanel_Loadout_Server.style.display = "inline-block";
+            this.markerPanel_Loadout_Server.style.marginLeft = "3px";
             //this.markerPanel_Loadout_Server.style.marginRight = "3px";
+
+            this.markerPanel_UI_Loadout = document.createElement("span");
+            //this.markerPanel_UI_Loadout.style.width = "10px";
+            this.markerPanel_UI_Loadout.style.cursor = "help";
+            this.markerPanel_UI_Loadout.style.textAlign = "center";
+            this.markerPanel_UI_Loadout.style.display = "inline-block";
+            //this.markerPanel_UI_Loadout.style.marginLeft = "3px";
+            this.markerPanel_UI_Loadout.style.marginRight = "3px";
+
             this.markerPanel_UI_Server = document.createElement("span");
-            //this.markerPanel_UI_Server.style.marginLeft = "0px";
+            this.markerPanel_UI_Server.style.width = "10px";
+            this.markerPanel_UI_Server.style.cursor = "help";
+            this.markerPanel_UI_Server.style.textAlign = "center";
+            this.markerPanel_UI_Server.style.display = "inline-block";
+            this.markerPanel_UI_Server.style.marginLeft = "3px";
             //this.markerPanel_UI_Server.style.marginRight = "3px";
 
 
@@ -122,7 +139,7 @@
             const updateSelect = function (profilName, initial) {
                 _this.updateProfileName();
                 _this.loadOutSelect.innerHTML = "";
-                for (const curProfileName of Object.keys(EquipConfig.getLoadouts()).sort()) {
+                for (const curProfileName of Object.keys(EquipConfig.getLoadouts()).sort(_.util.localeComparator)) {
                     const selected = profilName === curProfileName ? "selected" : "";
                     _this.loadOutSelect.innerHTML += "<option " + selected + ">" + curProfileName + "</option>";
                 }
@@ -182,18 +199,27 @@
                 }
             }
 
-            this.saveButton = document.createElement("button");
-            this.saveButton.type = "button";
-            this.saveButton.innerHTML = this.marker_Left + " Speichern";
-            this.saveButton.style.lineHeight = "1em";
-            this.saveButton.style.display = "none";
-            this.saveButton.onclick = async function (e) {
+            const createButton = function (content, onclick) {
+                const result = document.createElement("button");
+                result.type = "button";
+                result.style.display = "none";
+                result.innerHTML = content;
+                result.style.lineHeight = "1em";
+                result.onclick = onclick;
+                return result;
+            }
+            const willSubmitToServer = function (button) {
+                button.innerHTML = button.innerHTML.replace(_this.marker_Right, _.UI.createSpinner().outerHTML);
+            }
+
+            this.applyUi2Loadout = createButton(this.marker_Left + " Speichern", async function (e) {
                 const saved = await saveCurrent(false);
                 if (saved) {
                     updateSelect(_this.getCurrentSelectedLoadoutName());
                     _this.revalidateAll();
                 }
-            }
+            });
+
 
             const saveAndRename = async function () {
                 const previousLoadoutName = _this.getCurrentSelectedLoadoutName();
@@ -206,109 +232,129 @@
                 }
             }
 
-            this.newButton = document.createElement("button");
-            this.newButton.type = "button";
-            this.newButton.innerHTML = " Neu+";
-            this.newButton.style.lineHeight = "1em";
-            this.newButton.style.display = "none";
-            this.newButton.onclick = async function () {
+            this.revertUiButton = createButton("🔙", async function () {
+                window.location.reload();
+            });
+
+            this.newButton = createButton(" ➕", async function () {
                 const savedLoadoutName = await saveCurrent(true);
                 if (savedLoadoutName) {
                     updateSelect(savedLoadoutName);
                     _this.revalidateAll();
                 }
-            }
+            });
+            this.newButton.style.width = "22px"
+            this.newButton.style.paddingLeft = "0px"
+            this.newButton.style.paddingRight = "0px"
 
-            this.saveAndLoadButton = document.createElement("button");
-            this.saveAndLoadButton.type = "button";
-            this.saveAndLoadButton.style.display = "none";
-            this.saveAndLoadButton.innerHTML = this.marker_Left + " Speichern + Ausrüsten " + this.marker_Right;
-            this.saveAndLoadButton.style.lineHeight = "1em";
-            this.saveAndLoadButton.onclick = async function () {
+            this.applyUi2Loadout2Server = createButton(this.marker_Left + " Speichern + Ausrüsten " + this.marker_Right, async function () {
                 await saveCurrent();
-                _this.saveAndLoadButton.innerHTML = _this.saveAndLoadButton.innerHTML.replace(_this.marker_Right, _.UI.createSpinner().outerHTML);
+                willSubmitToServer(this);
                 await loadCurrent();
-            }
+            });
 
-            this.renameButton = document.createElement("button");
-            this.renameButton.type = "button";
-            this.renameButton.style.display = "none";
-            this.renameButton.innerHTML = "Umbenennen";
-            this.renameButton.style.lineHeight = "1em";
-            this.renameButton.onclick = async function () {
+            this.renameButton = createButton("✎", async function () {
                 await renameCurrent();
-            }
+            });
+            this.renameButton.style.width = "22px"
+            this.renameButton.style.paddingLeft = "0px"
+            this.renameButton.style.paddingRight = "0px"
 
-            this.loadButton = document.createElement("button");
-            this.loadButton.type = "button";
-            this.loadButton.style.display = "none";
-            this.loadButton.innerHTML = "Ausrüsten " + this.marker_Right;
-            this.loadButton.style.lineHeight = "1em";
-            this.loadButton.onclick = async function () {
-                _this.loadButton.innerHTML = _this.loadButton.innerHTML.replace(_this.marker_Right, _.UI.createSpinner().outerHTML);
+            this.applyLoadout2ServerButton = createButton("Ausrüsten " + this.marker_Right, async function () {
+                willSubmitToServer(this);
                 await loadCurrent();
-            }
+            });
 
-            this.activButton = document.createElement("button");
-            this.activButton.type = "button";
-            this.activButton.style.display = "none";
-            this.activButton.innerHTML = "Aktuell";
-            this.activButton.style.lineHeight = "1em";
-            this.activButton.onclick = async function () {
+            this.applyUi2ServerButton = createButton("Anwenden " + this.marker_Right, async function () {
+                willSubmitToServer(this);
+                document.querySelector("input[name='ok']").click();
+            });
+
+            this.activButton = createButton("Aktuell", async function () {
                 EquipConfig.setCurrent(_this.getCurrentSelectedLoadoutName(), true);
                 _this.updateProfileName();
                 _this.onDataChange();
-            }
+            });
 
-            this.vgSyncButton = document.createElement("button");
-            this.vgSyncButton.type = "button";
-            this.vgSyncButton.style.display = "none";
-            this.vgSyncButton.innerHTML = "NachfüllenTest " + this.marker_Right;
-            this.vgSyncButton.style.lineHeight = "1em";
-            this.vgSyncButton.onclick = async function () {
+            this.vgSyncButton = createButton("NachfüllenTest " + this.marker_Right, async function () {
                 //_this.vgSyncButton.innerHTML = _this.vgSyncButton.innerHTML.replace(_this.marker_Right, _.UI.createSpinner().outerHTML);
                 FormHandler.getDynamicVGs((await EquipConfig.getSelectedLoadout()).vgs, true);
-            }
+            });
 
-            this.deleteButton = document.createElement("button");
-            this.deleteButton.type = "button";
-            this.deleteButton.innerHTML = "Löschen";
-            this.deleteButton.style.lineHeight = "1em";
-            this.deleteButton.onclick = async function () {
+            this.deleteButton = createButton("❌", async function () {
                 const loadoutName = _this.loadOutSelect.value;
                 const confirm = window.confirm("Soll das Loadout '" + loadoutName + "' wirklisch gelöscht werden?");
                 if (confirm) {
                     await EquipConfig.deleteLoadout(loadoutName);
                     updateSelect();
                 }
-            }
+            });
+            this.deleteButton.style.width = "22px"
+            this.deleteButton.style.paddingLeft = "0px"
+            this.deleteButton.style.paddingRight = "0px"
 
-            panel.append(this.loadoutNamePanel);
-            panel.append(this.markerPanel_UI_Loadout);
-            panel.append(this.markerPanel_Loadout_Server);
-            panel.append(this.markerPanel_UI_Server);
-            panel.append(this.loadOutSelect);
-            panel.append(this.activButton);
-            panel.append(this.loadButton);
+            // 1st row
+            //panel.append(this.loadoutNamePanel);
 
-            //this.markerPanel_UI_Server.style.display = "inline-block";
-            //this.markerPanel_UI_Server.style.marginBottom = "5px";
-            panel.append(document.createElement("br"));
-            let subpanel = this.row2Panel = document.createElement("div");
-            subpanel.style.marginTop = "2px"
-            //subpanel.style.marginBottom = "2px"
+            // 2nd row: Loadout -> Server
+            let subpanel = this.ui2XXXPanel = document.createElement("div");
             panel.append(subpanel);
-            subpanel.append(_.UI.createElem("span", "UI: "));
-            subpanel.append(this.saveButton);
-            subpanel.append(this.saveAndLoadButton);
+
+            let selectPanel = document.createElement("span");
+            subpanel.append(selectPanel);
+            selectPanel.style.zIndex = 1;
+            const buttonPanel = document.createElement("span");
+            selectPanel.style.position = "relative";
+            selectPanel.append(buttonPanel);
+            buttonPanel.style.display = "inline-block";
+            buttonPanel.style.position = "absolute";
+            buttonPanel.style.width = "100%";
+
+            buttonPanel.style.textAlign = "left";
+            buttonPanel.append(this.newButton);
+            buttonPanel.append(this.renameButton);
+            buttonPanel.append(this.deleteButton);
+            selectPanel.append(this.loadOutSelect);
+            selectPanel.onmouseenter = function () {
+                buttonPanel.style.top = (selectPanel.offsetHeight + 2) + "px";
+                _this.newButton.style.display = "";
+                _this.renameButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
+                _this.deleteButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
+            }
+            const leaveFn = function () {
+                _this.newButton.style.display = "none";
+                _this.renameButton.style.display = "none";
+                _this.deleteButton.style.display = "none";
+            };
+            this.loadOutSelect.onclick = leaveFn;
+            selectPanel.onmouseleave = leaveFn;
+            leaveFn();
+
+            subpanel.append(this.activButton);
+            subpanel.append(this.applyLoadout2ServerButton);
+            subpanel.append(this.markerPanel_Loadout_Server);
+
+            // 3rd row: UI -> Loadout / Server
+            subpanel = this.ui2XXXPanel = document.createElement("div");
+            subpanel.style.marginTop = "2px";
+            subpanel.style.marginBottom = "2px";
+            subpanel.style.display = "none";
+            panel.append(subpanel);
+            this.nameIt = _.UI.createElem("span", "UI: ");
+            subpanel.append(this.nameIt);
+            subpanel.append(this.markerPanel_UI_Loadout);
+            subpanel.append(this.revertUiButton);
+            subpanel.append(this.applyUi2Loadout);
+            subpanel.append(this.applyUi2Loadout2Server);
+            subpanel.append(this.applyUi2ServerButton);
             subpanel.append(this.vgSyncButton);
+            subpanel.append(this.markerPanel_UI_Server);
+
+            // 4th row: Persistent Loadout actions
             subpanel = document.createElement("div");
             subpanel.style.marginTop = "2px";
             subpanel.style.marginBottom = "2px";
             panel.append(subpanel);
-            subpanel.append(this.newButton);
-            subpanel.append(this.renameButton);
-            subpanel.append(this.deleteButton);
             //panel.style.marginLeft = "0px";
             panel.style.marginTop = "10px";
             panel.style.float = "right";
@@ -320,10 +366,11 @@
             title.style.display = "inline-block";
             title.parentElement.insertBefore(panel, title.nextSibling);
 
+            this.applyUi2ServerButton.title = "Gemachte Änderungen direkt durchführen und an den Server senden";
             this.newButton.title = "Angezeigte Ausrüstung als Loadout unter einem abgefragten Namen speichern.";
-            this.saveAndLoadButton.title = ""; // wird dynamisch bestimmt
-            this.loadButton.title = ""; // wird dynamisch bestimmt
-            this.saveButton.title = ""; // wird dynamisch bestimmt
+            this.applyUi2Loadout2Server.title = ""; // wird dynamisch bestimmt
+            this.applyLoadout2ServerButton.title = ""; // wird dynamisch bestimmt
+            this.applyUi2Loadout.title = ""; // wird dynamisch bestimmt
             this.vgSyncButton.title = "Anhand der hinterlegten VG-Konfig im Loadout die Tasche befüllen.";
 
             // Einzig auf Loadout bezogen
@@ -344,40 +391,48 @@
             this.hasChange_UI_Server = await EquipConfig.differs_UI_Server();
             console.log("DIFF", selectedLoadoutName, "UI<>Loadout:" + this.hasChange_UI_Loadout, "Loadout<>Server:" + this.hasChange_Loadout_Server, "UI<>Server:" + this.hasChange_UI_Server);
 
-            // 2nd Row
-            this.row2Panel.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none";
-            this.saveButton.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none";
-            this.saveAndLoadButton.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none"; // && this.hasChange_UI_Server
+            // 3nd Row
+            this.ui2XXXPanel.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout || this.hasChange_UI_Server ? "" : "none";
+            this.applyUi2Loadout.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none";
+            this.applyUi2Loadout2Server.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none"; // && this.hasChange_UI_Server
+            this.applyUi2ServerButton.style.display = this.hasChange_UI_Server ? "" : "none";
 
-            this.renameButton.style.display = this.hasSelectedLoadout() ? "" : "none";
-            this.loadButton.style.display = this.hasSelectedLoadout() && (this.hasChange_Loadout_Server || hasVGsConfigured) ? "" : "none";
+            //this.renameButton.style.display = this.hasSelectedLoadout() ? "" : "none";
+            this.applyLoadout2ServerButton.style.display = this.hasSelectedLoadout() && (this.hasChange_Loadout_Server || hasVGsConfigured) ? "" : "none";
             this.vgSyncButton.style.display = "none"; // & hasVGsConfigured && !this.hasChange_UI_Loadout ? "" : "none";
-            this.newButton.style.display = ""; // ist immer möglich
+            //this.newButton.style.display = ""; // ist immer möglich
+            this.revertUiButton.style.display = this.hasChange_UI_Server ? "" : "none";
 
-            const prefix = this.hasChange_UI_Server ? " unverifiziert" : "";
+            const prefix = this.hasChange_UI_Server ? "" : ""; //  unverifiziert
             if (this.getCurrentSelectedLoadoutName() !== EquipConfig.getCurrentLoadoutName()) {
-                this.saveButton.innerHTML = this.marker_Left + prefix + " Überschreiben";
-                this.saveButton.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
+                this.applyUi2Loadout.innerHTML = this.marker_Left + prefix + " Überschreiben";
+                this.applyUi2Loadout.style.opacity = 0.6;
+                this.applyUi2Loadout.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
             } else {
-                this.saveButton.innerHTML = this.marker_Left + prefix + " Speichern";
-                this.saveButton.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
+                this.applyUi2Loadout.innerHTML = this.marker_Left + prefix + " Speichern";
+                this.applyUi2Loadout.style.opacity = prefix ? 0.6 : "";
+                this.applyUi2Loadout.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
             }
             if (this.getCurrentSelectedLoadoutName() !== EquipConfig.getCurrentLoadoutName()) {
-                this.saveAndLoadButton.innerHTML = this.marker_Left + prefix + " Überschreiben + Ausrüsten " + this.marker_Right;
-                this.saveAndLoadButton.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
+                this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Überschreiben + Ausrüsten " + this.marker_Right;
+                this.applyUi2Loadout2Server.style.opacity = 0.6;
+                this.applyUi2Loadout2Server.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             } else {
-                this.saveAndLoadButton.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
-                this.saveAndLoadButton.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
+                this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
+                this.applyUi2Loadout2Server.style.opacity = prefix ? 0.6 : "";
+                this.applyUi2Loadout2Server.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             }
             if (this.hasChange_UI_Loadout && this.hasChange_UI_Server) {
-                this.loadButton.innerHTML = "Trotz Änderungen ausrüsten" + this.marker_Right;
-                this.loadButton.title = "Gewähltes Loadout laden und VGs neu befüllen! Änderungen an der UI werden verworfen!";
+                this.applyLoadout2ServerButton.innerHTML = "🔙 " + this.marker_Right;
+                this.applyLoadout2ServerButton.style.opacity = 0.6;
+                this.applyLoadout2ServerButton.title = "Gewähltes Loadout laden und VGs neu befüllen! Änderungen an der UI werden verworfen!";
             } else {
-                this.loadButton.innerHTML = "" + this.marker_Right;
-                this.loadButton.title = "Gewähltes Loadout laden! VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
+                this.applyLoadout2ServerButton.innerHTML = "" + this.marker_Right;
+                this.applyLoadout2ServerButton.style.opacity = "";
+                this.applyLoadout2ServerButton.title = "Gewähltes Loadout laden! VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             }
             this.activButton.style.display = (!this.hasChange_UI_Loadout && this.hasChangedProfile()) ? "" : "none";
-            this.deleteButton.style.display = this.hasSelectedLoadout() ? "" : "none";
+            //this.deleteButton.style.display = this.hasSelectedLoadout() ? "" : "none";
             this.updateProfileName();
         }
 
@@ -1260,16 +1315,29 @@
          * Um exakt zu funktionieren, muss die Seite aktuell sein, da man auch explizit Gegenstände ablegen muss.
          */
         static applyEquip(loadout) {
-            const equip = _.util.cloneObject(loadout.equip);
-            const vgs = this.getDynamicVGs(loadout.vgs);
-            for (const [slotName, itemIds] of Object.entries(vgs)) {
-                if (this.isMultiSlot(slotName)) {
+            const equipChangesId = {};
+            const equip = loadout.equip;
+            const vgs = this.getDynamicVGs(loadout.vgs)
+            console.log("APPLY_EQUIP", equip, vgs);
+
+            for (const [slotName, itemIds] of Object.entries(equip)) {
+                const slotList = equipChangesId[slotName] = [];
+                if (Array.isArray(itemIds)) {
                     for (const itemId of itemIds) {
-                        equip[slotName].push({id: itemId});
+                        slotList.push(itemId.id);
                     }
                 } else {
-                    //const list = equip[slotName] = [];
-                    equip[slotName] = {id: itemIds[0]};
+                    slotList.push(itemIds.id);
+                }
+            }
+            for (const [slotName, itemIds] of Object.entries(vgs)) {
+                const slotList = equipChangesId[slotName] || (equipChangesId[slotName] = []);
+                if (Array.isArray(itemIds)) {
+                    for (const itemId of itemIds) {
+                        slotList.push(itemId);
+                    }
+                } else {
+                    slotList.push(itemIds);
                 }
             }
             const theForm = document.getElementsByName("the_form")[0];
@@ -1313,38 +1381,31 @@
                 return itemDef.id;
             }
 
+            const getDefaultEquipArray = function (defaultEquip) {
+                if (defaultEquip && !Array.isArray(defaultEquip)) defaultEquip = [defaultEquip];
+                return defaultEquip;
+            }
+
             for (const slotName of this.getAllSlotNames()) {
-                const wantedEquip = equip[slotName];
-                if (Array.isArray(equip[slotName])) {
-                    const slotIds = [];
-                    if (wantedEquip) {
-                        for (const [idx, cur] of wantedEquip.entries()) {
-                            const itemId = getId(cur);
-                            slotIds.push(itemId);
-                            if (!defaultEquip[slotName] || !defaultEquip[slotName].includes(itemId)) {
-                                addEntry(slotName, idx, itemId);
-                            }
-                        }
+                let idx = 0;
+                const wantedEquipIds = equipChangesId[slotName] || [];
+                console.log("KKKKK", slotName, wantedEquipIds);
+                for (const cur of wantedEquipIds) {
+                    const itemId = getId(cur);
+                    const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
+                    if (!defaultEquipSlot || !defaultEquipSlot.includes(itemId)) {
+                        addEntry(slotName, idx, itemId);
+                        idx++;
                     }
-                    // Überprüfen, was abgelegt werden soll
-                    let idx = (wantedEquip && wantedEquip.length) || 0;
-                    if (defaultEquip[slotName]) { // tasche kann auch mal komplett nicht vorhanden sein
-                        for (const itemId of defaultEquip[slotName]) {
-                            if (!slotIds.includes(itemId)) {
-                                addEntry(slotName, idx, -itemId);
-                                idx++;
-                            }
-                        }
-                    }
-                } else {
-                    if (wantedEquip) {
-                        const itemId = getId(wantedEquip);
-                        if (defaultEquip[slotName] !== itemId) {
-                            addEntry(slotName, 0, itemId);
-                        }
-                    } else {
-                        if (defaultEquip[slotName]) {
-                            addEntry(slotName, 0, -defaultEquip[slotName]);
+                }
+                // Überprüfen, was abgelegt werden soll
+                const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
+                console.log("DefaultEquipSlot: ", defaultEquipSlot);
+                if (defaultEquipSlot) { // tasche kann auch mal komplett nicht vorhanden sein
+                    for (const itemId of defaultEquipSlot) {
+                        if (!wantedEquipIds.includes(itemId)) {
+                            addEntry(slotName, idx, -itemId);
+                            idx++;
                         }
                     }
                 }
@@ -1366,6 +1427,7 @@
                 addFormValue("LocationEquip[go_" + cur[0] + "][" + getNextIndex(cur[0]) + "]", cur[2]);
             }
 
+            console.log("SUBMIT", removes, adds);
             document.body.append(newForm);
             newForm.submit();
         }
