@@ -13,8 +13,10 @@
 // @include        https://*/wod/spiel/hero/items.php*
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
+//
 // @include        http*://*world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
+//
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js
 // @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
