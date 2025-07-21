@@ -5,10 +5,13 @@
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
 // @include        http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+//
+// @include        http*://world-of-dungeons.de*
+// @require        repo/DemawiRepository.js
+//
 // @require        https://code.jquery.com/jquery-3.7.1.min.js
 // @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
 // @require	       https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js#sha512=2ImtlRlf2VVmiGZsjm9bEyhjGW4dU7B6TNwh/hx/iSByxNENtj3WVE6o/9Lj4TJeVXPi4bnOIMXFIJJAeufa0A==
-// @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Kampfkonfig Plus                                  ***
@@ -28,8 +31,11 @@
 
         static async startMod() {
             if (_.WoD.getView() === _.WoD.VIEW.ITEMS_GEAR) {
-                await demawiRepository.startMod();
-                await MyStorage.initMyStorage(_.Storages.IndexedDb.getDb(Mod.dbname, "Equipper"));
+                const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
+                if (!indexedDb) return;
+                await MyStorage.initMyStorage(indexedDb);
+
+                demawiRepository.startMod();
                 Ausruester.start();
             }
         }
@@ -994,6 +1000,7 @@
     class EquipConfig {
 
         static #heroId;
+        static #myWorld;
         static #equipConfigs; // save(), load()
         static #serverEquip;
         static #serverEquipOhneVGs;
@@ -1001,6 +1008,7 @@
 
         static async init() {
             this.#heroId = _.WoD.getMyHeroId();
+            this.#myWorld = _.WoD.getMyWorld();
             await this.#load();
             if (!this.#equipConfigs) {
                 this.#equipConfigs = {
@@ -1221,11 +1229,11 @@
         }
 
         static getLoadoutId(profileName) {
-            return this.#heroId + "|" + profileName;
+            return this.#myWorld + this.#heroId + "|" + profileName;
         }
 
         static async #load() {
-            this.#equipConfigs = await MyStorage.equipHeroes.getValue(this.#heroId);
+            this.#equipConfigs = await MyStorage.equipHeroes.getValue(this.#myWorld + this.#heroId);
         }
 
         static async #save() {
@@ -1683,12 +1691,11 @@
 
         static async initMyStorage(indexedDb) {
             this.indexedDb = indexedDb;
-            this.indexedDbLocal = _.Storages.IndexedDb.getDb(Mod.dbname, "WoDStats+");
             await this.initThisStorage(this.indexedDb);
         }
 
         static async initThisStorage(indexedDb) {
-            this.equipHeroes = indexedDb.createObjectStorage("equipHeroes", "id");
+            this.equipHeroes = indexedDb.createObjectStorage("equipHero", "id");
             this.equipLoadout = indexedDb.createObjectStorage("equipLoadout", "id");
         }
 
