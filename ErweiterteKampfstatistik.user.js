@@ -1,9 +1,9 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
+// @version        0.21.6
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @version        0.21.5
 // @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
 // @include        http*://*/wod/spiel/*dungeon/report.php*
 // @include        http*://*.world-of-dungeons.de/*combat_report.php*
@@ -11,6 +11,7 @@
 // @include        http*://*/wod/spiel/event/play.php*
 // @include        http*://*/wod/spiel/event/eventlist.php*
 //
+// @include        http*://*/wod/spiel/hero/skill.php*
 // @include        http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
@@ -51,7 +52,19 @@
             if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
 
-            await demawiRepository.startMod();
+            const view = _.WoD.getView();
+            demawiRepository.startMod();
+            switch (view) {
+                case _.WoD.VIEW.SKILL:
+                    await _.WoDSkillsDb.onSkillPage();
+                    break;
+                case _.WoD.VIEW.REPORT: // Statistik, Gegenstände oder Kampfbericht
+                    await this.onReportSite();
+                    break;
+            }
+        }
+
+        static async onReportSite() {
             unsafeWindow.statExecuter = async function (...args) {
                 console.log(GM.info.script.name + " wird aufgerufen");
                 await Mod.startMod2(...args);
