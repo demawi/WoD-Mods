@@ -5152,7 +5152,6 @@ class demawiRepository {
                      * Ausserhalb muss dann entschieden werden, was wirklich noch fehlt.
                      */
                     requestedSkillInfoFromUser = unknownIdentifier;
-                    console.log("Fertigkeit: ", fertigkeit);
                 }
 
                 if (requestedSkillInfoFromUser) requestSkillInfoFromUser(requestedSkillInfoFromUser, fertigkeit, actionTD.parentElement);
@@ -5204,7 +5203,7 @@ class demawiRepository {
                 const unknownEntry = await unknownSkillDb.getValue(unknownIdentifier) || {id: unknownIdentifier};
                 if (unknownEntry.typ) fertigkeit.typ = unknownEntry.typ;
                 if (unknownEntry.angriffstyp) fertigkeit.angriffstyp = unknownEntry.angriffstyp;
-                console.log("UnknownEntry: ", unknownIdentifier, unknownEntry, fertigkeit, actionTD);
+                //console.log("UnknownEntry: ", unknownIdentifier, unknownEntry, fertigkeit, actionTD);
                 unknownEntry.wurf = !!fertigkeit.wuerfe;
 
                 // TODO: weiter definieren in welchem Dungeon und in welchem Level, gab es nen variablen Wurf oder ist der auch unbekannt?
