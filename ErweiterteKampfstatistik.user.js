@@ -519,7 +519,7 @@
                             }
                             angriffstypSelect.onchange = async function () {
                                 const userBestimmung = unknownEntry.user || (unknownEntry.user = {});
-                                unknownEntry.angrifsstyp = userBestimmung.angrifsstyp = angriffstypValue.value;
+                                unknownEntry.angrifsstyp = userBestimmung.angrifsstyp = angriffstypSelect.value;
                                 await _.WoDStorages.getSkillsUnknownDb().setValue(unknownEntry);
                             }
                             angriffstypContainer.append(angriffstypSelect);
