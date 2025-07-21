@@ -1274,6 +1274,8 @@ class demawiRepository {
 
         static #supported = ["Tampermonkey", "Greasemonkey", "Violentmonkey"];
 
+        static #access = "http*://world-of-dungeons.de*";
+
         static mode;
 
         /**
@@ -1398,12 +1400,13 @@ class demawiRepository {
          * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
          */
         static actAsCSProxyResponder() {
+            if (_.WindowManager.getMark("actAsCSProxyResponder")) return;
+            _.WindowManager.mark("actAsCSProxyResponder", 1);
             const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
             const log = document.referrer ? console.log : window.top.console.log;
             const errorlogger = document.referrer ? console.error : window.top.console.error;
             const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
             const myOrigin = window.location.origin;
-            parentWindow.focus();
 
             document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + myOrigin + "</b><br>Es schließt sich mit dem Hauptfenster";
 
@@ -1467,7 +1470,7 @@ class demawiRepository {
                 false,
             );
 
-            log("CSProxy[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
+            log("CSProxy-Responder[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
 
             // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
             try {
@@ -1478,11 +1481,25 @@ class demawiRepository {
         }
 
         /**
+         * Prüft, ob das Skript auch Zugriff auf die entsprechende URL hat, um den Responder zu installieren.
+         */
+        static #checkScriptAccess(responderHttp) {
+            for (const curInclude of GM.info.script.includes) {
+                if (responderHttp.match("^" + curInclude.replaceAll("*", ".*")) + "$") return true;
+            }
+            return false;
+        }
+
+        /**
          * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
          */
         static async getProxyFor(responderHttp, debug) {
             const targetUrl = new URL(responderHttp);
             targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
+            if (!this.#checkScriptAccess(responderHttp)) {
+                console.error(GM.info.script.name + " kann nicht mit '" + responderHttp + "' kommunizieren. ", GM.info.script.includes);
+                throw Error(GM.info.script.name + " kann nicht mit '" + responderHttp + "' kommunizieren. " + JSON.stringify(GM.info.script.includes));
+            }
 
             const mainTopWindow = (window.opener || window).top;
 
@@ -1794,7 +1811,7 @@ class demawiRepository {
                 if (dbType === "l") { // cant proxy
                     return this.initWodDb("___", modDbName);
                 } else if (dbType === "p") {
-                    const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", true);
+                    const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
                     const indexedDb = this.initWodDbProxy(modDbName + "Main", "___", messengerPromise);
                     await messengerPromise;
                     return indexedDb;
@@ -2862,6 +2879,7 @@ class demawiRepository {
 
 
         static #reportViewCache;
+
         static getReportView(silent) {
             if (this.#reportViewCache) return this.#reportViewCache;
             this.#reportViewCache = this.#getReportViewIntern();

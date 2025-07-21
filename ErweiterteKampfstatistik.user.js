@@ -11,7 +11,7 @@
 // @include        http*://*/wod/spiel/event/play.php*
 // @include        http*://*/wod/spiel/event/eventlist.php*
 //
-// @include        http*://*world-of-dungeons.de*
+// @include        http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************

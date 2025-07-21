@@ -14,7 +14,7 @@
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
 //
-// @include        http*://*world-of-dungeons.de*
+// @include        http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 //
 // @require        libs/jszip.min.js
