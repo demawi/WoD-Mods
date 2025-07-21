@@ -50,6 +50,8 @@
 
         static hasChange_Loadout_Server;
         static hasChange_UI_Loadout;
+        static hasChange_UI_Loadout_Equip;
+        static hasChange_UI_Loadout_VGConfig;
         static hasChange_UI_Server;
 
         static loadoutNamePanel;
@@ -72,6 +74,7 @@
 
         static marker_Right = "⮞"; // ↷Commit changes to server
         static marker_Left = "⮝"; // ⮜Commit changes to indexedDb
+        static marker_Warn = "🔙"; // ⚠️
 
         static updateProfileName() {
             const currentLoadoutName = EquipConfig.getCurrentLoadoutName();
@@ -87,7 +90,7 @@
             this.markerPanel_Loadout_Server.innerHTML = this.hasChange_Loadout_Server ? "*" : "✓";
             this.markerPanel_UI_Server.innerHTML = this.hasChange_UI_Server ? "*" : "✓";
             this.markerPanel_UI_Loadout.title = this.hasChange_UI_Loadout ? "UI<>Loadout. Das Loadout wurde noch nicht für später gespeichert!" : "UI=Loadout. Das gewählte Loadout stimmt mit der aktuellen Auswahl der UI überein!";
-            this.markerPanel_Loadout_Server.title = this.hasChange_Loadout_Server ? "Loadout<>Server. Das Loadout ist aktuell noch nicht ausgerüstet!" : "Loadout=Server. Das gewählte Loadout stimmt mit der aktuellen Auswahl der UI überein!";
+            this.markerPanel_Loadout_Server.title = this.hasChange_Loadout_Server ? "Loadout<>Server. Das Loadout ist aktuell noch nicht ausgerüstet!" : "Loadout=Server. Das gewählte Loadout stimmt mit dem Server überein!";
             this.markerPanel_UI_Server.title = this.hasChange_UI_Server ? "UI<>Server. UI und Server unterscheiden sich" : "UI=Server. Die gewählte Ausrüstung entspricht dem Stand des Servers";
         }
 
@@ -208,7 +211,7 @@
                 result.onclick = onclick;
                 return result;
             }
-            const willSubmitToServer = function (button) {
+            const willSubmitToServer = function (button, revert) {
                 button.innerHTML = button.innerHTML.replace(_this.marker_Right, _.UI.createSpinner().outerHTML);
             }
 
@@ -232,7 +235,8 @@
                 }
             }
 
-            this.revertUiButton = createButton("🔙", async function () {
+            this.revertUiButton = createButton("🔙 " + this.marker_Right, async function () {
+                willSubmitToServer(this);
                 window.location.reload();
             });
 
@@ -278,7 +282,7 @@
 
             this.vgSyncButton = createButton("NachfüllenTest " + this.marker_Right, async function () {
                 //_this.vgSyncButton.innerHTML = _this.vgSyncButton.innerHTML.replace(_this.marker_Right, _.UI.createSpinner().outerHTML);
-                FormHandler.getDynamicVGs((await EquipConfig.getSelectedLoadout()).vgs, true);
+                VGKonfig.getDynamicVGs((await EquipConfig.getSelectedLoadout()).vgs, true);
             });
 
             this.deleteButton = createButton("❌", async function () {
@@ -286,7 +290,7 @@
                 const confirm = window.confirm("Soll das Loadout '" + loadoutName + "' wirklisch gelöscht werden?");
                 if (confirm) {
                     await EquipConfig.deleteLoadout(loadoutName);
-                    updateSelect();
+                    updateSelect(EquipConfig.getCurrentLoadoutName());
                 }
             });
             this.deleteButton.style.width = "22px"
@@ -366,18 +370,21 @@
             title.style.display = "inline-block";
             title.parentElement.insertBefore(panel, title.nextSibling);
 
-            this.applyUi2ServerButton.title = "Gemachte Änderungen direkt durchführen und an den Server senden";
+            this.applyUi2ServerButton.title = "";
             this.newButton.title = "Angezeigte Ausrüstung als Loadout unter einem abgefragten Namen speichern.";
             this.applyUi2Loadout2Server.title = ""; // wird dynamisch bestimmt
             this.applyLoadout2ServerButton.title = ""; // wird dynamisch bestimmt
             this.applyUi2Loadout.title = ""; // wird dynamisch bestimmt
             this.vgSyncButton.title = "Anhand der hinterlegten VG-Konfig im Loadout die Tasche befüllen.";
+            this.revertUiButton.title = "Jegliche gemachte Änderungen verwerfen und die Seite neu laden.";
 
             // Einzig auf Loadout bezogen
             this.activButton.title = "Als aktuelles Loadout übernehmen.";
             this.renameButton.title = "Das gewählte Loadout umbenennen.";
             this.deleteButton.title = "Das gewählte Loadout löschen";
         }
+
+        static notPreferredOpacity = 0.8;
 
         /**
          * Wird aufgerufen, wenn ein Gegenstand, die Loadout-Auswahl oder eine VG-Konfig geändert wird.
@@ -386,7 +393,9 @@
             const selectedLoadoutName = this.getCurrentSelectedLoadoutName();
             const hasVGsConfigured = this.hasSelectedLoadout() && (await EquipConfig.getSelectedLoadout()).vgs;
 
-            this.hasChange_UI_Loadout = !this.hasSelectedLoadout() || await EquipConfig.differs_UI_Loadout(selectedLoadoutName);
+            [this.hasChange_UI_Loadout_Equip, this.hasChange_UI_Loadout_VGConfig] = (!this.hasSelectedLoadout() & [false, false]) || await EquipConfig.differs_UI_Loadout(selectedLoadoutName);
+            this.hasChange_UI_Loadout = this.hasChange_UI_Loadout_Equip || this.hasChange_UI_Loadout_VGConfig;
+
             this.hasChange_Loadout_Server = !this.hasSelectedLoadout() || await EquipConfig.differs_Loadout_Server(selectedLoadoutName);
             this.hasChange_UI_Server = await EquipConfig.differs_UI_Server();
             console.log("DIFF", selectedLoadoutName, "UI<>Loadout:" + this.hasChange_UI_Loadout, "Loadout<>Server:" + this.hasChange_Loadout_Server, "UI<>Server:" + this.hasChange_UI_Server);
@@ -396,40 +405,48 @@
             this.applyUi2Loadout.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none";
             this.applyUi2Loadout2Server.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout ? "" : "none"; // && this.hasChange_UI_Server
             this.applyUi2ServerButton.style.display = this.hasChange_UI_Server ? "" : "none";
+            this.revertUiButton.style.opacity = this.notPreferredOpacity;
 
             //this.renameButton.style.display = this.hasSelectedLoadout() ? "" : "none";
-            this.applyLoadout2ServerButton.style.display = this.hasSelectedLoadout() && (this.hasChange_Loadout_Server || hasVGsConfigured) ? "" : "none";
+            this.applyLoadout2ServerButton.style.display = this.hasSelectedLoadout() ? "" : "none"; //  && (this.hasChange_Loadout_Server || hasVGsConfigured)
             this.vgSyncButton.style.display = "none"; // & hasVGsConfigured && !this.hasChange_UI_Loadout ? "" : "none";
             //this.newButton.style.display = ""; // ist immer möglich
-            this.revertUiButton.style.display = this.hasChange_UI_Server ? "" : "none";
+            this.revertUiButton.style.display = this.hasChange_UI_Server || this.hasChange_UI_Loadout_VGConfig ? "" : "none";
 
             const prefix = this.hasChange_UI_Server ? "" : ""; //  unverifiziert
             if (this.getCurrentSelectedLoadoutName() !== EquipConfig.getCurrentLoadoutName()) {
                 this.applyUi2Loadout.innerHTML = this.marker_Left + prefix + " Überschreiben";
-                this.applyUi2Loadout.style.opacity = 0.6;
+                this.applyUi2Loadout.style.opacity = this.notPreferredOpacity;
                 this.applyUi2Loadout.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
             } else {
                 this.applyUi2Loadout.innerHTML = this.marker_Left + prefix + " Speichern";
-                this.applyUi2Loadout.style.opacity = prefix ? 0.6 : "";
+                this.applyUi2Loadout.style.opacity = prefix ? this.notPreferredOpacity : "";
                 this.applyUi2Loadout.title = "Angezeigte Ausrüstung im Loadout speichern." + (prefix ? " Die Ausrüstung wurde noch nicht an den Server übertragen und somit verifiziert!" : "");
             }
             if (this.getCurrentSelectedLoadoutName() !== EquipConfig.getCurrentLoadoutName()) {
                 this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Überschreiben + Ausrüsten " + this.marker_Right;
-                this.applyUi2Loadout2Server.style.opacity = 0.6;
+                this.applyUi2Loadout2Server.style.opacity = this.notPreferredOpacity;
                 this.applyUi2Loadout2Server.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             } else {
                 this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
-                this.applyUi2Loadout2Server.style.opacity = prefix ? 0.6 : "";
+                this.applyUi2Loadout2Server.style.opacity = prefix ? this.notPreferredOpacity : "";
                 this.applyUi2Loadout2Server.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             }
             if (this.hasChange_UI_Loadout && this.hasChange_UI_Server) {
-                this.applyLoadout2ServerButton.innerHTML = "🔙 " + this.marker_Right;
-                this.applyLoadout2ServerButton.style.opacity = 0.6;
-                this.applyLoadout2ServerButton.title = "Gewähltes Loadout laden und VGs neu befüllen! Änderungen an der UI werden verworfen!";
+                this.applyLoadout2ServerButton.innerHTML = this.marker_Warn + " " + this.marker_Right;
+                this.applyLoadout2ServerButton.style.opacity = this.notPreferredOpacity;
+                this.applyLoadout2ServerButton.title = "Gewähltes Loadout laden und VGs neu befüllen!!\n" + this.marker_Warn + ": Änderungen an der UI werden verworfen";
             } else {
                 this.applyLoadout2ServerButton.innerHTML = "" + this.marker_Right;
                 this.applyLoadout2ServerButton.style.opacity = "";
                 this.applyLoadout2ServerButton.title = "Gewähltes Loadout laden! VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
+            }
+            if (this.hasChange_UI_Loadout_VGConfig) {
+                this.applyUi2ServerButton.innerHTML = this.marker_Warn + " Anwenden " + this.marker_Right;
+                this.applyUi2ServerButton.title = "Gemachte Änderungen von der Oberfläche auf den Server übernehmen\n" + this.marker_Warn + ": Änderungen an der VG-Konfig werden somit nicht gespeichert!";
+            } else {
+                this.applyUi2ServerButton.innerHTML = "Anwenden " + this.marker_Right;
+                this.applyUi2ServerButton.title = "Gemachte Änderungen von der Oberfläche auf den Server übernehmen";
             }
             this.activButton.style.display = (!this.hasChange_UI_Loadout && this.hasChangedProfile()) ? "" : "none";
             //this.deleteButton.style.display = this.hasSelectedLoadout() ? "" : "none";
@@ -457,19 +474,22 @@
         }
 
         static errors = {};
+        static DEBUG_ERROR_REPORTING = true;
 
         static reportProblem(id, msg) {
-            //console.warn(id, "Report problem: " + msg);
+            if (this.DEBUG_ERROR_REPORTING) console.warn("[" + id + "] Report problem: " + msg);
             this.errors[id] = msg;
             this.updateErrorMsg();
         }
 
         static removeError(id) {
+            if (this.DEBUG_ERROR_REPORTING && this.errors[id]) console.warn("[" + id + "] Remove problem");
             delete this.errors[id];
             this.updateErrorMsg();
         }
 
         static clearErrors() {
+            if (this.DEBUG_ERROR_REPORTING) console.warn("Clear all errors");
             this.errors = {};
             this.updateErrorMsg();
         }
@@ -541,7 +561,6 @@
                     }, 1000);
                 }
                 _.Libs.betterSelect2(selectField, {templateResult: _this.addSlotImgs});
-                VGKonfig.onEquipSelectChange(slotName, slotIdx); // Initial
             }
 
             ControlBar.revalidateAll();
@@ -645,6 +664,7 @@
             }
 
             const curEquippedAmount = FormHandler.getCurrentEquippedVGAmount(vgBaseName);
+
             if (curEquippedAmount < vgCfg.amount) {
                 ControlBar.reportProblem(vgBaseName, vgBaseName + " zu wenig ausgerüstet " + curEquippedAmount + " < " + vgCfg.amount);
             } else {
@@ -765,7 +785,6 @@
                     delete this.vgSelects[vgBaseName];
                 }
             }
-            this.checkValidation(vgBaseName);
         }
 
         static findFirstVGItem(vgBaseName, slotName) {
@@ -818,6 +837,158 @@
             ControlBar.removeError(vgBaseName);
         }
 
+        /**
+         * Primäres Ziel: möglichst kleine Stacks aufbrauchen
+         */
+        static getDynamicVGs(vgsDef, debug) {
+            if (!vgsDef) return [];
+            const result = {};
+            for (const [slotName, itemsDef] of Object.entries(vgsDef)) {
+                // 1. Auswählbare VG-Statistiken zusammenzählen
+                const stacksDef = FormHandler.getSelectableVGStatistics(slotName);
+                if (!stacksDef) return;
+                const slotResultIds = result[slotName] = [];
+                const freeSlots = itemsDef.slots; // Anzahl verfügbarer Slots
+                const vgsToFillCount = Object.keys(itemsDef.items).length; // Anzahl gewünschter unterschiedlicher VGs
+                const additionalSlots = freeSlots - vgsToFillCount;
+                if (additionalSlots < 0) console.error("Tasche kann nicht ausreichend gefüllt werden, da nicht genügend Slots für VGs frei sind!");
+
+                const arrTimes = function (nr, times) {
+                    const result = [];
+                    for (let i = 0; i < times; i++) {
+                        result.push(nr);
+                    }
+                    return result;
+                }
+
+                const slotUsages = [];
+                let realUsedSlots = 0;
+
+                // 2. Slot-Priorisierung: initial alles zusammenfassen
+                for (const [vgBaseName, wantedAmount] of Object.entries(itemsDef.items)) {
+                    const stackInfo = stacksDef[vgBaseName];
+                    if (!stackInfo) continue; // ERROR: Keine Stacks um vgBaseName zu bedienen
+
+                    const cur = {
+                        name: vgBaseName,
+                        slots: 1,
+                        info: stackInfo,
+                        // hier könnte man noch optimieren, da wir eigentlich gar nicht die gesamte StackSizeOrder brauchen, sondern nur soviel wie wir überhaupt Slots zu vergeben haben
+                        stackSizeInOrder: Object.entries(stackInfo.stacks).map(a => [Number(a[0]), a[1].length]).sort((a, b) => b[0] - a[0]).flatMap(a => arrTimes(a[0], a[1])),
+                        wantedAmount: wantedAmount,
+                    };
+                    cur.maxAvailable = Number(cur.stackSizeInOrder[0]); // cur.slots - 1
+                    cur.prio = this.#priority(cur);
+                    slotUsages.push(cur);
+                    realUsedSlots++;
+                }
+                if (debug) console.log("Initial SlotUsage: ", _.util.cloneObject(slotUsages));
+
+                // 3. Slot-Priorisierung: Die noch freien Slots vergeben
+                for (let i = 0, l = freeSlots - realUsedSlots; i < l; i++) {
+                    const best = slotUsages.reduce(function (prev, current) {
+                        return (prev && prev.prio > current.prio) ? prev : current
+                    }); //returns object
+                    if (debug) console.log("Add Slot for " + best.name + " prio:" + best.prio);
+                    best.slots++;
+                    // Es wird der max Stack verbraucht
+                    best.maxAvailable += Number(best.stackSizeInOrder[best.slots - 1]);
+                    best.prio = this.#priority(best);
+                }
+                if (debug) console.log("SlotUsages: " + slotName, slotUsages);
+
+                // 4. Knappsack-Vergabe
+                for (const slotUsage of slotUsages) {
+                    const wantedAmount = slotUsage.wantedAmount;
+                    const numberArray = Object.entries(slotUsage.info.stacks).reduce((map, a) => {
+                        map[a[0]] = a[1].length;
+                        return map;
+                    }, {});
+                    const kResult = this.#getKnappsack(numberArray, slotUsage.slots, wantedAmount);
+                    if (debug) console.log("Knappsack: ", kResult);
+                    for (const [key, value] of Object.entries(kResult[1])) {
+                        for (let i = 0; i < value; i++) {
+                            slotResultIds.push(slotUsage.info.stacks[key][i]);
+                        }
+                    }
+                }
+            }
+            // console.log("RESULTS: ", result);
+            return result;
+        }
+
+        /**
+         * Bewertet die Priorität, ob noch ein weiterer Slot konsumiert werden sollte.
+         */
+        static #priority(slotUsage) {
+            const stackInfo = slotUsage.info;
+            const stackCount = stackInfo.stackCount;
+            const alreadyConsumedSlots = slotUsage.slots;
+            if (alreadyConsumedSlots >= stackCount) return 0; // Wir haben gar keinen weiteren Stack mehr
+            const wantedAmount = slotUsage.wantedAmount;
+            const maxAvailableStackSize = slotUsage.maxAvailable;
+            if (wantedAmount > maxAvailableStackSize) return Number.MAX_VALUE; // Wir brauchen auf jeden Fall einen weiteren Slot
+            const minStackSizeFound = stackInfo.min;
+            const maxStackSizeFound = stackInfo.max;
+            const stackSize = stackInfo.stackSize; // max stacksize in general
+            const amountSum = stackInfo.sum; // Anzahl an VGs
+            const avgStackCountInPercent = (amountSum / stackCount) / stackSize; // in percent
+            return avgStackCountInPercent / alreadyConsumedSlots / minStackSizeFound;
+        }
+
+        /**
+         * Es soll in Summe mindestens X aber nicht weniger erreicht werden.
+         * Es sollen genau 'count'-Items verwendet werden.
+         * NumberArray: {1: 2, 2: 4}
+         */
+        static #getKnappsack(numberArray, count, X) {
+            const availableNumbers = Object.keys(numberArray);
+            const resultArr = [];
+            const resultMap = {};
+            let resultCount = 0;
+
+            let prev;
+            do { // take the smallest available
+                prev = resultCount;
+                for (const cur of availableNumbers) {
+                    if (numberArray[cur] > (resultMap[cur] || 0)) {
+                        const add = Number(cur);
+                        resultCount += add;
+                        resultArr.push(add);
+                        resultMap[cur] = (resultMap[cur] || 0) + 1;
+                        break;
+                    }
+                }
+            } while (resultArr.length < count && resultCount > prev);
+            if (resultCount >= X || resultArr.length !== count) return [resultArr, resultMap, resultCount]; // Ziel erreicht oder Abbruch
+
+            const increaseANumber = function () {
+                // increase one number
+                for (let i = resultArr.length - 1; i >= 0; i--) {
+                    const oldNumber = resultArr[i];
+                    for (const cur of availableNumbers) {
+                        const newNumber = Number(cur);
+                        if (oldNumber >= newNumber) continue; // erstmal eine größere Zahl finden
+                        if (numberArray[cur] > (resultMap[cur] || 0)) { // ist noch eine verfügbar
+                            resultCount += (newNumber - oldNumber);
+                            resultArr[i] = newNumber;
+                            resultMap[oldNumber] -= 1;
+                            if (resultMap[oldNumber] === 0) delete resultMap[oldNumber];
+                            resultMap[cur] = (resultMap[cur] || 0) + 1;
+                            return true;
+                        }
+                    }
+                }
+            }
+
+            do {
+                prev = resultCount;
+                const increased = increaseANumber();
+            } while (resultCount > prev && resultCount < X);
+
+            return [resultArr, resultMap, resultCount];
+        }
+
     }
 
     class EquipConfig {
@@ -843,15 +1014,15 @@
             console.log("Loaded Equip: ", this.#serverEquip);
         }
 
-        static async onEquipSlotChanged(slotName, slotIdx, initial) {
+        static async onEquipSlotChanged(slotName, slotIdx) {
             const loadout = await this.getCurrentLoadout();
             if (!loadout) return;
             const equip = loadout.equip;
             const isMultiSlot = FormHandler.isMultiSlot(slotName);
             if (!isMultiSlot) {
-                this.checkValidationOnEquipSlot(equip, slotName, slotIdx, initial);
-            } else if (!initial) { // Initial wird dieses nur einmalig aufgerufen und nicht auf jedem Slot
-                this.checkValidationOnEquip(slotName, false);
+                this.checkValidationOnEquipSlot(equip, slotName, slotIdx);
+            } else {
+                this.checkValidationOnEquip(slotName);
             }
         }
 
@@ -924,7 +1095,7 @@
             loadOutName = loadOutName || this.getCurrentLoadoutName();
             const [loadoutEquip, loadoutVgs] = await this.#getSnapshotFromLoadout(loadOutName);
             if (!loadoutEquip) return true;
-            return this.#compareEquips(this.#serverEquipOhneVGs, undefined, loadoutEquip, undefined, "differs_Loadout_Server");
+            return this.#differsEquips(this.#serverEquipOhneVGs, loadoutEquip, "differs_Loadout_Server");
         }
 
         /**
@@ -934,8 +1105,8 @@
             const [currentUiEquip, uniqueVGs] = FormHandler.getUIEquipOnlyIds(1);
             loadOutName = loadOutName || this.getCurrentLoadoutName();
             const [loadoutEquip, loadoutVgs] = await this.#getSnapshotFromLoadout(loadOutName);
-            if (!loadoutEquip) return true;
-            return this.#compareEquips(currentUiEquip, VGKonfig.getCurrentUiVGKonfig(currentUiEquip), loadoutEquip, loadoutVgs, "differs_UI_Loadout");
+            if (!loadoutEquip) return [false, false];
+            return [this.#differsEquips(currentUiEquip, loadoutEquip, "differs_UI_Loadout_Equip"), this.#differsVGConfig(VGKonfig.getCurrentUiVGKonfig(currentUiEquip), loadoutVgs, "differs_UI_Loadout_VGKonfig")]
         }
 
         static async #getSnapshotFromLoadout(loadOutName) {
@@ -958,14 +1129,31 @@
             return [storeEquip, currentEquipCfg.vgs];
         }
 
-        static #compareEquips(equip1, vgCfg1, equip2, vgCfg2, debugMethod) {
+        static #differsEquips(equip1, equip2, debugMethod) {
             let result = !_.util.deepEqual(equip1, equip2);
-            console.log(debugMethod + "#1", result, equip1, equip2);
-            if (result) return true;
+            console.log(debugMethod, result, equip1, equip2);
+            return result;
+        }
 
+        static #differsVGConfig(vgCfg1, vgCfg2, debugMethod) {
+            let result = false;
+            vgCfg1 = this.#withoutFreeSlots(vgCfg1);
+            vgCfg2 = this.#withoutFreeSlots(vgCfg2);
             if (vgCfg1 || vgCfg2) {
                 result = !_.util.deepEqual(vgCfg1, vgCfg2);
-                console.log(debugMethod + "#2", result, vgCfg1, vgCfg2);
+            }
+            console.log(debugMethod, result, vgCfg1, vgCfg2);
+            return result;
+        }
+
+        /**
+         * Unabhängig von den freien Slots
+         */
+        static #withoutFreeSlots(vgCfg) {
+            if(!vgCfg) return;
+            const result = _.util.cloneObject(vgCfg);
+            for(const [slotName, itemCfg] of Object.entries(vgCfg)) {
+                delete itemCfg.slots;
             }
             return result;
         }
@@ -1077,7 +1265,7 @@
         }
 
         static getAvailableVGAmount(slotName, vgBaseName) {
-            let availableAmount = FormHandler.getAllSlotOptionsByName(slotName);
+            let availableAmount = FormHandler.getSelectableVGStatistics(slotName);
             if (!availableAmount) return 0;
             availableAmount = availableAmount[vgBaseName];
             if (!availableAmount) return 0;
@@ -1317,7 +1505,7 @@
         static applyEquip(loadout) {
             const equipChangesId = {};
             const equip = loadout.equip;
-            const vgs = this.getDynamicVGs(loadout.vgs)
+            const vgs = VGKonfig.getDynamicVGs(loadout.vgs);
             console.log("APPLY_EQUIP", equip, vgs);
 
             for (const [slotName, itemIds] of Object.entries(equip)) {
@@ -1432,159 +1620,15 @@
             newForm.submit();
         }
 
-        /**
-         * Primäres Ziel: möglichst kleine Stacks aufbrauchen
-         */
-        static getDynamicVGs(vgsDef, debug) {
-            if (!vgsDef) return [];
-            const result = {};
-            for (const [slotName, itemsDef] of Object.entries(vgsDef)) {
-                const stacksDef = this.getAllSlotOptionsByName(slotName, 1);
-                if (!stacksDef) return;
-                const slotResult = result[slotName] = [];
-                const freeSlots = itemsDef.slots; // Anzahl verfügbarer Slots
-                const vgsToFillCount = Object.keys(itemsDef.items).length; // Anzahl gewünschter unterschiedlicher VGs
-                const additionalSlots = freeSlots - vgsToFillCount;
-                if (additionalSlots < 0) console.error("Tasche kann nicht ausreichend gefüllt werden, da nicht genügend Slots für VGs frei sind!");
-
-                const arrTimes = function (nr, times) {
-                    const result = [];
-                    for (let i = 0; i < times; i++) {
-                        result.push(nr);
-                    }
-                    return result;
-                }
-
-                const slotUsages = [];
-                let realUsedSlots = 0;
-                for (const [vgBaseName, wantedAmount] of Object.entries(itemsDef.items)) {
-                    const stackInfo = stacksDef[vgBaseName];
-                    if (!stackInfo) continue; // ERROR: Keine Stacks um vgBaseName zu bedienen
-
-                    const cur = {
-                        name: vgBaseName,
-                        slots: 1,
-                        info: stackInfo,
-                        // hier könnte man noch optimieren, da wir eigentlich gar nicht die gesamte StackSizeOrder brauchen, sondern nur soviel wie wir überhaupt Slots zu vergeben haben
-                        stackSizeInOrder: Object.entries(stackInfo.stacks).map(a => [Number(a[0]), a[1].length]).sort((a, b) => b[0] - a[0]).flatMap(a => arrTimes(a[0], a[1])),
-                        wantedAmount: wantedAmount,
-                    };
-                    cur.maxAvailable = Number(cur.stackSizeInOrder[0]); // cur.slots - 1
-                    cur.prio = this.#priority(cur);
-                    slotUsages.push(cur);
-                    realUsedSlots++;
-                }
-                if (debug) console.log("Initial SlotUsage: ", _.util.cloneObject(slotUsages))
-                for (let i = 0, l = freeSlots - realUsedSlots; i < l; i++) {
-                    const best = slotUsages.reduce(function (prev, current) {
-                        return (prev && prev.prio > current.prio) ? prev : current
-                    }); //returns object
-                    if (debug) console.log("Add Slot for " + best.name + " prio:" + best.prio);
-                    best.slots++;
-                    // Es wird der max Stack verbraucht
-                    best.maxAvailable += Number(best.stackSizeInOrder[best.slots - 1]);
-                    best.prio = this.#priority(best);
-                }
-                if (debug) console.log("SlotUsages: " + slotName, slotUsages);
-
-                for (const slotUsage of slotUsages) {
-                    const wantedAmount = slotUsage.wantedAmount;
-                    const numberArray = Object.entries(slotUsage.info.stacks).reduce((map, a) => {
-                        map[a[0]] = a[1].length;
-                        return map;
-                    }, {});
-                    const kResult = this.#getKnappsack(numberArray, slotUsage.slots, wantedAmount);
-                    if (debug) console.log("Knappsack: ", kResult);
-                    for (const [key, value] of Object.entries(kResult[1])) {
-                        for (let i = 0; i < value; i++) {
-                            slotResult.push(slotUsage.info.stacks[key][i]);
-                        }
-                    }
-                }
-            }
-            // console.log("RESULTS: ", result);
-            return result;
-        }
-
-        /**
-         * Bewertet die Priorität, ob noch ein weiterer Slot konsumiert werden sollte.
-         */
-        static #priority(slotUsage) {
-            const stackInfo = slotUsage.info;
-            const stackCount = stackInfo.stackCount;
-            const alreadyConsumedSlots = slotUsage.slots;
-            if (alreadyConsumedSlots >= stackCount) return 0; // Wir haben gar keinen weiteren Stack mehr
-            const wantedAmount = slotUsage.wantedAmount;
-            const maxAvailableStackSize = slotUsage.maxAvailable;
-            if (wantedAmount > maxAvailableStackSize) return Number.MAX_VALUE; // Wir brauchen auf jeden Fall einen weiteren Slot
-            const minStackSize = stackInfo.min;
-            const amountSum = stackInfo.sum; // Anzahl an VGs
-            const avgStackCount = amountSum / stackCount;
-            return stackCount * avgStackCount / stackInfo.stackSize / alreadyConsumedSlots;
-        }
-
-        /**
-         * Es soll in Summe mindestens X aber nicht weniger erreicht werden.
-         * Es sollen genau 'count'-Items verwendet werden.
-         * NumberArray: {1: 2, 2: 4}
-         */
-        static #getKnappsack(numberArray, count, X) {
-            const availableNumbers = Object.keys(numberArray);
-            const resultArr = [];
-            const resultMap = {};
-            let resultCount = 0;
-
-            let prev;
-            do { // take the smallest available
-                prev = resultCount;
-                for (const cur of availableNumbers) {
-                    if (numberArray[cur] > (resultMap[cur] || 0)) {
-                        const add = Number(cur);
-                        resultCount += add;
-                        resultArr.push(add);
-                        resultMap[cur] = (resultMap[cur] || 0) + 1;
-                        break;
-                    }
-                }
-            } while (resultArr.length < count && resultCount > prev);
-            if (resultCount >= X || resultArr.length !== count) return [resultArr, resultMap, resultCount]; // Ziel erreicht oder Abbruch
-
-            const increaseANumber = function () {
-                // increase one number
-                for (let i = resultArr.length - 1; i >= 0; i--) {
-                    const oldNumber = resultArr[i];
-                    for (const cur of availableNumbers) {
-                        const newNumber = Number(cur);
-                        if (oldNumber >= newNumber) continue; // erstmal eine größere Zahl finden
-                        if (numberArray[cur] > (resultMap[cur] || 0)) { // ist noch eine verfügbar
-                            resultCount += (newNumber - oldNumber);
-                            resultArr[i] = newNumber;
-                            resultMap[oldNumber] -= 1;
-                            if (resultMap[oldNumber] === 0) delete resultMap[oldNumber];
-                            resultMap[cur] = (resultMap[cur] || 0) + 1;
-                            return true;
-                        }
-                    }
-                }
-            }
-
-            do {
-                prev = resultCount;
-                const increased = increaseANumber();
-            } while (resultCount > prev && resultCount < X);
-
-            return [resultArr, resultMap, resultCount];
-        }
-
         static _allVGItemStats = {};
 
         /**
-         * Gruppiert nach BaseName.
+         * Gruppiert nach BaseName und liefert Statistiken dazu.
          * slotName -> vgBaseName -> {
-         *     ...
+         *     min/max/sum/stackCount/stackSize/stacks
          * }
          */
-        static getAllSlotOptionsByName(slotName, vgMode) {
+        static getSelectableVGStatistics(slotName) {
             if (this._allVGItemStats[slotName]) return this._allVGItemStats[slotName];
             const select = this.getSelectField(slotName, 0);
             if (!select) return;

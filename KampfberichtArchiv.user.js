@@ -13,8 +13,10 @@
 // @include        https://*/wod/spiel/hero/items.php*
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
+//
 // @include        http*://*world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
+//
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js
 // @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
@@ -145,6 +147,7 @@
         static async onReportSite() {
             const title = document.getElementsByTagName("h1")[0];
 
+            const isAdmivView = !_.WoD.isReallyMyGroupOnReportSite();
             const reportData = _.WoD.getFullReportBaseData();
             const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
             if (!reportMeta.fav) reportMeta.fav = {none: 1};
@@ -181,8 +184,9 @@
                 reportSource.items = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.items = true;
                 const memberList = _.WoDParser.parseKampfberichtGegenstaende();
-                const reportLoot = await MyStorage.putToLoot(reportSource.reportId, memberList);
-                await MyStorage.submitLoot(reportMeta, reportLoot);
+                // Als Admin die "reportArchiveItems" und die Ableitung auf "itemLoot" nicht speichern sondern lediglich für die direkte Darstellung erstellen
+                const reportLoot = isAdmivView ? MyStorage.createReportArchiveItems(reportSource.reportId, memberList) : await MyStorage.putToLoot(reportSource.reportId, memberList);
+                if (!isAdmivView) await MyStorage.submitLoot(reportMeta, reportLoot);
                 if ((await MySettings.get()).get(MySettings.SETTING.LOOT_SUMMARY)) await ItemLootSummary.einblenden(reportLoot, reportMeta);
             } else if (reportView === "fight") {
                 const form = _.WoD.getMainForm();
@@ -202,10 +206,12 @@
                 reportSource.levels[levelNr - 1] = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.levels[levelNr - 1] = true;
 
-                const heldenListe = _.WoDParser.getHeldenstufenOnKampfbericht();
-                if (heldenListe) { // da wir hier jetzt auch die Stufe der Helden haben, bringen wir auch von hier den Loot ein.
-                    const reportLoot = await MyStorage.putToLoot(reportMeta.reportId, heldenListe);
-                    await MyStorage.submitLoot(reportMeta, reportLoot);
+                if (!isAdmivView) {
+                    const heldenListe = _.WoDParser.getHeldenstufenOnKampfbericht();
+                    if (heldenListe) { // da wir hier jetzt auch die Stufe der Helden haben, bringen wir auch von hier den Loot ein.
+                        const reportLoot = await MyStorage.putToLoot(reportMeta.reportId, heldenListe);
+                        await MyStorage.submitLoot(reportMeta, reportLoot);
+                    }
                 }
                 if (_.WoD.isSchlacht()) reportMeta.success = _.WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(document, reportMeta.success);
                 ReportView.changeView(reportMeta);
@@ -591,8 +597,8 @@
                 let reportMeta = await reportDBMeta.getValue(reportId);
                 if (!isArchiv && !reportMeta) {
                     reportMeta = Report.createNewReportEntry(reportId, curTR.children[1].textContent.trim(),
-                        _.WoD.getMyGroupName(),
-                        _.WoD.getMyGroupId(),
+                        _.WoD.getCurrentGroupName(),
+                        _.WoD.getCurrentGroupId(),
                         _.WoD.getMyWorld(),
                         _.WoD.getTimestampFromString(curTR.children[0].textContent.trim()) / 60000)
                     await MyStorage.reportArchive.setValue(reportMeta);
@@ -1359,7 +1365,7 @@
     class DungeonAuswahl {
         static async start() {
             const dungeonTRs = document.querySelectorAll(".content_table > tbody > tr:not([id*=\"desc\"])");
-            const gruppeId = _.WoD.getMyGroupId();
+            const gruppeId = _.WoD.getCurrentGroupId();
             const world = _.WoD.getMyWorld();
             const worldSeasonNr = await _.WoD.getMyWorldSeasonNr();
             for (const tr of dungeonTRs) {
@@ -1379,7 +1385,7 @@
             _.WoD.addTooltip(elem, async function () {
                 const world = _.WoD.getMyWorld();
                 const worldSeasonNr = await _.WoD.getMyWorldSeasonNr();
-                const gruppeId = _.WoD.getMyGroupId();
+                const gruppeId = _.WoD.getCurrentGroupId();
                 let title = await thisObject.getErfolgstext("Gruppenerfolge (aktuelle Saison)", thisObject.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName, worldSeasonNr));
                 const gruppenErfolg = await thisObject.getErfolgstext("Gruppenerfolge (Gesamt)", thisObject.getSuccessLevelAndRatesForGroup(world, gruppeId, dungeonName));
                 title += "<br>" + gruppenErfolg;
@@ -2246,7 +2252,7 @@
                     date.setDate(date.getDate() - anzahlTage);
                     await MyStorage.reportArchive.getAll({
                         index: ["ts", "fav.none"],
-                        keyMatchBefore: [date.getTime()/60000, Number.MAX_VALUE],
+                        keyMatchBefore: [date.getTime() / 60000, Number.MAX_VALUE],
                     }, async function (report) {
                         if (!_.Mod.isLocalTest()) {
                             console.log("[Löschautomatik] Lösche Quell-Dateien für:", report.reportId);
@@ -3171,16 +3177,23 @@
             await this.reportArchiveSources.setValue(report);
         }
 
-        static async putToLoot(reportId, memberList) {
-            const reportExt = await this.reportArchiveItems.getValue(reportId) || {reportId: reportId, members: {}};
+        static async createReportArchiveItems(reportId, memberList, itemReport) {
+            itemReport = itemReport || {reportId: reportId, members: {}};
             for (const [name, entry] of Object.entries(memberList)) {
-                const member = reportExt.members[name] || (reportExt.members[name] = {});
+                const member = itemReport.members[name] || (itemReport.members[name] = {});
+                // Informationen werde hier immer nur ergänzt, da die Stufen direkt aus dem Kampf kommen und die eigentlichen Items von der Gegenstandsseite
                 for (const [entryKey, entryValue] of Object.entries(entry)) {
                     member[entryKey] = entryValue;
                 }
             }
-            await this.reportArchiveItems.setValue(reportExt);
-            return reportExt;
+            return itemReport;
+        }
+
+        static async putToLoot(reportId, memberList) {
+            const itemReport = await this.reportArchiveItems.getValue(reportId) || {reportId: reportId, members: {}};
+            this.createReportArchiveItems(reportId, memberList, itemReport);
+            await this.reportArchiveItems.setValue(itemReport);
+            return itemReport;
         }
 
         static async submitLoot(report, reportLoot) {

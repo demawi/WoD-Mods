@@ -1503,7 +1503,7 @@ class demawiRepository {
                 }
             };
             mainTopWindow.addEventListener("message", messageListener, false);
-            window.addEventListener("beforeunload", function () {
+            window.addEventListener("unload", function () {
                 mainTopWindow.removeEventListener("message", messageListener);
             });
 
@@ -1787,14 +1787,14 @@ class demawiRepository {
             return this.initWodDb("___", modDbName);
         }
 
-        static async tryConnectToMainDomain(modDbName) {
+        static async tryConnectToMainDomain(modDbName, debug) {
             const [scriptExecution, dbType] = _.CSProxy.check();
 
             if (scriptExecution) {
                 if (dbType === "l") { // cant proxy
                     return this.initWodDb("___", modDbName);
                 } else if (dbType === "p") {
-                    const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+                    const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", true);
                     const indexedDb = this.initWodDbProxy(modDbName + "Main", "___", messengerPromise);
                     await messengerPromise;
                     return indexedDb;
@@ -2812,7 +2812,15 @@ class demawiRepository {
             ITEMS_STORE: "storage",
         }
 
+        static #viewCache;
+
         static getView() {
+            if (this.#viewCache) return this.#viewCache;
+            this.#viewCache = this.#getViewIntern();
+            return this.#viewCache;
+        }
+
+        static #getViewIntern() {
             const pathname = window.location.pathname;
             if (pathname.includes("/item/")) return this.VIEW.ITEM;
             if (pathname.includes("/skill/")) return this.VIEW.SKILL;
@@ -2852,7 +2860,15 @@ class demawiRepository {
             }
         }
 
+
+        static #reportViewCache;
         static getReportView(silent) {
+            if (this.#reportViewCache) return this.#reportViewCache;
+            this.#reportViewCache = this.#getReportViewIntern();
+            return this.#reportViewCache;
+        }
+
+        static #getReportViewIntern(silent) {
             const title = document.getElementsByTagName("h1")[0].textContent.trim();
             if (title.startsWith("Kampfstatistik")) return "stats";
             if (title.startsWith("Übersicht Gegenstände")) return "items";
@@ -2902,12 +2918,6 @@ class demawiRepository {
             return form && form[valueType] && form[valueType].value;
         }
 
-        static isReallyMyGroupOnReportStatsView() {
-            const myGroupName = this.getMyGroupName();
-            let statGroupName = document.querySelector("h1").textContent.match(/Kampfstatistik:\s(.*)+/)[1];
-            return myGroupName === statGroupName;
-        }
-
         static getMyWorld(doc) {
             return _.WoD.getValueFromMainForm("wod_post_world", doc) || this.getMyWorldFromUrl(doc);
         }
@@ -2919,17 +2929,37 @@ class demawiRepository {
             return this.worldIds[worldName];
         }
 
-        static getMyGroupName(doc) {
-            return _.WoD.getValueFromMainForm("gruppe_name", doc);
+        static isReallyMyGroupOnReportSite() {
+            const myGroupName = this.getMyGroupName();
+            let statGroupName = document.querySelector("h1").textContent.match(/.*:\s(.*)+/)[1];
+            return myGroupName === statGroupName;
         }
 
-        static getMyGroupId(doc) {
-            return _.WoD.getValueFromMainForm("gruppe_id", doc);
+        static isInAdminViewMode(doc) {
+            return !!this.getValueFromMainForm("set_gruppe_id", doc);
+        }
+
+        static getMyGroupName(doc) {
+            return this.getValueFromMainForm("gruppe_name", doc);
+        }
+
+        static getCurrentGroupName(doc) {
+            doc = doc || document;
+            if (!this.isInAdminViewMode(doc)) return this.getMyGroupName(doc);
+            // Admin-Mode-Fallback
+            if (this.getView() === this.VIEW.REPORT) {
+                return doc.querySelector("h1").textContent.match(/.*:\s(.*)+/)[1];
+            }
+            return undefined;
+        }
+
+        static getCurrentGroupId(doc) {
+            return this.getValueFromMainForm("set_gruppe_id", doc) || this.getValueFromMainForm("gruppe_id", doc);
         }
 
         static getMyHeroId(doc) {
             doc = doc || document;
-            return _.WoD.getValueFromMainForm("session_hero_id", doc) || this.getMyHeroIdFromUrl(doc) || this.getHeroIdByFallback2(doc);
+            return this.getValueFromMainForm("session_hero_id", doc) || this.getMyHeroIdFromUrl(doc) || this.getHeroIdByFallback2(doc);
         }
 
         static getMyHeroIdFromUrl(doc) {
@@ -3075,8 +3105,8 @@ class demawiRepository {
                     name: locName,
                     schlacht: schlachtName, // Name der Schlacht
                 },
-                gruppe: this.getMyGroupName(doc),
-                gruppe_id: this.getMyGroupId(doc),
+                gruppe: this.getCurrentGroupName(doc),
+                gruppe_id: this.getCurrentGroupId(doc),
                 stufe: this.getMyStufe(doc),
             }
         }
@@ -4289,6 +4319,8 @@ class demawiRepository {
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
     static util = class {
+
+        static localeComparator = (a, b) => a.localeCompare(b);
 
         static async wait(msecs) {
             return new Promise((resolve, reject) => {
