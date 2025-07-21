@@ -1274,8 +1274,6 @@ class demawiRepository {
 
         static #supported = ["Tampermonkey", "Greasemonkey", "Violentmonkey"];
 
-        static #access = "http*://world-of-dungeons.de*";
-
         static mode;
 
         /**
@@ -1303,6 +1301,7 @@ class demawiRepository {
                     return [false, "l"];
                 } else return [false];
             }
+
             if (this.ensureIframeWrap()) return [false];
             const rootWindow = _.WindowManager.getRootWindow();
             const version = rootWindow._demrepv;
@@ -1485,7 +1484,9 @@ class demawiRepository {
          */
         static #checkScriptAccess(responderHttp) {
             for (const curInclude of GM.info.script.includes) {
-                if (responderHttp.match("^" + curInclude.replaceAll("*", ".*")) + "$") return true;
+                if (responderHttp.match("^" + curInclude.replaceAll(".", "\\.").replaceAll("?", ".").replaceAll("*", ".*") + "$")) {
+                    return true;
+                }
             }
             return false;
         }
@@ -5247,7 +5248,7 @@ class demawiRepository {
              */
             static async bestimmeFertigkeitFromTarget(curRound, fertigkeit, actionTD, actionUnit, targetTD) {
                 const unknownIdentifier = this.getIdentifierOfTheUnknown(actionTD);
-                console.log("Unknown: ", unknownIdentifier, actionTD);
+                //console.log("Unknown: ", unknownIdentifier, actionTD);
                 const unknownSkillDb = _.WoDStorages.getSkillsUnknownDb();
                 const unknownEntry = await unknownSkillDb.getValue(unknownIdentifier) || {id: unknownIdentifier};
                 if (unknownEntry.typ) fertigkeit.typ = unknownEntry.typ;

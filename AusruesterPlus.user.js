@@ -384,7 +384,7 @@
             this.deleteButton.title = "Das gewählte Loadout löschen";
         }
 
-        static notPreferredOpacity = 0.8;
+        static notPreferredOpacity = 0.65;
 
         /**
          * Wird aufgerufen, wenn ein Gegenstand, die Loadout-Auswahl oder eine VG-Konfig geändert wird.
@@ -411,9 +411,9 @@
             this.applyLoadout2ServerButton.style.display = this.hasSelectedLoadout() ? "" : "none"; //  && (this.hasChange_Loadout_Server || hasVGsConfigured)
             this.vgSyncButton.style.display = "none"; // & hasVGsConfigured && !this.hasChange_UI_Loadout ? "" : "none";
             //this.newButton.style.display = ""; // ist immer möglich
-            this.revertUiButton.style.display = this.hasChange_UI_Server || this.hasChange_UI_Loadout_VGConfig ? "" : "none";
+            this.revertUiButton.style.display = this.hasChange_UI_Server || (!this.hasChangedProfile() && this.hasChange_UI_Loadout_VGConfig) ? "" : "none";
 
-            const prefix = this.hasChange_UI_Server ? "" : ""; //  unverifiziert
+            const prefix = this.hasChange_UI_Server ? "" : ""; //  unverifiziert dürfte nur bei this.hasChange_UI_Server_Equip auftauchen nicht bei VGs
             if (this.getCurrentSelectedLoadoutName() !== EquipConfig.getCurrentLoadoutName()) {
                 this.applyUi2Loadout.innerHTML = this.marker_Left + prefix + " Überschreiben";
                 this.applyUi2Loadout.style.opacity = this.notPreferredOpacity;
@@ -1150,9 +1150,9 @@
          * Unabhängig von den freien Slots
          */
         static #withoutFreeSlots(vgCfg) {
-            if(!vgCfg) return;
+            if (!vgCfg) return;
             const result = _.util.cloneObject(vgCfg);
-            for(const [slotName, itemCfg] of Object.entries(vgCfg)) {
+            for (const [slotName, itemCfg] of Object.entries(vgCfg)) {
                 delete itemCfg.slots;
             }
             return result;
