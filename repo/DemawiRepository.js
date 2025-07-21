@@ -5248,11 +5248,11 @@ class demawiRepository {
              */
             static async bestimmeFertigkeitFromTarget(curRound, fertigkeit, actionTD, actionUnit, targetTD) {
                 const unknownIdentifier = this.getIdentifierOfTheUnknown(actionTD);
-                //console.log("Unknown: ", unknownIdentifier, actionTD);
                 const unknownSkillDb = _.WoDStorages.getSkillsUnknownDb();
                 const unknownEntry = await unknownSkillDb.getValue(unknownIdentifier) || {id: unknownIdentifier};
                 if (unknownEntry.typ) fertigkeit.typ = unknownEntry.typ;
                 if (unknownEntry.angriffstyp) fertigkeit.angriffstyp = unknownEntry.angriffstyp;
+                //console.log("UnknownEntry: ", unknownIdentifier, unknownEntry, fertigkeit, actionTD);
                 unknownEntry.wurf = !!fertigkeit.wuerfe;
 
                 // TODO: weiter definieren in welchem Dungeon und in welchem Level, gab es nen variablen Wurf oder ist der auch unbekannt?

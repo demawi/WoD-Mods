@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.7
+// @version        0.21.8
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -479,7 +479,7 @@
                 const tableContent = [];
                 for (const [noSkillId, list] of Object.entries(missingSkillInfos.noskills)) {
                     const unknownEntry = await unknownSkillDb.getValue(noSkillId);
-                    console.log("DDDD", unknownEntry);
+                    //console.log("DDDD", unknownEntry);
                     const angriffstypContainer = document.createElement("span");
                     let createAngriffsartSelect;
                     const wurfContainer = document.createElement("span");
@@ -532,7 +532,7 @@
                             }
                             angriffstypSelect.onchange = async function () {
                                 const userBestimmung = unknownEntry.user || (unknownEntry.user = {});
-                                unknownEntry.angrifsstyp = userBestimmung.angrifsstyp = angriffstypSelect.value;
+                                unknownEntry.angriffstyp = userBestimmung.angriffstyp = angriffstypSelect.value;
                                 await _.WoDStorages.getSkillsUnknownDb().setValue(unknownEntry);
                             }
                             angriffstypContainer.append(angriffstypSelect);
