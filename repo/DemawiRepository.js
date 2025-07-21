@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.2";
+    static version = "1.1.3";
 
     /**
      * Indexed-DB Framework.
@@ -1398,6 +1398,8 @@ class demawiRepository {
          * Führt den übergebenen Code aus und sendet das Ergebnis an das parent-Window zurück
          */
         static actAsCSProxyResponder() {
+            if (_.WindowManager.getMark("actAsCSProxyResponder")) return;
+            _.WindowManager.mark("actAsCSProxyResponder", 1);
             const parentOrigin = document.referrer || parent.origin; // document.referrer funktioniert auf chrome, parent.origin wirft dort eine Exception funktioniert aber auf Firefox
             const log = document.referrer ? console.log : window.top.console.log;
             const errorlogger = document.referrer ? console.error : window.top.console.error;
