@@ -7,13 +7,14 @@
 // @include        https://*/wod/spiel/*dungeon/report.php*
 // @include        https://*/wod/spiel/clanquest/combat_report.php*
 // @include        https://*/wod/spiel/clanquest/move.php*
-// @include        https://*/wod/spiel/hero/item.php*
 // @include        https://*/wod/spiel/settings/heroes.php*
 // @include        https://*/wod/spiel/dungeon/dungeon.php*
 // @include        https://*/wod/spiel/hero/items.php*
 // @include        https://*/wod/spiel/news/news.php*
 // @include        https://*/wod/spiel/rewards/tombola.php*
 //
+// @include        https://*/wod/spiel/hero/item.php*
+// @include        http*://*/wod/spiel/hero/skill.php*
 // @include        http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 //
