@@ -1,20 +1,21 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.14.4
+// @version        0.14.5
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
-// @include        https://*/wod/spiel/*dungeon/report.php*
-// @include        https://*/wod/spiel/clanquest/combat_report.php*
-// @include        https://*/wod/spiel/clanquest/move.php*
-// @include        https://*/wod/spiel/hero/item.php*
-// @include        https://*/wod/spiel/settings/heroes.php*
-// @include        https://*/wod/spiel/dungeon/dungeon.php*
-// @include        https://*/wod/spiel/hero/items.php*
-// @include        https://*/wod/spiel/news/news.php*
-// @include        https://*/wod/spiel/rewards/tombola.php*
+// @include        http*://*/wod/spiel/*dungeon/report.php*
+// @include        http*://*/wod/spiel/clanquest/combat_report.php*
+// @include        http*://*/wod/spiel/clanquest/move.php*
+// @include        http*://*/wod/spiel/settings/heroes.php*
+// @include        http*://*/wod/spiel/dungeon/dungeon.php*
+// @include        http*://*/wod/spiel/hero/items.php*
+// @include        http*://*/wod/spiel/news/news.php*
+// @include        http*://*/wod/spiel/rewards/tombola.php*
 //
-// @include        http*://*world-of-dungeons.de*
+// @include        http*://*/wod/spiel/hero/item.php*
+// @include        http*://*/wod/spiel/hero/skill.php*
+// @include        http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 //
 // @require        libs/jszip.min.js

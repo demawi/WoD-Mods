@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name           [WoD] Item-Datenbank
-// @version        0.12.2
+// @version        0.12.3
 // @author         demawi
 // @namespace      demawi
 // @description    Datenbank der Items und Suche
 // @include        https://*.world-of-dungeons.*/wod/spiel/*
+//
+// @include        http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
