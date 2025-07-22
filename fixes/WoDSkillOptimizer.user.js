@@ -4016,7 +4016,7 @@ class oSkillsOptimizerData {
                 return;
             }
 
-            for (let aPtOb of Object.values(oSet.owner_powerups)) {
+            for (let aPtOb of Object.values(oSet.owner_powerups || [])) {
                 for (let oAttribute of aPtOb) {
                     let iFrom = parseInt(oAttribute.from_count);
                     let iTo = parseInt(oAttribute.to_count);
@@ -6022,8 +6022,6 @@ const oClassSkills = new oSkillOptimizerSkills();
         }
 
         oClassData.getSetPowerUps();
-    }).catch(sError => {
-        throw new Error(sError);
     });
 
     // fetch permanent data
@@ -6097,8 +6095,6 @@ const oClassSkills = new oSkillOptimizerSkills();
         oBonusSkillEffectValues = oClassData.applySetBoniToPowerUps(oClassData.oPowerUpApiKeys.sSkillsEffect, oBonusSkillEffectValues);
 
         return [oBonusAttackValues, oBonusAttributeValues, oBonusDropValues, oBonusParadeValues, oBonusArmorValues, oBonusDamageValues, oBonusDamageZValues, oBonusDamageFactorValues, oBonusSkillEffectValues];
-    }).catch(sError => {
-        throw new Error(sError);
     });
 
     Promise.all([oStructureRendered, oSavedPermanentData, oAppliedSetBoni]).then(aValues => {
@@ -6126,7 +6122,5 @@ const oClassSkills = new oSkillOptimizerSkills();
         oClassLayout.fillBonusSkillEffects(oBonusSkillEffectValues);
 
         oClassLayout.appendLayout();
-    }).catch(sError => {
-        console.error("all", sError);
     });
 })();
