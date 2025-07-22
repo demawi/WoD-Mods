@@ -3,7 +3,55 @@
  */
 class demawiRepository {
 
-    static version = "1.1.3";
+    static version = "1.1.4";
+    /**
+     * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
+     * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
+     */
+    static csProxyV = "1.0";
+
+    /**
+     * Erlaubt Skript-übergreifende Markierungen am 'window'-Objekt.
+     */
+    static WindowManager = class {
+
+        static isMarked(tag, win) {
+            win = win || unsafeWindow;
+            return win._demrep && win._demrep[tag];
+        }
+
+        static getMark(tag, win) {
+            win = win || unsafeWindow;
+            return win._demrep && win._demrep[tag];
+        }
+
+        static mark(tag, value, win) {
+            value = value || true;
+            win = win || unsafeWindow;
+            (win._demrep || (win._demrep = {}))[tag] = value;
+        }
+
+        /**
+         * Führt die Funktion (pro 'tagId') in diesem unsafeWindow nur einmalig aus, auch wenn mehrere Mods diese aufrufen.
+         * Das Resultat wird über ein Promise an alle ausgeliefert.
+         */
+        static async onlyOnce(tagId, asyncFunction) {
+            let functionMark = this.getMark(tagId);
+            if (functionMark) return functionMark;
+            functionMark = new Promise((resolve, reject) => {
+                resolve(asyncFunction());
+            });
+            this.mark(tagId, functionMark);
+            return functionMark;
+        }
+
+        static getRootWindow(win) {
+            win = win || window;
+            if (win.opener) return this.getRootWindow(win.opener);
+            if (win.top && win.top !== win) return this.getRootWindow(win.top);
+            return win;
+        }
+    }
 
     /**
      * Indexed-DB Framework.
@@ -1274,7 +1322,14 @@ class demawiRepository {
 
         static #supported = ["Tampermonkey", "Greasemonkey", "Violentmonkey"];
 
-        static mode;
+        /**
+         * Greasemonkey hat mehrere gravierende Probleme mit dem Ausführen eines User-Scriptes für ein iframe, daher wird dieses für die Nutzung ausgenommen.
+         */
+        static cantProxy() {
+            return GM.info.scriptHandler === "Greasemonkey";
+        }
+
+        static dbMode;
 
         /**
          * 4 Modes:
@@ -1292,7 +1347,7 @@ class demawiRepository {
                 return [false];
             }
             if (this.cantProxy()) {
-                this.mode = "local";
+                this.dbMode = "local";
                 return [true, "l"];
             }
             if (window.origin.endsWith("//world-of-dungeons.de")) { // Main-Domain-Check, hier wird generell kein weiterer Script-Code ausgeführt
@@ -1301,35 +1356,40 @@ class demawiRepository {
                     return [false, "l"];
                 } else return [false];
             }
+
             if (this.ensureIframeWrap()) return [false];
             const rootWindow = _.WindowManager.getRootWindow();
-            const version = rootWindow._demrepv;
-            if (version !== _.version) { // Die Version hat sich geändert, alles nochmal laden.
+            const usedVersion = _.WindowManager.getMark("csProxyV", rootWindow) || rootWindow._demrepv; // das 'oder' kann später wieder entfernt werden
+            const installedBy = _.WindowManager.getMark("csProxyM", rootWindow) || rootWindow._demrepm; // das 'oder' kann später wieder entfernt werden
+            if (GM.info.script.name === installedBy) _.WindowManager.mark("csProxyInstallerVisited", true); // auf dem aktuellen Iframe-Window nicht auf dem Root
+            if (usedVersion !== _.csProxyV) { // Die Version hat sich geändert, alles nochmal laden.
                 // Fall 1: Mod hat sich nach dem ersten Laden der Seite aktualisiert
                 // Fall 2: Mehrere Mods, nur einer hat sich aktualisiert, der andere läuft hier dann immer auf einen Fehler
                 console.log("Versionchange: reload");
                 if (window.opener) window.close(); // Popup muss geschlossen werden, damit es erneut geöffnet werden kann
 
-                // nur die vorherige Mod stößt den Reload an, damit es bei Versionsunterschieden (z.B. eine Mod ist nicht aktuell) nicht zu Dauerschleifen kommt
-                if (GM.info.script.name === rootWindow._demrepm) rootWindow.location.reload();
+                // nur die vorherige Mod stößt den Reload an, damit es bei Versionsunterschieden (z.B. eine Mod ist nicht aktuell) nicht zu Dauerschleifen kommt.
+                if (GM.info.script.name === installedBy) rootWindow.location.reload();
                 else {
                     // damit der eigentlich Mod Zeit für den Reload hat, dann brauchen diese Meldungen gar nicht erst angezeigt werden.
-                    // kann aber natürlich auch passieren, wenn eine inner Seite aufgerufen wurde, wo die Mod, die den Proxy installiert hat nicht zur Ausführung kommt.
+                    // kann aber natürlich auch passieren, wenn eine Seite aufgerufen wird, wo die Mod, die den Proxy installiert hat nicht zur Ausführung kommt.
                     setTimeout(function () {
-                        alert(GM.info.script.name + ": falsche Version erkannt!" + "\n\nMainDomainProxy-Version: " + rootWindow._demrepv + "\nwurde von " + rootWindow._demrepm + " installiert!" + "\n\n" + GM.info.script.name + " erwartet Version " + _.version + "\n\nAlle demawi-Mods müssen auf der gleichen Version laufen bzw. aktuell sein!");
+                        if (_.WindowManager.getMark("csProxyInstallerVisited")) {
+                            // Der Installer hat scheinbar wirklich noch eine andere Version
+                            alert(GM.info.script.name + ": falsche Version erkannt!" + "\n\nMainDomainProxy-Version: " + usedVersion + "\nwurde von " + installedBy + " installiert!" + "\n\n" + GM.info.script.name + " erwartet Version " + _.csProxyV + "\n\nAlle demawi-Mods müssen auf der gleichen Version laufen bzw. aktuell sein!\n");
+                        } else {
+                            // Der Installer wird auf dieser Seite nicht aufgerufen: wir laden die Seite neu
+                            if (!_.WindowManager.getMark("csProxyReload")) {
+                                _.WindowManager.mark("csProxyReload", true);
+                                rootWindow.location.reload();
+                            }
+                        }
                     }, 2000);
                 }
                 return [false];
             }
-            this.mode = "www";
+            this.dbMode = "www";
             return [true, "p"];
-        }
-
-        /**
-         * Greasemonkey hat mehrere gravierende Probleme mit dem Ausführen eines User-Scriptes für ein iframe, daher wird dieses für die Nutzung ausgenommen.
-         */
-        static cantProxy() {
-            return GM.info.scriptHandler === "Greasemonkey";
         }
 
         /**
@@ -1351,8 +1411,8 @@ class demawiRepository {
 
         static #ensureIframeWrapDoIt() {
             console.log("Iframe-Wrap wurde erstellt!");
-            unsafeWindow._demrepv = _.version;
-            unsafeWindow._demrepm = GM.info.script.name;
+            _.WindowManager.mark("csProxyV", _.csProxyV);
+            _.WindowManager.mark("csProxyM", GM.info.script.name);
             const iframeWrap = document.createElement("iframe");
             iframeWrap.style.width = "100%";
             iframeWrap.style.height = "100%";
@@ -1366,7 +1426,6 @@ class demawiRepository {
 
             iframeWrap.src = window.location.href;
             document.body.insertBefore(iframeWrap, document.body.children[0]);
-            //iframeWrap.contentDocument.body.className = document.body.className;
 
             iframeWrap.addEventListener("load", function () {
                 let cur;
@@ -1405,7 +1464,6 @@ class demawiRepository {
             const errorlogger = document.referrer ? console.error : window.top.console.error;
             const parentWindow = window.opener || window.parent; // window.opener bei window.open(), ansonsten für iframe
             const myOrigin = window.location.origin;
-            parentWindow.focus();
 
             document.body.innerHTML = "Dieses Fenster dient als Kommunikationsschnittstelle:<br><b>" + parentOrigin + " => " + myOrigin + "</b><br>Es schließt sich mit dem Hauptfenster";
 
@@ -1469,7 +1527,7 @@ class demawiRepository {
                 false,
             );
 
-            log("CSProxy[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
+            log("CSProxy-Responder[" + myOrigin + "] wurde erstellt: '" + parentOrigin + "' => '" + window.location.origin + "'");
 
             // Dem parent melden dass wir bereit sind (es wird keine data.id geliefert)
             try {
@@ -1480,11 +1538,27 @@ class demawiRepository {
         }
 
         /**
+         * Prüft, ob das Skript auch Zugriff auf die entsprechende URL hat, um den Responder zu installieren.
+         */
+        static #checkScriptAccess(responderHttp) {
+            for (const curInclude of GM.info.script.includes) {
+                if (responderHttp.match("^" + curInclude.replaceAll(".", "\\.").replaceAll("?", ".").replaceAll("*", ".*") + "$")) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        /**
          * @param responderHttp welche bei Aufruf Messenger.actAsResponder ausführt. (z.B. "https://world-of-dungeons.de/wod/spiel/news/"). Die Url wird noch durch einen Suchparameter (messengerId=X) erweitert.
          */
         static async getProxyFor(responderHttp, debug) {
             const targetUrl = new URL(responderHttp);
             targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
+            if (!this.#checkScriptAccess(responderHttp)) {
+                console.error(GM.info.script.name + " kann nicht mit '" + responderHttp + "' kommunizieren. ", GM.info.script.includes);
+                throw Error(GM.info.script.name + " kann nicht mit '" + responderHttp + "' kommunizieren. " + JSON.stringify(GM.info.script.includes));
+            }
 
             const mainTopWindow = (window.opener || window).top;
 
@@ -1505,7 +1579,7 @@ class demawiRepository {
                 }
             };
             mainTopWindow.addEventListener("message", messageListener, false);
-            window.addEventListener("beforeunload", function () {
+            window.addEventListener("unload", function () {
                 mainTopWindow.removeEventListener("message", messageListener);
             });
 
@@ -1674,46 +1748,6 @@ class demawiRepository {
         }
     }
 
-    static WindowManager = class {
-
-        static isMarked(tag, win) {
-            win = win || unsafeWindow;
-            return win._demrep && win._demrep[tag];
-        }
-
-        static getMark(tag, win) {
-            win = win || unsafeWindow;
-            return win._demrep && win._demrep[tag];
-        }
-
-        static mark(tag, value, win) {
-            value = value || true;
-            win = win || unsafeWindow;
-            (win._demrep || (win._demrep = {}))[tag] = value;
-        }
-
-        /**
-         * Führt die Funktion (pro 'tagId') in diesem unsafeWindow nur einmalig aus, auch wenn mehrere Mods diese aufrufen.
-         * Das Resultat wird über ein Promise an alle ausgeliefert.
-         */
-        static async onlyOnce(tagId, asyncFunction) {
-            let functionMark = this.getMark(tagId);
-            if (functionMark) return functionMark;
-            functionMark = new Promise((resolve, reject) => {
-                resolve(asyncFunction());
-            });
-            this.mark(tagId, functionMark);
-            return functionMark;
-        }
-
-        static getRootWindow(win) {
-            win = win || window;
-            if (win.opener) return this.getRootWindow(win.opener);
-            if (win.top && win.top !== win) return this.getRootWindow(win.top);
-            return win;
-        }
-    }
-
     static Settings = class Settings {
         static async getHandler(settingsDef) {
             const settingsHandler = new _.Settings(settingsDef);
@@ -1789,7 +1823,7 @@ class demawiRepository {
             return this.initWodDb("___", modDbName);
         }
 
-        static async tryConnectToMainDomain(modDbName) {
+        static async tryConnectToMainDomain(modDbName, debug) {
             const [scriptExecution, dbType] = _.CSProxy.check();
 
             if (scriptExecution) {
@@ -2814,7 +2848,15 @@ class demawiRepository {
             ITEMS_STORE: "storage",
         }
 
+        static #viewCache;
+
         static getView() {
+            if (this.#viewCache) return this.#viewCache;
+            this.#viewCache = this.#getViewIntern();
+            return this.#viewCache;
+        }
+
+        static #getViewIntern() {
             const pathname = window.location.pathname;
             if (pathname.includes("/item/")) return this.VIEW.ITEM;
             if (pathname.includes("/skill/")) return this.VIEW.SKILL;
@@ -2854,7 +2896,16 @@ class demawiRepository {
             }
         }
 
+
+        static #reportViewCache;
+
         static getReportView(silent) {
+            if (this.#reportViewCache) return this.#reportViewCache;
+            this.#reportViewCache = this.#getReportViewIntern();
+            return this.#reportViewCache;
+        }
+
+        static #getReportViewIntern(silent) {
             const title = document.getElementsByTagName("h1")[0].textContent.trim();
             if (title.startsWith("Kampfstatistik")) return "stats";
             if (title.startsWith("Übersicht Gegenstände")) return "items";
@@ -2904,12 +2955,6 @@ class demawiRepository {
             return form && form[valueType] && form[valueType].value;
         }
 
-        static isReallyMyGroupOnReportStatsView() {
-            const myGroupName = this.getMyGroupName();
-            let statGroupName = document.querySelector("h1").textContent.match(/Kampfstatistik:\s(.*)+/)[1];
-            return myGroupName === statGroupName;
-        }
-
         static getMyWorld(doc) {
             return _.WoD.getValueFromMainForm("wod_post_world", doc) || this.getMyWorldFromUrl(doc);
         }
@@ -2921,17 +2966,40 @@ class demawiRepository {
             return this.worldIds[worldName];
         }
 
-        static getMyGroupName(doc) {
-            return _.WoD.getValueFromMainForm("gruppe_name", doc);
+        /**
+         * Ermittelt den Gruppennamen auf den Seiten des Kampfberichts.
+         */
+        static isReallyMyGroupOnReportSite() {
+            const myGroupName = this.getMyGroupName();
+            let statGroupName = document.querySelector("h1").textContent.match(/.*:\s(.*)+/)[1];
+            return myGroupName === statGroupName;
         }
 
-        static getMyGroupId(doc) {
-            return _.WoD.getValueFromMainForm("gruppe_id", doc);
+        static isInAdminViewMode(doc) {
+            return !!this.getValueFromMainForm("set_gruppe_id", doc);
+        }
+
+        static getMyGroupName(doc) {
+            return this.getValueFromMainForm("gruppe_name", doc);
+        }
+
+        static getCurrentGroupName(doc) {
+            doc = doc || document;
+            if (!this.isInAdminViewMode(doc)) return this.getMyGroupName(doc);
+            // Admin-Mode-Fallback
+            if (this.getView() === this.VIEW.REPORT) {
+                return doc.querySelector("h1").textContent.match(/.*:\s(.*)+/)[1];
+            }
+            return undefined;
+        }
+
+        static getCurrentGroupId(doc) {
+            return this.getValueFromMainForm("set_gruppe_id", doc) || this.getValueFromMainForm("gruppe_id", doc);
         }
 
         static getMyHeroId(doc) {
             doc = doc || document;
-            return _.WoD.getValueFromMainForm("session_hero_id", doc) || this.getMyHeroIdFromUrl(doc) || this.getHeroIdByFallback2(doc);
+            return this.getValueFromMainForm("session_hero_id", doc) || this.getMyHeroIdFromUrl(doc) || this.getHeroIdByFallback2(doc);
         }
 
         static getMyHeroIdFromUrl(doc) {
@@ -3077,8 +3145,8 @@ class demawiRepository {
                     name: locName,
                     schlacht: schlachtName, // Name der Schlacht
                 },
-                gruppe: this.getMyGroupName(doc),
-                gruppe_id: this.getMyGroupId(doc),
+                gruppe: this.getCurrentGroupName(doc),
+                gruppe_id: this.getCurrentGroupId(doc),
                 stufe: this.getMyStufe(doc),
             }
         }
@@ -4273,8 +4341,8 @@ class demawiRepository {
 
         static start(zusatz) {
             if (!window.location.href.includes("silent=true")) {
-                const mode = _.CSProxy.mode || "local";
-                console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
+                const mode = _.CSProxy.dbMode || "local";
+                console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + "@" + demawiRepository.csProxyV + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
             }
         }
 
@@ -4291,6 +4359,8 @@ class demawiRepository {
      * Allgemeine nicht WoD-spezifische Hilfsmethoden.
      */
     static util = class {
+
+        static localeComparator = (a, b) => a.localeCompare(b);
 
         static async wait(msecs) {
             return new Promise((resolve, reject) => {
