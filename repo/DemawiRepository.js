@@ -1359,14 +1359,17 @@ class demawiRepository {
 
             if (this.ensureIframeWrap()) return [false];
             const rootWindow = _.WindowManager.getRootWindow();
-            const usedVersion = _.WindowManager.getMark("csProxyV", rootWindow) || rootWindow._demrepv; // das 'oder' kann später wieder entfernt werden
-            const installedBy = _.WindowManager.getMark("csProxyM", rootWindow) || rootWindow._demrepm; // das 'oder' kann später wieder entfernt werden
+            const usedVersion = _.WindowManager.getMark("csProxyV", rootWindow);
+            const installedBy = _.WindowManager.getMark("csProxyM", rootWindow);
             if (GM.info.script.name === installedBy) _.WindowManager.mark("csProxyInstallerVisited", true); // auf dem aktuellen Iframe-Window nicht auf dem Root
             if (usedVersion !== _.csProxyV) { // Die Version hat sich geändert, alles nochmal laden.
                 // Fall 1: Mod hat sich nach dem ersten Laden der Seite aktualisiert
                 // Fall 2: Mehrere Mods, nur einer hat sich aktualisiert, der andere läuft hier dann immer auf einen Fehler
                 console.log("Versionchange: reload");
-                if (window.opener) window.close(); // Popup muss geschlossen werden, damit es erneut geöffnet werden kann
+                if (window.opener) { // Popup muss geschlossen werden!? damit es erneut geöffnet werden kann
+                    console.error("Fehler: wir sind in einem Popup, aber die installierte DB-Proxy-Version unterscheidet sich zu der aktuell vom Skript genutzten Version: '" + usedVersion + "' by '" + installedBy + "' vs. '" + _.csProxyV + "' by '" + GM.info.script.name + "' RootWindow:" + rootWindow);
+                    //window.close();
+                }
 
                 // nur die vorherige Mod stößt den Reload an, damit es bei Versionsunterschieden (z.B. eine Mod ist nicht aktuell) nicht zu Dauerschleifen kommt.
                 if (GM.info.script.name === installedBy) rootWindow.location.reload();
