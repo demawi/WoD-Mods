@@ -1384,7 +1384,7 @@ class demawiRepository {
                                 rootWindow.location.reload();
                             }
                         }
-                    }, 2000);
+                    }, 5000);
                 }
                 return [false];
             }
