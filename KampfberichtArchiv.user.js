@@ -12,6 +12,8 @@
 // @include        http*://*/wod/spiel/hero/items.php*
 // @include        http*://*/wod/spiel/news/news.php*
 // @include        http*://*/wod/spiel/rewards/tombola.php*
+// ** Um überall das Season-Element zu platzieren (auch im Forum) **
+// @include        https://*.world-of-dungeons.*/wod/spiel/*
 //
 // @include        http*://*/wod/spiel/hero/item.php*
 // @include        http*://*/wod/spiel/hero/skill.php*

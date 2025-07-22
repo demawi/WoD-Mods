@@ -1027,7 +1027,7 @@
 
             const checkExists = function (itemDef) {
                 if (!equippedIds.includes(itemDef.id)) {
-                    if (initial) ControlBar.reportProblem(itemDef.id, "Fehlendes Item [" + slotName + "]: " + itemDef.name);
+                    if (initial) ControlBar.reportProblem(itemDef.id, "Fehlender Gegenstand [" + slotName + "]: " + itemDef.name);
                 } else {
                     ControlBar.removeError(itemDef.id);
                 }
