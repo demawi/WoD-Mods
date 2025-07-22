@@ -2948,6 +2948,9 @@ class demawiRepository {
             return this.worldIds[worldName];
         }
 
+        /**
+         * Ermittelt den Gruppennamen auf den Seiten des Kampfberichts.
+         */
         static isReallyMyGroupOnReportSite() {
             const myGroupName = this.getMyGroupName();
             let statGroupName = document.querySelector("h1").textContent.match(/.*:\s(.*)+/)[1];

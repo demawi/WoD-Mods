@@ -39,6 +39,7 @@
         static modname = "KampfberichtArchiv";
         static version = GM.info.script.version;
         static dbname = "wodDB";
+        static isAdmin;
 
 
         // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
@@ -52,6 +53,7 @@
             demawiRepository.startMod("View: '" + view + "'");
             await _.WoDWorldDb.placeSeasonElem();
             await MySettings.getFresh();
+            this.isAdmin = _.WoD.isInAdminViewMode();
 
             switch (view) {
                 case _.WoD.VIEW.TOMBOLA:
@@ -64,7 +66,7 @@
                     await Ausruestung.start();
                     break;
                 case _.WoD.VIEW.DUNGEONS:
-                    await DungeonAuswahl.start();
+                    if (!this.isAdmin) await DungeonAuswahl.start();
                     break;
                 case _.WoD.VIEW.QUEST:
                     await QuestAuswahl.start();
@@ -102,7 +104,6 @@
                 const groupName = header.textContent;
                 const groupId = new URL(header.href).searchParams.get("id");
                 const schlachtName = document.getElementsByTagName("h2")[0].textContent.trim();
-                //console.log("Schlachtname: " + schlachtName)
                 for (const roundX of oldRound1.parentElement.children) {
                     for (const aElem of roundX.getElementsByTagName("a")) {
                         if (aElem.textContent === "(Bericht)") {
@@ -148,7 +149,6 @@
         static async onReportSite() {
             const title = document.getElementsByTagName("h1")[0];
 
-            const isAdmivView = !_.WoD.isReallyMyGroupOnReportSite();
             const reportData = _.WoD.getFullReportBaseData();
             const reportMeta = await MyStorage.reportArchive.getValue(reportData.reportId) || reportData;
             if (!reportMeta.fav) reportMeta.fav = {none: 1};
@@ -186,8 +186,8 @@
                 reportMeta.srcs.items = true;
                 const memberList = _.WoDParser.parseKampfberichtGegenstaende();
                 // Als Admin die "reportArchiveItems" und die Ableitung auf "itemLoot" nicht speichern sondern lediglich für die direkte Darstellung erstellen
-                const reportLoot = isAdmivView ? MyStorage.createReportArchiveItems(reportSource.reportId, memberList) : await MyStorage.putToLoot(reportSource.reportId, memberList);
-                if (!isAdmivView) await MyStorage.submitLoot(reportMeta, reportLoot);
+                const reportLoot = await MyStorage.createReportArchiveItemsEntry(reportSource.reportId, memberList);
+                await MyStorage.submitLoot(reportMeta, reportLoot);
                 if ((await MySettings.get()).get(MySettings.SETTING.LOOT_SUMMARY)) await ItemLootSummary.einblenden(reportLoot, reportMeta);
             } else if (reportView === "fight") {
                 const form = _.WoD.getMainForm();
@@ -207,12 +207,10 @@
                 reportSource.levels[levelNr - 1] = WoD.getPlainMainContent().documentElement.outerHTML;
                 reportMeta.srcs.levels[levelNr - 1] = true;
 
-                if (!isAdmivView) {
-                    const heldenListe = _.WoDParser.getHeldenstufenOnKampfbericht();
-                    if (heldenListe) { // da wir hier jetzt auch die Stufe der Helden haben, bringen wir auch von hier den Loot ein.
-                        const reportLoot = await MyStorage.putToLoot(reportMeta.reportId, heldenListe);
-                        await MyStorage.submitLoot(reportMeta, reportLoot);
-                    }
+                const heldenListe = _.WoDParser.getHeldenstufenOnKampfbericht();
+                if (heldenListe) { // da wir hier jetzt auch die Stufe der Helden haben, bringen wir auch von hier den Loot ein.
+                    const reportLoot = await MyStorage.createReportArchiveItemsEntry(reportMeta.reportId, heldenListe);
+                    await MyStorage.submitLoot(reportMeta, reportLoot);
                 }
                 if (_.WoD.isSchlacht()) reportMeta.success = _.WoDParser.updateSuccessInformationsInSchlachtFromBattleReport(document, reportMeta.success);
                 ReportView.changeView(reportMeta);
@@ -359,21 +357,6 @@
                 }
                 await MyStorage.reportArchive.setValue(report);
             });
-        }
-
-        static async rewriteReportArchiveItems() {
-            for (const reportSource of await MyStorage.reportArchiveSources.getAll()) {
-                if (reportSource.items) {
-                    const doc = _.util.getDocumentFor(reportSource.items);
-                    const memberList = _.WoDParser.parseKampfberichtGegenstaende(doc);
-                    await MyStorage.putToLoot(reportSource.reportId, memberList);
-                }
-                if (reportSource.levels && reportSource.levels[0]) {
-                    const doc = _.util.getDocumentFor(reportSource.levels[0]);
-                    const helden = _.WoDParser.getHeldenstufenOnKampfbericht(doc);
-                    if (helden) await MyStorage.putToLoot(reportSource.reportId, helden);
-                }
-            }
         }
 
         static async syncReportArchiveItems2ItemLoot() {
@@ -1363,6 +1346,9 @@
         }
     }
 
+    /**
+     * Erfolgs-Farb-Hinterlegung
+     */
     class DungeonAuswahl {
         static async start() {
             const dungeonTRs = document.querySelectorAll(".content_table > tbody > tr:not([id*=\"desc\"])");
@@ -1421,6 +1407,9 @@
 
     }
 
+    /**
+     * Dungeon-Informationen "Quest-Name" speichern
+     */
     class QuestAuswahl {
 
         static async start() {
@@ -3190,14 +3179,15 @@
             return itemReport;
         }
 
-        static async putToLoot(reportId, memberList) {
+        static async createReportArchiveItemsEntry(reportId, memberList) {
             const itemReport = await this.reportArchiveItems.getValue(reportId) || {reportId: reportId, members: {}};
             this.createReportArchiveItems(reportId, memberList, itemReport);
-            await this.reportArchiveItems.setValue(itemReport);
+            if (!Mod.isAdmin) await this.reportArchiveItems.setValue(itemReport);
             return itemReport;
         }
 
         static async submitLoot(report, reportLoot) {
+            if (Mod.isAdmin) return;
             const loots = {};
             for (const member of Object.values(reportLoot.members)) {
                 if (member.loot) {

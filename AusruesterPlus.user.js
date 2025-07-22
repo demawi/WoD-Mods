@@ -36,7 +36,7 @@
                 await MyStorage.initMyStorage(indexedDb);
 
                 demawiRepository.startMod();
-                Ausruester.start();
+                await Ausruester.start();
             }
         }
 
@@ -45,6 +45,7 @@
     class Ausruester {
 
         static async start() {
+            await GemHandler.init();
             await EquipConfig.init();
             await ControlBar.init();
             await SelectOptimizer.init();
@@ -59,6 +60,8 @@
         static hasChange_UI_Loadout_Equip;
         static hasChange_UI_Loadout_VGConfig;
         static hasChange_UI_Server;
+        static hasChange_UI_CurrentLoadout_Equip;
+        static hasChange_UI_CurrentLoadout_VGConfig;
 
         static loadoutNamePanel;
         static markerPanel_UI_Loadout;
@@ -399,7 +402,8 @@
             const selectedLoadoutName = this.getCurrentSelectedLoadoutName();
             const hasVGsConfigured = this.hasSelectedLoadout() && (await EquipConfig.getSelectedLoadout()).vgs;
 
-            [this.hasChange_UI_Loadout_Equip, this.hasChange_UI_Loadout_VGConfig] = (!this.hasSelectedLoadout() & [false, false]) || await EquipConfig.differs_UI_Loadout(selectedLoadoutName);
+            [this.hasChange_UI_Loadout_Equip, this.hasChange_UI_Loadout_VGConfig] = (!this.hasSelectedLoadout() && [false, false]) || await EquipConfig.differs_UI_Loadout(selectedLoadoutName);
+            [this.hasChange_UI_CurrentLoadout_Equip, this.hasChange_UI_CurrentLoadout_VGConfig] = (!EquipConfig.getCurrentLoadoutName() && [false, false]) || await EquipConfig.differs_UI_Loadout(EquipConfig.getCurrentLoadoutName());
             this.hasChange_UI_Loadout = this.hasChange_UI_Loadout_Equip || this.hasChange_UI_Loadout_VGConfig;
 
             this.hasChange_Loadout_Server = !this.hasSelectedLoadout() || await EquipConfig.differs_Loadout_Server(selectedLoadoutName);
@@ -447,14 +451,14 @@
                 this.applyLoadout2ServerButton.style.opacity = "";
                 this.applyLoadout2ServerButton.title = "Gewähltes Loadout laden! VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             }
-            if (this.hasChange_UI_Loadout_VGConfig) {
+            if (this.hasChange_UI_CurrentLoadout_VGConfig) { // eigentlich sollte es hier this.hasChange_UI_Server_VGConfig heißen!?
                 this.applyUi2ServerButton.innerHTML = this.marker_Warn + " Anwenden " + this.marker_Right;
                 this.applyUi2ServerButton.title = "Gemachte Änderungen von der Oberfläche auf den Server übernehmen\n" + this.marker_Warn + ": Änderungen an der VG-Konfig werden somit nicht gespeichert!";
             } else {
                 this.applyUi2ServerButton.innerHTML = "Anwenden " + this.marker_Right;
                 this.applyUi2ServerButton.title = "Gemachte Änderungen von der Oberfläche auf den Server übernehmen";
             }
-            this.activButton.style.display = (!this.hasChange_UI_Loadout && this.hasChangedProfile()) ? "" : "none";
+            this.activButton.style.display = (!this.hasChange_UI_Loadout && this.hasSelectedLoadout() && this.hasChangedProfile()) ? "" : "none";
             //this.deleteButton.style.display = this.hasSelectedLoadout() ? "" : "none";
             this.updateProfileName();
         }
@@ -507,8 +511,6 @@
 
     class SelectOptimizer {
 
-        static slotElements;
-
         static async init() {
             const _this = this;
             await _.Libs.useJQueryUI();
@@ -526,9 +528,6 @@
                     if (vgs) VGKonfig.syncWithLoadout(vgs);
                 }
             }
-
-            // instanceId -> Veredelungen
-            this.slotElements = this.getSlotElements();
 
             const theForm = FormHandler.getTheForm();
             const allSlots = FormHandler.getAllExistingSlots();
@@ -552,7 +551,7 @@
                     if (curItemId) {
                         const parent = selectField.parentElement;
                         const lastElem = parent.querySelector("input[type='submit']");
-                        const slotImages = _this.getSlotImagesSrcs(curItemId);
+                        const slotImages = GemHandler.getSlotImagesSrcs(curItemId);
                         if (slotImages) {
                             for (const cur of slotImages) {
                                 const img = document.createElement("img");
@@ -595,28 +594,6 @@
             }
         }
 
-        static getSlotElements() {
-            const result = {};
-            const trs = document.getElementsByName('ITEMS_LOCATION')[0].getElementsByTagName('tr');
-            for (const curTr of trs) {
-                const id = Number(curTr.childNodes[0].innerHTML);
-                result[id] = curTr;
-            }
-            return result;
-        }
-
-        static getSlotImagesSrcs(itemId) {
-            const slotInfoTR = this.slotElements[itemId];
-            if (slotInfoTR) {
-                let slotImages = [];
-                const imgs = slotInfoTR.childNodes[3].querySelectorAll('img');
-                for (const curImg of imgs) {
-                    slotImages.push(curImg.src);
-                }
-                return slotImages;
-            }
-        }
-
         static addSlotImagesToSelect(select) {
             let selectedId;
             for (const [idx, option] of Object.entries(select.options)) {
@@ -629,7 +606,7 @@
                     } else {
                         curId = Number(option.value);
                     }
-                    const slotImages = this.getSlotImagesSrcs(curId);
+                    const slotImages = GemHandler.getSlotImagesSrcs(curId);
                     if (slotImages) option.setAttribute("slotImgs", slotImages.map(src => "<img src='" + src + "'/>").join(""));
                 }
             }
@@ -650,31 +627,31 @@
 
         static syncWithLoadout(loadoutVGs) {
             for (const [slotName, slotDef] of Object.entries(loadoutVGs)) {
-                for (const [vgBaseName, amount] of Object.entries(slotDef.items)) {
-                    VGKonfig.ensureUpdateVGKonfig(vgBaseName, slotName, amount, true);
+                for (const [vgBaseNameWithGems, amount] of Object.entries(slotDef.items)) {
+                    VGKonfig.ensureUpdateVGKonfig(vgBaseNameWithGems, slotName, amount, true);
                 }
             }
         }
 
         static checkValidationAll() {
-            for (const [vgBaseName, vgCfg] of Object.entries(this.vgSelects)) {
-                this.checkValidation(vgBaseName);
+            for (const [vgBaseNameWithGems, vgCfg] of Object.entries(this.vgSelects)) {
+                this.checkValidation(vgBaseNameWithGems);
             }
         }
 
-        static checkValidation(vgBaseName) {
-            const vgCfg = this.vgSelects[vgBaseName];
+        static checkValidation(vgBaseNameWithGems) {
+            const vgCfg = this.vgSelects[vgBaseNameWithGems];
             if (!vgCfg) {
-                ControlBar.removeError(vgBaseName);
+                ControlBar.removeError(vgBaseNameWithGems);
                 return;
             }
 
-            const curEquippedAmount = FormHandler.getCurrentEquippedVGAmount(vgBaseName);
+            const curEquippedAmount = FormHandler.getCurrentEquippedVGAmount(vgBaseNameWithGems);
 
             if (curEquippedAmount < vgCfg.amount) {
-                ControlBar.reportProblem(vgBaseName, vgBaseName + " zu wenig ausgerüstet " + curEquippedAmount + " < " + vgCfg.amount);
+                ControlBar.reportProblem(vgBaseNameWithGems, GemHandler.getVGFullWithImgs(vgBaseNameWithGems) + " zu wenig ausgerüstet " + curEquippedAmount + " < " + vgCfg.amount);
             } else {
-                ControlBar.removeError(vgBaseName);
+                ControlBar.removeError(vgBaseNameWithGems);
             }
         }
 
@@ -692,13 +669,13 @@
                     slotEntry.slots = slotCount - usedSlots; // free slots
                 }
                 const items = slotEntry.items;
-                items[curVgDef.vgBaseName] = curVgDef.amount;
+                items[curVgDef.vgBaseNameWithGems] = curVgDef.amount;
             }
             if (Object.keys(vgDefs).length === 0) return;
             return vgDefs;
         }
 
-        static addVGKonfig(vgBaseName, slotName, slotIdx, amount) {
+        static addVGKonfig(vgBaseNameWithGems, slotName, slotIdx, amount) {
             const _this = this;
             const textInput = document.createElement("input");
             textInput.type = "text";
@@ -713,7 +690,7 @@
             vgKonfig.innerHTML = "≥ ";
             vgKonfig.append(textInput);
 
-            let availableAmount = FormHandler.getAvailableVGAmount(slotName, vgBaseName);
+            let availableAmount = FormHandler.getAvailableVGAmount(slotName, vgBaseNameWithGems);
             const amountElem = document.createElement("span");
             amountElem.innerHTML = "/ " + availableAmount;
             vgKonfig.append(amountElem);
@@ -739,13 +716,13 @@
                         lastSelectField.parentElement.parentElement.parentElement.insertBefore(tr, lastSelectField.parentElement.parentElement.nextElementSibling);
                     }
                     td.colSpan = 100;
-                    td.innerHTML = vgBaseName + ": ";
+                    td.innerHTML = vgBaseNameWithGems + ": ";
                     td.append(vgKonfig);
                 }
             }
 
-            this.vgSelects[vgBaseName] = {
-                vgBaseName: vgBaseName,
+            this.vgSelects[vgBaseNameWithGems] = {
+                vgBaseNameWithGems: vgBaseNameWithGems,
                 slotName: slotName,
                 slotIdx: slotIdx,
                 amount: latestValue,
@@ -756,19 +733,19 @@
                 try {
                     let newValue;
                     if (textInput.value === "") {
-                        newValue = 1;
+                        newValue = 0;
                     } else {
                         newValue = Number(textInput.value);
                         if (isNaN(newValue) || (selectField && newValue < 1) || newValue < 0) throw new Errror("Not a valid number");
                     }
                     if (newValue === 0) {
-                        _this.remove(vgBaseName);
+                        _this.remove(vgBaseNameWithGems);
                     } else {
                         latestValue = newValue;
-                        _this.vgSelects[vgBaseName].amount = newValue;
+                        _this.vgSelects[vgBaseNameWithGems].amount = newValue;
                     }
                     ControlBar.onDataChange();
-                    _this.checkValidation(vgBaseName);
+                    _this.checkValidation(vgBaseNameWithGems);
                 } catch (e) { // reset
                     textInput.value = latestValue;
                 }
@@ -778,28 +755,30 @@
         /**
          * Stellt sich, dass an der richtigen Stelle die Konfig für den Vebrauchsgegenstand auftaucht
          */
-        static ensureUpdateVGKonfig(vgBaseName, slotName, amount, initial) {
-            const [wantedSlotName, wantedSlotIdx] = this.findFirstVGItem(vgBaseName, slotName);
-            const existingKonfig = this.vgSelects[vgBaseName];
+        static ensureUpdateVGKonfig(vgBaseNameWithGems, slotName, amount, initial) {
+            const [wantedSlotName, wantedSlotIdx] = this.findFirstVGItem(vgBaseNameWithGems, slotName);
+            const existingKonfig = this.vgSelects[vgBaseNameWithGems];
             if (!existingKonfig) {
-                this.addVGKonfig(vgBaseName, slotName, wantedSlotIdx, amount || 1);
+                this.addVGKonfig(vgBaseNameWithGems, slotName, wantedSlotIdx, amount || 1);
             } else if (existingKonfig.slotIdx !== wantedSlotIdx) {
                 existingKonfig.elem.remove();
-                if (initial || this.findFirstVGItem(vgBaseName, slotName)[1]) { // Behalten nur initial und wenn es noch ein anderes SelectField mit diesem Item existiert
-                    this.addVGKonfig(vgBaseName, slotName, wantedSlotIdx, existingKonfig.amount);
+                if (initial || this.findFirstVGItem(vgBaseNameWithGems, slotName)[1]) { // Behalten nur initial und wenn es noch ein anderes SelectField mit diesem Item existiert
+                    this.addVGKonfig(vgBaseNameWithGems, slotName, wantedSlotIdx, existingKonfig.amount);
                 } else {
-                    delete this.vgSelects[vgBaseName];
+                    delete this.vgSelects[vgBaseNameWithGems];
                 }
             }
         }
 
-        static findFirstVGItem(vgBaseName, slotName) {
+        static findFirstVGItem(vgBaseNameWithGems, slotName) {
             for (const [curSlotName, slotIdx] of FormHandler.getAllExistingSlots()) {
                 if (curSlotName !== slotName) continue;
                 const [instanceId, instanceName] = FormHandler.getSlotSelectedItemInformation(curSlotName, slotIdx);
                 if (!instanceName) continue;
                 const curBaseName = _.WoDItemDb.getItemVGBaseName(instanceName);
-                if (vgBaseName === curBaseName) {
+                const gems = GemHandler.getGemsFor(instanceId);
+                const curBaseNameWithGems = GemHandler.getBaseNameWithGems(curBaseName, gems);
+                if (vgBaseNameWithGems === curBaseNameWithGems) {
                     return [curSlotName, slotIdx];
                 }
             }
@@ -812,8 +791,8 @@
             let alreadyChecked;
             for (const [key, def] of Object.entries(_this.vgSelects)) {
                 if (def.slotIdx === slotIdx && def.slotName === slotName) {
-                    alreadyChecked = def.vgBaseName;
-                    _this.ensureUpdateVGKonfig(def.vgBaseName, slotName);
+                    alreadyChecked = def.vgBaseNameWithGems;
+                    _this.ensureUpdateVGKonfig(alreadyChecked, slotName);
                     break;
                 }
             }
@@ -822,25 +801,27 @@
             const [instanceId, itemName] = FormHandler.getSlotSelectedItemInformation(slotName, slotIdx);
             if (!itemName || !_.WoDItemDb.isVGName(itemName)) return;
             const vgBaseName = _.WoDItemDb.getItemVGBaseName(itemName);
-            if (alreadyChecked !== vgBaseName) _this.ensureUpdateVGKonfig(vgBaseName, slotName);
+            const gems = GemHandler.getGemsFor(instanceId);
+            const vgBaseNameWithGems = GemHandler.getBaseNameWithGems(vgBaseName, gems);
+            if (alreadyChecked !== vgBaseNameWithGems) _this.ensureUpdateVGKonfig(vgBaseNameWithGems, slotName);
 
             this.checkRemoval(slotName, slotIdx);
         }
 
         static checkRemoval(slotName, slotIdx) {
             if (!FormHandler.isMultiSlot(slotName)) {
-                for (const [vgBaseName, vgCfg] of Object.entries(this.vgSelects)) {
-                    if (FormHandler.getCurrentEquippedVGAmount(vgBaseName) <= 0) {
-                        this.remove(vgBaseName);
+                for (const [vgBaseNameWithGems, vgCfg] of Object.entries(this.vgSelects)) {
+                    if (FormHandler.getCurrentEquippedVGAmount(vgBaseNameWithGems) <= 0) {
+                        this.remove(vgBaseNameWithGems);
                     }
                 }
             }
         }
 
-        static remove(vgBaseName) {
-            this.vgSelects[vgBaseName].elem.remove();
-            delete this.vgSelects[vgBaseName];
-            ControlBar.removeError(vgBaseName);
+        static remove(vgBaseNameWithGems) {
+            this.vgSelects[vgBaseNameWithGems].elem.remove();
+            delete this.vgSelects[vgBaseNameWithGems];
+            ControlBar.removeError(vgBaseNameWithGems);
         }
 
         /**
@@ -871,12 +852,12 @@
                 let realUsedSlots = 0;
 
                 // 2. Slot-Priorisierung: initial alles zusammenfassen
-                for (const [vgBaseName, wantedAmount] of Object.entries(itemsDef.items)) {
-                    const stackInfo = stacksDef[vgBaseName];
+                for (const [vgBaseNameWithGems, wantedAmount] of Object.entries(itemsDef.items)) {
+                    const stackInfo = stacksDef[vgBaseNameWithGems];
                     if (!stackInfo) continue; // ERROR: Keine Stacks um vgBaseName zu bedienen
 
                     const cur = {
-                        name: vgBaseName,
+                        name: vgBaseNameWithGems,
                         slots: 1,
                         info: stackInfo,
                         // hier könnte man noch optimieren, da wir eigentlich gar nicht die gesamte StackSizeOrder brauchen, sondern nur soviel wie wir überhaupt Slots zu vergeben haben
@@ -1000,6 +981,7 @@
     class EquipConfig {
 
         static #heroId;
+        static #heroName;
         static #myWorld;
         static #equipConfigs; // save(), load()
         static #serverEquip;
@@ -1009,6 +991,7 @@
         static async init() {
             this.#heroId = _.WoD.getMyHeroId();
             this.#myWorld = _.WoD.getMyWorld();
+            this.#heroName = _.WoD.getMyHeroName();
             await this.#load();
             if (!this.#equipConfigs) {
                 this.#equipConfigs = {
@@ -1017,6 +1000,7 @@
                 }
                 await this.#save();
             }
+            this.#equipConfigs.name = this.#heroName;
             [this.#serverEquipOhneVGs, this.#serverEquipUniqueVgs] = FormHandler.getUIEquipOnlyIds(1);
             this.#serverEquip = FormHandler.getServerEquipOnlyIds();
             console.log("Loaded Equip: ", this.#serverEquip);
@@ -1242,6 +1226,71 @@
 
     }
 
+    /**
+     * Gibt Informationen zu Veredelungen der Gegenstände heraus
+     */
+    class GemHandler {
+
+        static slotElements;
+
+        static init() {
+            this.slotElements = this.#getSlotElements();
+        }
+
+        static getSlotImagesSrcs(itemId) {
+            const slotInfoTR = this.slotElements[itemId];
+            if (slotInfoTR) {
+                let slotImages = [];
+                const imgs = slotInfoTR.childNodes[3].querySelectorAll('img');
+                for (const curImg of imgs) {
+                    slotImages.push(curImg.src);
+                }
+                return slotImages;
+            }
+        }
+
+        static getGemsFor(itemId) {
+            const vm = this.slotElements[itemId];
+            if (!vm) return;
+            return vm.querySelector("td[name='item_gems']").textContent;
+        }
+
+        static getVGFullWithImgs(vgBaseNameWithGems) {
+            const [vgBaseName, gems] = this.getBaseNameAndGems(vgBaseNameWithGems);
+            if (!gems) return vgBaseName;
+            let result = vgBaseName + " ";
+            for (let i = 0, l = gems.length; i < l; i++) {
+                result += "<img src='/wod/css/icons/WOD/gems/gem_" + gems[i] + ".png' />";
+            }
+            return result;
+        }
+
+        static getBaseNameAndGems(vgBaseNameWithGems) {
+            const idx = vgBaseNameWithGems.lastIndexOf("|");
+            if (!idx) return [vgBaseNameWithGems, undefined];
+            return vgBaseNameWithGems.split("|");
+        }
+
+        static getBaseNameWithGems(vgBaseName, gems) {
+            if (!gems) return vgBaseName;
+            return vgBaseName + "|" + gems;
+        }
+
+        static hasGems(vgBaseNameWithGems) {
+            return vgBaseNameWithGems.includes("|");
+        }
+
+        static #getSlotElements() {
+            const result = {};
+            const trs = document.getElementsByName('ITEMS_LOCATION')[0].getElementsByTagName('tr');
+            for (const curTr of trs) {
+                const id = Number(curTr.childNodes[0].innerHTML);
+                result[id] = curTr;
+            }
+            return result;
+        }
+    }
+
     class FormHandler {
 
         static getTheForm() {
@@ -1272,21 +1321,22 @@
             return [itemId, option.text];
         }
 
-        static getAvailableVGAmount(slotName, vgBaseName) {
+        static getAvailableVGAmount(slotName, vgBaseNameWithGems) {
             let availableAmount = FormHandler.getSelectableVGStatistics(slotName);
             if (!availableAmount) return 0;
-            availableAmount = availableAmount[vgBaseName];
+            availableAmount = availableAmount[vgBaseNameWithGems];
             if (!availableAmount) return 0;
             return availableAmount.sum;
         }
 
-        static getCurrentEquippedVGAmount(vgBaseName) {
+        static getCurrentEquippedVGAmount(vgBaseNameWithGems) {
             let result = 0;
             for (const [slotName, slotIdx] of this.getAllExistingSlots()) {
-                const [, itemName] = this.getSlotSelectedItemInformation(slotName, slotIdx);
+                const [itemId, itemName] = this.getSlotSelectedItemInformation(slotName, slotIdx);
                 if (!itemName) continue;
-                const [curVgBaseName, amount, max] = _.WoDItemDb.getItemVGInfos(itemName);
-                if (!vgBaseName || curVgBaseName !== vgBaseName) continue;
+                let [curVgBaseName, amount, max] = _.WoDItemDb.getItemVGInfos(itemName);
+                if (GemHandler.hasGems(vgBaseNameWithGems)) curVgBaseName = GemHandler.getBaseNameWithGems(curVgBaseName, GemHandler.getGemsFor(itemId));
+                if (!vgBaseNameWithGems || curVgBaseName !== vgBaseNameWithGems) continue;
                 result += Number(amount);
             }
             return result;
@@ -1478,6 +1528,7 @@
                     sortGroup = 0;
                     colorCode = "rgba(0,0,0,0.6)";
                 } else {
+                    // evtl. ist hier die explizite Sortierung für Veredelungen nicht notwendig
                     const [curVgBaseName, amount, max] = _.WoDItemDb.getItemVGInfos(selectedName);
                     if (curVgBaseName) {
                         sortGroup = 1;
@@ -1632,7 +1683,7 @@
 
         /**
          * Gruppiert nach BaseName und liefert Statistiken dazu.
-         * slotName -> vgBaseName -> {
+         * slotName -> vgBaseNameWithGems -> {
          *     min/max/sum/stackCount/stackSize/stacks
          * }
          */
@@ -1645,7 +1696,9 @@
             const addEntry = function (itemId, itemName) {
                 let [vgBaseName, amount, max] = _.WoDItemDb.getItemVGInfos(itemName);
                 if (!vgBaseName) return;
-                const vgBaseDef = result[vgBaseName] || (result[vgBaseName] = {
+                const gems = GemHandler.getGemsFor(itemId);
+                const vgBaseNameWithGems = GemHandler.getBaseNameWithGems(vgBaseName, gems);
+                const vgBaseDef = result[vgBaseNameWithGems] || (result[vgBaseNameWithGems] = {
                     min: 1000, // min available
                     max: 0, // max available
                     sum: 0,

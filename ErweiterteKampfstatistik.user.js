@@ -1255,9 +1255,11 @@
                 this.columns.push(new Column("Gesamtschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
+                        let targetDmg = 0;
                         (target.damage || []).forEach(damage => {
-                            dmgs.push(damage.value + damage.ruestung + damage.resistenz);
+                            targetDmg += damage.value + damage.ruestung + damage.resistenz;
                         });
+                        dmgs.push(targetDmg);
                     })
                     const min = util.arrayMin(dmgs);
                     const max = util.arrayMax(dmgs);
@@ -1274,9 +1276,11 @@
                 this.columns.push(new Column("Direkter Schaden", center("Direkter<br>Schaden<br>(Ø)<br>(min-max)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
+                        let targetDmg = 0;
                         (target.damage || []).forEach(damage => {
-                            dmgs.push(damage.value);
+                            targetDmg += damage.value;
                         });
+                        dmgs.push(targetDmg);
                     })
                     const min = util.arrayMin(dmgs);
                     let max = util.arrayMax(dmgs);
