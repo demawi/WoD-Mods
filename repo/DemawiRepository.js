@@ -1367,7 +1367,7 @@ class demawiRepository {
                 // Fall 2: Mehrere Mods, nur einer hat sich aktualisiert, der andere läuft hier dann immer auf einen Fehler
                 console.log("Versionchange: reload");
                 if (window.opener) { // Popup muss geschlossen werden!? damit es erneut geöffnet werden kann
-                    console.error("Fehler: wir sind in einem Popup, aber die installierte DB-Proxy-Version unterscheidet sich zu der aktuell vom Skript genutzten Version: '" + usedVersion + "' by '" + installedBy + "' vs. '" + _.csProxyV + "' by '" + GM.info.script.name + "' RootWindow:" + rootWindow);
+                    console.error("Fehler: wir sind in einem Popup, aber die installierte DB-Proxy-Version unterscheidet sich zu der aktuell vom Skript genutzten Version: '" + usedVersion + "' by '" + installedBy + "' vs. '" + _.csProxyV + "' by '" + GM.info.script.name + "' RootWindow:" + rootWindow + " window-Opener:" + window.opener);
                     //window.close();
                 }
 

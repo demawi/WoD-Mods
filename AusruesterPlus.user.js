@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.5
+// @version        0.8.6
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
@@ -995,7 +995,7 @@
             await this.#load();
             if (!this.#equipConfigs) {
                 this.#equipConfigs = {
-                    id: this.#heroId,
+                    id: this.#myWorld + this.#heroId,
                     loadouts: {}
                 }
                 await this.#save();
@@ -1161,7 +1161,7 @@
         static async setCurrent(profileName, diretSave) {
             this.#equipConfigs.current = profileName;
             if (diretSave) {
-                await MyStorage.equipHeroes.setValue(this.#equipConfigs);
+                await MyStorage.equipHeroe.setValue(this.#equipConfigs);
             }
         }
 
@@ -1208,7 +1208,7 @@
             }
             this.setCurrent(profileName, false);
             equipConfig.ts = now;
-            await MyStorage.equipHeroes.setValue(this.#equipConfigs);
+            await MyStorage.equipHeroe.setValue(this.#equipConfigs);
             await MyStorage.equipLoadout.setValue(equipConfig);
         }
 
@@ -1217,11 +1217,11 @@
         }
 
         static async #load() {
-            this.#equipConfigs = await MyStorage.equipHeroes.getValue(this.#myWorld + this.#heroId);
+            this.#equipConfigs = await MyStorage.equipHeroe.getValue(this.#myWorld + this.#heroId);
         }
 
         static async #save() {
-            await MyStorage.equipHeroes.setValue(this.#equipConfigs);
+            await MyStorage.equipHeroe.setValue(this.#equipConfigs);
         }
 
     }
@@ -1748,7 +1748,7 @@
         }
 
         static async initThisStorage(indexedDb) {
-            this.equipHeroes = indexedDb.createObjectStorage("equipHero", "id");
+            this.equipHeroe = indexedDb.createObjectStorage("equipHero", "id");
             this.equipLoadout = indexedDb.createObjectStorage("equipLoadout", "id");
         }
 
