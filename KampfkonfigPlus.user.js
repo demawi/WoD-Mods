@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name           [WoD] Kampfkonfig Plus
-// @version        1.1.4
+// @version        1.1.5
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Kampfkonfigs. Aktuell nur JSON-Export/Import.
-// @include        http*://*.world-of-dungeons.de/wod/spiel/hero/skillconf_nojs.php*
-// @include        http*://*.world-of-dungeons.de/wod/spiel/hero/skillconfig.php*
+// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/skillconf_nojs.php*
+// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/skillconfig.php*
 //
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
