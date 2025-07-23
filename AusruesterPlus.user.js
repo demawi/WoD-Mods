@@ -217,6 +217,11 @@
                 result.style.display = "none";
                 result.innerHTML = content;
                 result.style.lineHeight = "1em";
+                result.style.paddingTop = "2px";
+                result.style.paddingBottom = "2px";
+                result.style.paddingLeft = "5px";
+                result.style.paddingRight = "5px";
+                result.style.verticalAlign = "middle";
                 result.onclick = onclick;
                 return result;
             }
