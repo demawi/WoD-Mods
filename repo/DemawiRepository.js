@@ -1387,7 +1387,7 @@ class demawiRepository {
                                 rootWindow.location.reload();
                             }
                         }
-                    }, 5000);
+                    }, 3000);
                 }
                 return [false];
             }
@@ -2846,10 +2846,11 @@ class demawiRepository {
             HEROES: "heroes",
             MOVE: "move",
             ITEM: "item",
-            COMBAT_REPORT: "combat_report",
             REPORT_OVERVIEW: "report_overview",
-            REPORT_ITEMS: "report_items",
             REPORT: "report",
+            REPORT_ITEMS: "report_items", // subsite from REPORT
+            REPORT_STATS: "report_stats", // subsite from REPORT
+            REPORT_COMBAT: "report_combat", // subsite from REPORT
             SKILL: "skill",
             ITEMS_STORE: "storage",
         }

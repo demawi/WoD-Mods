@@ -58,17 +58,24 @@
                 case _.WoD.VIEW.SKILL:
                     await _.WoDSkillsDb.onSkillPage();
                     break;
+                case _.WoD.VIEW.REPORT_OVERVIEW:
+                    this.createStub();
+                    break;
                 case _.WoD.VIEW.REPORT: // Statistik, Gegenstände oder Kampfbericht
                     await this.onReportSite();
                     break;
             }
         }
 
-        static async onReportSite() {
+        static createStub() {
             unsafeWindow.statExecuter = async function (...args) {
                 console.log(GM.info.script.name + " wird aufgerufen");
                 await Mod.startMod2(...args);
             }
+        }
+
+        static async onReportSite() {
+            this.createStub();
             const _this = this;
             setTimeout(async function () {
                 await _this.startMod2();
