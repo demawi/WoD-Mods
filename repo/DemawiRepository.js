@@ -8,7 +8,7 @@ class demawiRepository {
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
      */
-    static csProxyV = "1.0";
+    static csProxyV = "1.1";
 
     /**
      * Erlaubt Skript-übergreifende Markierungen am 'window'-Objekt.

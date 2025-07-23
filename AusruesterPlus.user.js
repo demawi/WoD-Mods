@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.6
+// @version        0.8.7
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
