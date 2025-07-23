@@ -4,13 +4,7 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @match          http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
-// @match          http*://*/wod/spiel/*dungeon/report.php*
-// @match          http*://*.world-of-dungeons.de/*combat_report.php*
-// @match          http*://*/wod/spiel/*dungeon/combat_report.php*
-// @match          http*://*/wod/spiel/event/play.php*
-// @match          http*://*/wod/spiel/event/eventlist.php*
-
+//
 // @match          https://*.world-of-dungeons.de/*
 // @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
