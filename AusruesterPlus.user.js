@@ -1,12 +1,11 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.14
+// @version        0.8.15
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
 // @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
 //
-// @match          https://*.world-of-dungeons.de/*
 // @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
