@@ -1,10 +1,10 @@
 // ==UserScript==
 // @name           [WoD] IndexDbBrowser
-// @version        0.11.2
+// @version        0.11.3
 // @author         demawi
 // @namespace      demawi
 // @description    Lässt einen die Index des Browsers ansehen und bearbeiten
-// @include        https://*.world-of-dungeons.*/wod/spiel/settings/settings.php*
+// @match          https://*.world-of-dungeons.*/wod/spiel/settings/settings.php*
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************

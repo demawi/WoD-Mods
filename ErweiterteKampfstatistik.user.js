@@ -1,18 +1,18 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.11
+// @version        0.21.12
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
-// @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
-// @include        http*://*/wod/spiel/*dungeon/report.php*
-// @include        http*://*.world-of-dungeons.de/*combat_report.php*
-// @include        http*://*/wod/spiel/*dungeon/combat_report.php*
-// @include        http*://*/wod/spiel/event/play.php*
-// @include        http*://*/wod/spiel/event/eventlist.php*
+// @match          http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
+// @match          http*://*/wod/spiel/*dungeon/report.php*
+// @match          http*://*.world-of-dungeons.de/*combat_report.php*
+// @match          http*://*/wod/spiel/*dungeon/combat_report.php*
+// @match          http*://*/wod/spiel/event/play.php*
+// @match          http*://*/wod/spiel/event/eventlist.php*
 //
-// @include        http*://*/wod/spiel/hero/skill.php*
-// @include        http*://world-of-dungeons.de*
+// @match          http*://*/wod/spiel/hero/skill.php*
+// @match          http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
