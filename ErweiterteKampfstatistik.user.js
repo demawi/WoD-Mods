@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.13
+// @version        0.21.14
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -10,8 +10,8 @@
 // @match          http*://*/wod/spiel/*dungeon/combat_report.php*
 // @match          http*://*/wod/spiel/event/play.php*
 // @match          http*://*/wod/spiel/event/eventlist.php*
-//
-// @match          http*://*/wod/spiel/hero/skill.php*
+
+// @match          https://*.world-of-dungeons.de/*
 // @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
@@ -41,12 +41,6 @@
             this.startMod2();
         }
 
-        /**
-         * Einstiegspunkt der Anwendung. Falls von externer Mod aufgerufen wird, sollten die Parameter entsprechend gesetzt werden.
-         * @param kampfbericht   ob es ich um eine Kampfberichtseite handelt
-         * @param kampfstatistik ob es sich um die Kampfstatistik-Seite handelt
-         * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
-         */
         static async startMod() {
             const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
             if (!indexedDb) return;
@@ -62,6 +56,8 @@
                     this.createStub();
                     break;
                 case _.WoD.VIEW.REPORT: // Statistik, Gegenstände oder Kampfbericht
+                case _.WoD.VIEW.EVENTLIST: // Abenteuer
+                case _.WoD.VIEW.PLAY: // Abenteuer
                     await this.onReportSite();
                     break;
             }
@@ -82,6 +78,12 @@
             }, 100);
         }
 
+        /**
+         * Einstiegspunkt der Anwendung. Falls von externer Mod aufgerufen wird, sollten die Parameter entsprechend gesetzt werden.
+         * @param kampfbericht   ob es ich um eine Kampfberichtseite handelt
+         * @param kampfstatistik ob es sich um die Kampfstatistik-Seite handelt
+         * @param dbReportSource Entität aus der "reportArchiveSources"-Datenbank
+         */
         static async startMod2(kampfbericht, kampfstatistik, dbReportSource) {
             this.thisReport = undefined;
             this.thisLevelDatas = undefined;

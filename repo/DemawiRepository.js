@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.5";
+    static version = "1.1.6";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1358,6 +1358,14 @@ class demawiRepository {
             }
 
             if (this.ensureIframeWrap()) return [false];
+
+            // Sicherstellen, dass alle Iframe-Navigationen die ausserhalb der Origin liegen über target="_top" abgewickelt werden. Zuvor gesetzt "_blank" wäre auch ok.
+            if (!_.WindowManager.getMark("_topLinks")) {
+                for (const cur of document.querySelectorAll("a[href^='http']:not([href^='" + document.location.origin + "'])")) {
+                    if (!cur.target) cur.target = "_top";
+                }
+                _.WindowManager.mark("_topLinks");
+            }
             const rootWindow = _.WindowManager.getRootWindow();
             const usedVersion = _.WindowManager.getMark("csProxyV", rootWindow);
             const installedBy = _.WindowManager.getMark("csProxyM", rootWindow);
@@ -1445,7 +1453,7 @@ class demawiRepository {
                     }
                 }
                 for (const cur of rootBody.children) {
-                    if(cur !== iframeWrap) cur.style.display = "none";
+                    if (cur !== iframeWrap) cur.style.display = "none";
                 }
                 document.title = iframeWrap.contentWindow.document.title;
                 //iframeWrap.contentWindow.addEventListener("beforeunload", function () {});
@@ -2853,6 +2861,8 @@ class demawiRepository {
             REPORT_COMBAT: "report_combat", // subsite from REPORT
             SKILL: "skill",
             ITEMS_STORE: "storage",
+            EVENTLIST: "eventlist",
+            PLAY: "play",
         }
 
         static #viewCache;
@@ -2900,6 +2910,10 @@ class demawiRepository {
                     }
                 case "skill.php":
                     return this.VIEW.SKILL;
+                case "eventlist.php":
+                    return this.VIEW.EVENTLIST;
+                case "play.php":
+                    return this.VIEW.PLAY;
             }
         }
 
@@ -2908,7 +2922,7 @@ class demawiRepository {
 
         static getReportView(silent) {
             if (this.#reportViewCache) return this.#reportViewCache;
-            this.#reportViewCache = this.#getReportViewIntern();
+            this.#reportViewCache = this.#getReportViewIntern(silent);
             return this.#reportViewCache;
         }
 
@@ -3786,7 +3800,7 @@ class demawiRepository {
         static #alreadyLoaded = {};
 
         static async useJQueryUI() {
-            if(_.WindowManager.getMark("jQueryUI-CSS")) return;
+            if (_.WindowManager.getMark("jQueryUI-CSS")) return;
             _.WindowManager.mark("jQueryUI-CSS", true);
             const css = document.styleSheets[0];
 
