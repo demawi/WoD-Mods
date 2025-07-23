@@ -1360,8 +1360,11 @@ class demawiRepository {
             if (this.ensureIframeWrap()) return [false];
 
             // Sicherstellen, dass alle Iframe-Navigationen die ausserhalb der Origin liegen über target="_top" abgewickelt werden. Zuvor gesetzt "_blank" wäre auch ok.
-            for (const cur of document.querySelectorAll("a[href^='http']:not([href^='" + document.location.origin + "'])")) {
-                if (!cur.target) cur.target = "_top";
+            if (!_.WindowManager.getMark("_topLinks")) {
+                for (const cur of document.querySelectorAll("a[href^='http']:not([href^='" + document.location.origin + "'])")) {
+                    if (!cur.target) cur.target = "_top";
+                }
+                _.WindowManager.mark("_topLinks");
             }
             const rootWindow = _.WindowManager.getRootWindow();
             const usedVersion = _.WindowManager.getMark("csProxyV", rootWindow);
