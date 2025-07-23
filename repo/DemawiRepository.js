@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.4";
+    static version = "1.1.5";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1547,7 +1547,7 @@ class demawiRepository {
          * Prüft, ob das Skript auch Zugriff auf die entsprechende URL hat, um den Responder zu installieren.
          */
         static #checkScriptAccess(responderHttp) {
-            for (const curInclude of GM.info.script.includes) {
+            for (const curInclude of GM.info.script.matches) {
                 if (responderHttp.match("^" + curInclude.replaceAll(".", "\\.").replaceAll("?", ".").replaceAll("*", ".*") + "$")) {
                     return true;
                 }

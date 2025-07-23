@@ -1,16 +1,16 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.8
+// @version        0.8.9
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
-// @include        http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
 //
-// @include        http*://world-of-dungeons.de*
+// @match          http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 //
-// @require        https://code.jquery.com/jquery-3.7.1.min.js
-// @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js
+// @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
+// @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js#sha512=ETeDoII5o/Zv6W1AtLiNDwfdkH684h6M/S8wd2N0vMEAeL3UAOf7a1SHdP1LGDieDrofe1KZpp9k6yLkR90E6A==
 // @require	       https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js#sha512=2ImtlRlf2VVmiGZsjm9bEyhjGW4dU7B6TNwh/hx/iSByxNENtj3WVE6o/9Lj4TJeVXPi4bnOIMXFIJJAeufa0A==
 // ==/UserScript==
 // *************************************************************
