@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.9
+// @version        0.8.13
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
 // @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
 //
-// @match          http*://world-of-dungeons.de*
+// @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
 // @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
@@ -217,6 +217,11 @@
                 result.style.display = "none";
                 result.innerHTML = content;
                 result.style.lineHeight = "1em";
+                result.style.paddingTop = "2px";
+                result.style.paddingBottom = "2px";
+                result.style.paddingLeft = "5px";
+                result.style.paddingRight = "5px";
+                result.style.verticalAlign = "middle";
                 result.onclick = onclick;
                 return result;
             }
@@ -1027,7 +1032,7 @@
 
             const checkExists = function (itemDef) {
                 if (!equippedIds.includes(itemDef.id)) {
-                    if (initial) ControlBar.reportProblem(itemDef.id, "Fehlendes Item [" + slotName + "]: " + itemDef.name);
+                    if (initial) ControlBar.reportProblem(itemDef.id, "Fehlender Gegenstand [" + slotName + "]: " + itemDef.name);
                 } else {
                     ControlBar.removeError(itemDef.id);
                 }

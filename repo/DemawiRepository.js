@@ -1374,7 +1374,7 @@ class demawiRepository {
                 // nur die vorherige Mod stößt den Reload an, damit es bei Versionsunterschieden (z.B. eine Mod ist nicht aktuell) nicht zu Dauerschleifen kommt.
                 if (GM.info.script.name === installedBy) rootWindow.location.reload();
                 else {
-                    // damit der eigentlich Mod Zeit für den Reload hat, dann brauchen diese Meldungen gar nicht erst angezeigt werden.
+                    // damit der eigentlich Mod Zeit für den Reload hat, warten wir hier bis wir weiteres unternehmen
                     // kann aber natürlich auch passieren, wenn eine Seite aufgerufen wird, wo die Mod, die den Proxy installiert hat nicht zur Ausführung kommt.
                     setTimeout(function () {
                         if (_.WindowManager.getMark("csProxyInstallerVisited")) {
@@ -1387,7 +1387,7 @@ class demawiRepository {
                                 rootWindow.location.reload();
                             }
                         }
-                    }, 2000);
+                    }, 3000);
                 }
                 return [false];
             }
@@ -2846,10 +2846,11 @@ class demawiRepository {
             HEROES: "heroes",
             MOVE: "move",
             ITEM: "item",
-            COMBAT_REPORT: "combat_report",
             REPORT_OVERVIEW: "report_overview",
-            REPORT_ITEMS: "report_items",
             REPORT: "report",
+            REPORT_ITEMS: "report_items", // subsite from REPORT
+            REPORT_STATS: "report_stats", // subsite from REPORT
+            REPORT_COMBAT: "report_combat", // subsite from REPORT
             SKILL: "skill",
             ITEMS_STORE: "storage",
         }

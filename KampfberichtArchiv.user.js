@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.14.10
+// @version        0.14.13
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -12,10 +12,12 @@
 // @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
 // @match          http*://*.world-of-dungeons.de/wod/spiel/news/news.php*
 // @match          http*://*.world-of-dungeons.de/wod/spiel/rewards/tombola.php*
+// *** Um überall die Saison-Anzeige einblenden zu können:
+// @match          https://*.world-of-dungeons.*/wod/spiel/*
 //
 // @match          http*://*.world-of-dungeons.de/wod/spiel/hero/item.php*
 // @match          http*://*.world-of-dungeons.de/wod/spiel/hero/skill.php*
-// @match          http*://world-of-dungeons.de*
+// @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
 // @require        libs/jszip.min.js
@@ -40,9 +42,6 @@
         static version = GM.info.script.version;
         static dbname = "wodDB";
         static isAdmin;
-
-
-        // Für den DB-Proxy muss man im Firefox openWindow statt nem IFrame benutzen
 
         static async startMod() {
             const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
