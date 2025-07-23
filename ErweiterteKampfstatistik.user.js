@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.12
+// @version        0.21.13
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -12,7 +12,7 @@
 // @match          http*://*/wod/spiel/event/eventlist.php*
 //
 // @match          http*://*/wod/spiel/hero/skill.php*
-// @match          http*://world-of-dungeons.de*
+// @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************

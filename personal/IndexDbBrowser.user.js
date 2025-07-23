@@ -5,6 +5,7 @@
 // @namespace      demawi
 // @description    Lässt einen die Index des Browsers ansehen und bearbeiten
 // @match          https://*.world-of-dungeons.*/wod/spiel/settings/settings.php*
+//
 // @require        repo/DemawiRepository.js
 // ==/UserScript==
 // *************************************************************
