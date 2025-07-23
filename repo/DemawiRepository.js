@@ -3785,17 +3785,17 @@ class demawiRepository {
         static #alreadyLoaded = {};
 
         static async useJQueryUI() {
-            if (this.#alreadyLoaded["jQueryUI-CSS"]) return;
-
-            this.#alreadyLoaded["jQueryUI-CSS"] = true;
+            if(_.WindowManager.getMark("jQueryUI-CSS")) return;
+            _.WindowManager.mark("jQueryUI-CSS", true);
             const css = document.styleSheets[0];
 
-            function addRule(rule) {
+            function addCssRule(rule) {
                 css.insertRule(rule, css.cssRules.length);
             }
 
-            addRule(".ui-datepicker {background-color:black;}");
-            addRule(".ui-datepicker .ui-datepicker-header {\n" +
+            // datepicker
+            addCssRule(".ui-datepicker {background-color:black;}");
+            addCssRule(".ui-datepicker .ui-datepicker-header {\n" +
                 "    background: #339999;\n" +
                 "    color: #ffffff;\n" +
                 "    font-family:'Times New Roman';\n" +
@@ -3803,38 +3803,43 @@ class demawiRepository {
                 "    border-style: solid;\n" +
                 "    border-color: #111;\n" +
                 "}");
-            addRule(".ui-datepicker .ui-datepicker-title {\n" +
+            addCssRule(".ui-datepicker .ui-datepicker-title {\n" +
                 "    text-align: center;\n" +
                 "    font-size: 15px;\n" +
                 "\n" +
                 "}");
-            addRule(".ui-datepicker .ui-datepicker-prev {\n" +
+            addCssRule(".ui-datepicker .ui-datepicker-prev {\n" +
                 "    float: left;\n" +
                 "    cursor: pointer;\n" +
                 "    background-position: center -30px;\n" +
                 "}");
-            addRule(".ui-datepicker .ui-datepicker-next {\n" +
+            addCssRule(".ui-datepicker .ui-datepicker-next {\n" +
                 "    float: right;\n" +
                 "    cursor: pointer;\n" +
                 "    background-position: center 0px;\n" +
                 "}");
 
-            _.Libs.addCSS("https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css");
             // select2
-            let select = $('select');
-            if (!select) console.warn("Kein select-feld gefunden");
-            let bg = select.css('background-color');
-            let c = select.css('color');
-            addRule('.select2-selection, .select2-dropdown { background: ' + bg + ' !important; } ');
-            addRule('.select2-selection span { color: ' + c + ' !important; } ');
-            addRule('.select2-dropdown li[aria-selected="true"] { background-color: rgba(255, 255, 255, 0.25) !important; } ');
-            addRule('.select2-results__option { padding: 0px !important; padding-left: 5px !important; min-height:20px !important;} ');
-            addRule('.button_image_info { width: 20px; } ');
-            addRule('.select2-container--default .select2-selection--single { border-color: #999999 !important;}')
+            _.Libs.addCSS("https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css");
+            let standardSelect = document.createElement("select");
+            standardSelect.style.display = "none";
+            document.body.append(standardSelect);
+
+            // Farben aus dem Skin übernehmen
+            standardSelect = $(standardSelect);
+            const bg = standardSelect.css('background-color');
+            const c = standardSelect.css('color');
+            standardSelect.remove();
+            addCssRule('.select2-selection, .select2-dropdown { background: ' + bg + ' !important; } ');
+            addCssRule('.select2-selection span { color: ' + c + ' !important; } ');
+            addCssRule('.select2-dropdown li[aria-selected="true"] { background-color: rgba(255, 255, 255, 0.25) !important; } ');
+            addCssRule('.select2-results__option { padding: 0px !important; padding-left: 5px !important; min-height:20px !important;} ');
+            addCssRule('.button_image_info { width: 20px; } ');
+            addCssRule('.select2-container--default .select2-selection--single { border-color: #999999 !important;}')
             //addRule('.select2-selection__rendered { font-size: 14px; } ');
-            addRule('.select2-results__options { max-height: ' + (window.screen.height * 0.4) + 'px !important; } ');
-            addRule('.select2-container, .select2-selection--single, .select2-selection__rendered, .select2-selection__arrow { height: 20px !important; line-height: 20px !important; } ');
-            addRule('.button_image_info { margin-top: -5px; } ');
+            addCssRule('.select2-results__options { max-height: ' + (window.screen.height * 0.4) + 'px !important; } ');
+            addCssRule('.select2-container, .select2-selection--single, .select2-selection__rendered, .select2-selection__arrow { height: 20px !important; line-height: 20px !important; } ');
+            addCssRule('.button_image_info { margin-top: -5px; } ');
 
             $(document).on('select2:open', () => {
                 document.querySelector('.select2-search__field').focus();
