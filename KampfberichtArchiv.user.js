@@ -1,12 +1,12 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.14.14
+// @version        0.14.15
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
-//
-// @match          https://*.world-of-dungeons.de/*
-// @match          http*://world-of-dungeons.de/*
+// @match          http*://*.world-of-dungeons.de/wod/spiel/*
+// @match          http*://*.world-of-dungeons.de/
+// @match          http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 //
 // @require        libs/jszip.min.js

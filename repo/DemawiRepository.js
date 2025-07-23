@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.6";
+    static version = "1.1.7";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1456,6 +1456,13 @@ class demawiRepository {
                     if (cur !== iframeWrap) cur.style.display = "none";
                 }
                 document.title = iframeWrap.contentWindow.document.title;
+
+                const wrappedDocument = iframeWrap.contentWindow.document;
+                // Sicherstellen, dass alle Iframe-Navigationen die ausserhalb der Origin liegen über target="_top" abgewickelt werden. Zuvor gesetzt "_blank" wäre auch ok.
+                for (const cur of wrappedDocument.querySelectorAll("a[href^='http']:not([href^='" + wrappedDocument.location.origin + "'])")) {
+                    if (!cur.target) cur.target = "_top";
+                }
+
                 //iframeWrap.contentWindow.addEventListener("beforeunload", function () {});
                 iframeWrap.contentWindow.addEventListener("unload", function () {
                     console.clear();
