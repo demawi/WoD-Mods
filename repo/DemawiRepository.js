@@ -8,7 +8,7 @@ class demawiRepository {
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
      */
-    static csProxyV = "1.0";
+    static csProxyV = "1.1";
 
     /**
      * Erlaubt Skript-übergreifende Markierungen am 'window'-Objekt.
@@ -1424,17 +1424,18 @@ class demawiRepository {
             iframeWrap.style.zIndex = 100;
             iframeWrap.id = "iframeWrap";
 
-            document.body.style.overflow = "hidden";
-            document.body.style.margin = "0px";
+            const rootBody = document.body;
+            rootBody.style.overflow = "hidden";
+            rootBody.style.margin = "0px";
 
             iframeWrap.src = window.location.href;
-            document.body.insertBefore(iframeWrap, document.body.children[0]);
+            rootBody.insertBefore(iframeWrap, rootBody.children[0]);
 
             iframeWrap.addEventListener("load", function () {
                 let cur;
                 // Elemente lieber nicht entfernen, da ansonsten Seiten-Skripte ins Leere laufen und die Konsole spammen z.B. bei der Dungeon-Ansicht die Progress-Bar
                 //while (cur = document.head.children[0]) cur.remove();
-                //while (cur = document.body.children[1])  cur.remove();
+                //while (cur = rootBody.children[1])  cur.remove();
                 for (let i = 0, l = document.head.children.length; i < l; i++) {
                     const cur = document.head.children[i];
                     if (cur.tagName === "LINK") {
@@ -1443,7 +1444,9 @@ class demawiRepository {
                         l--;
                     }
                 }
-                for (let i = 1, l = document.body.children.length; i < l; i++) document.body.children[i].style.display = "none";
+                for (const cur of rootBody.children) {
+                    if(cur !== iframeWrap) cur.style.display = "none";
+                }
                 document.title = iframeWrap.contentWindow.document.title;
                 //iframeWrap.contentWindow.addEventListener("beforeunload", function () {});
                 iframeWrap.contentWindow.addEventListener("unload", function () {
