@@ -1,22 +1,11 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.14.13
+// @version        0.14.14
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
-// @match          http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/clanquest/combat_report.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/clanquest/move.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/dungeon/dungeon.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/news/news.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/rewards/tombola.php*
-// *** Um überall die Saison-Anzeige einblenden zu können:
-// @match          https://*.world-of-dungeons.*/wod/spiel/*
 //
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/item.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/skill.php*
+// @match          https://*.world-of-dungeons.de/*
 // @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
@@ -410,10 +399,16 @@
             await Maintenance.checkMaintenance();
             this.title = document.getElementsByTagName("h1")[0];
 
-            const wodContent = document.getElementsByClassName("content_table")[0];
+            const wodContent = document.createElement("div");
+            const titleParent = this.title.parentElement;
+            const titleIdx = Array.prototype.indexOf.call(titleParent.childNodes, this.title);
+            for (let i = titleIdx + 1, l = titleParent.childNodes.length; i < l; i++) {
+                wodContent.append(titleParent.childNodes[i]);
+                i--;
+                l--;
+            }
             this.anchor = document.createElement("div");
-            wodContent.parentElement.insertBefore(this.anchor, wodContent);
-            wodContent.parentElement.removeChild(wodContent);
+            titleParent.append(this.anchor);
             this.anchor.append(wodContent);
             this.wodContent = wodContent;
 
@@ -537,6 +532,7 @@
         static async completeDungeonInformations(isArchiv, mainNode) {
             const reportDBMeta = await MyStorage.getReportDBMeta();
             const table = mainNode.classList.contains("content_table") ? mainNode : mainNode.getElementsByClassName("content_table")[0];
+            if (!table) return;
             const tbody = table.children[0];
             const ueberschriftArchiv = document.createElement("th");
             ueberschriftArchiv.innerHTML = "Archiv";
