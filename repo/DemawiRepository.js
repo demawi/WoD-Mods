@@ -1749,6 +1749,7 @@ class demawiRepository {
                 const original = iframe2Capture.contentWindow.open;
                 iframe2Capture.contentWindow.open = function (...args) {
                     const popup = original(...args);
+                    console.log("POPUP!!");
                     // TODO: auch das Popup verarbeiten und auf Navigationen horchen
                     return popup;
                 }
