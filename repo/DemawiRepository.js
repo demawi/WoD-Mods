@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.7";
+    static version = "1.2.0";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1351,7 +1351,7 @@ class demawiRepository {
                 return [true, "l"];
             }
             if (window.origin.endsWith("//world-of-dungeons.de")) { // Main-Domain-Check, hier wird generell kein weiterer Script-Code ausgeführt
-                if (window.location.href.includes("messenger=true")) { // With ProxyMarker
+                if (window.location.href.includes("csProxyV=")) { // With ProxyMarker
                     this.actAsCSProxyResponder();
                     return [false, "l"];
                 } else return [false];
@@ -1360,17 +1360,17 @@ class demawiRepository {
             if (await this.ensureIframeWrap()) return [false];
 
             const rootWindow = _.WindowManager.getRootWindow();
-            const usedVersion = _.WindowManager.getMark("csProxyV", rootWindow);
-            const installedBy = _.WindowManager.getMark("csProxyM", rootWindow);
-            // TODO: hmm.. der Check hier auf der Seite bringt gar nicht so viel, da es ja relevant ist, was im CS-Domain-Iframe für ein Skript läuft und das bekommen wir von hier aus gar nicht raus
-            // TODO: wir könnten es höchstens als Parameter in die URL schreiben.
+            const usedVersion = _.WindowManager.getMark("demRepV", rootWindow);
+            const installedBy = _.WindowManager.getMark("demRepM", rootWindow);
+            // Sicherstellen, dass die aktuelle Version im Haupfenster läuft (wg. MyMod.start()), was im CS-Iframe läuft bekommen wir von hier aus allerdings nicht mit.
+            // TODO: ggf. dem Iframe nen Parameter mit der csProxyVersion mitgeben, damit dort sichergestellt werden kann, dass die aktuelle Version läuft!?
             if (GM.info.script.name === installedBy) _.WindowManager.mark("csProxyInstallerVisited", true); // auf dem aktuellen Iframe-Window nicht auf dem Root
-            if (usedVersion !== _.csProxyV) { // Die Version hat sich geändert, alles nochmal laden.
+            if (usedVersion !== _.version) { // Die Version hat sich geändert, alles nochmal laden.
                 // Fall 1: Mod hat sich nach dem ersten Laden der Seite aktualisiert
                 // Fall 2: Mehrere Mods, nur einer hat sich aktualisiert, der andere läuft hier dann immer auf einen Fehler
                 console.log("Versionchange: reload");
                 if (window.opener) { // Popup muss geschlossen werden!? damit es erneut geöffnet werden kann
-                    console.error("Fehler: wir sind in einem Popup, aber die installierte DB-Proxy-Version unterscheidet sich zu der aktuell vom Skript genutzten Version: '" + usedVersion + "' by '" + installedBy + "' vs. '" + _.csProxyV + "' by '" + GM.info.script.name + "' RootWindow:" + rootWindow + " window-Opener:" + window.opener);
+                    console.error("Fehler: wir sind in einem Popup, aber die installierte DB-Proxy-Version unterscheidet sich zu der aktuell vom Skript genutzten Version: '" + usedVersion + "' by '" + installedBy + "' vs. '" + _.version + "' by '" + GM.info.script.name + "' RootWindow:" + rootWindow + " window-Opener:" + window.opener);
                     //window.close();
                 }
 
@@ -1382,7 +1382,7 @@ class demawiRepository {
                     setTimeout(function () {
                         if (_.WindowManager.getMark("csProxyInstallerVisited")) {
                             // Der Installer hat scheinbar wirklich noch eine andere Version
-                            alert(GM.info.script.name + ": falsche Version erkannt!" + "\n\nMainDomainProxy-Version: " + usedVersion + "\nwurde von " + installedBy + " installiert!" + "\n\n" + GM.info.script.name + " erwartet Version " + _.csProxyV + "\n\nAlle demawi-Mods müssen auf der gleichen Version laufen bzw. aktuell sein!\n");
+                            alert(GM.info.script.name + ": falsche Version erkannt!" + "\n\nMainDomainProxy-Version: " + usedVersion + "\nwurde von " + installedBy + " installiert!" + "\n\n" + GM.info.script.name + " erwartet Version " + _.version + "\n\nAlle demawi-Mods müssen auf der gleichen Version laufen bzw. aktuell sein!\n");
                         } else {
                             // Der Installer wird auf dieser Seite nicht aufgerufen: wir laden die Seite neu
                             if (!_.WindowManager.getMark("csProxyReload")) {
@@ -1418,8 +1418,8 @@ class demawiRepository {
         static async #ensureIframeWrapDoIt() {
             if (document.querySelector("#innerMainframe")) return;
             console.log("Iframe-Wrap wurde erstellt!");
-            _.WindowManager.mark("csProxyV", _.csProxyV);
-            _.WindowManager.mark("csProxyM", GM.info.script.name);
+            _.WindowManager.mark("demRepV", _.version);
+            _.WindowManager.mark("demRepM", GM.info.script.name);
             const innerMainframe = document.createElement("iframe");
             innerMainframe.style.width = "100%";
             innerMainframe.style.height = "100%";
@@ -1456,9 +1456,7 @@ class demawiRepository {
             }
             innerMainframe.addEventListener("load", rebuildPageOnce);
 
-            _.IFrameCapture.captureIt(innerMainframe, async function () {
-                await _.MyMod.startMod(innerMainframe.contentWindow, innerMainframe.contentDocument);
-            });
+            _.IFrameCapture.captureIt(innerMainframe, _.MyMod.startMod);
             innerMainframe.src = window.location.href;
 
         }
@@ -1564,7 +1562,7 @@ class demawiRepository {
          */
         static async getProxyFor(responderHttp, debug) {
             const targetUrl = new URL(responderHttp);
-            targetUrl.searchParams.append("messenger", "true"); // marker, dass dies lediglich eine versteckte Seite ist
+            targetUrl.searchParams.append("csProxyV", _.csProxyV); // Marker, dass es sich hier um den CS-Proxy handelt
             if (!this.#checkScriptAccess(responderHttp)) {
                 console.error(GM.info.script.name + " kann nicht mit '" + responderHttp + "' kommunizieren. ", GM.info.script.includes);
                 throw Error(GM.info.script.name + " kann nicht mit '" + responderHttp + "' kommunizieren. " + JSON.stringify(GM.info.script.includes));
@@ -1716,9 +1714,9 @@ class demawiRepository {
         }
 
         getTargetWindow(responderUrl) {
-            const mainWindow = (window.opener || window).top;
+            const mainWindow = _.WindowManager.getRootWindow();
 
-            let iframe = mainWindow.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src$='messenger=true']");
+            let iframe = mainWindow.document.querySelector("iframe[src^='" + responderUrl.origin + "'][src*='csProxyV=']");
             if (iframe) { // Wiederverwendung
                 if (this.debug) console.log("ProxyTarget: Reuse iframe window found");
                 return iframe.contentWindow;
@@ -1733,29 +1731,51 @@ class demawiRepository {
 
     static IFrameCapture = class IFrameCapture {
 
-        static async captureIt(iframe2Capture, onLoadFn) {
-            iframe2Capture.addEventListener("load", function () {
-                // Titel und Url ins Hauptfenster übernehmen
-                document.title = iframe2Capture.contentWindow.document.title;
-                iframe2Capture.contentWindow.addEventListener("unload", function () {
-                    console.clear();
-                    setTimeout(function () {
-                        const newUrl = iframe2Capture.contentWindow.location.href;
-                        window.history.replaceState({}, "", newUrl);
-                    }, 0);
-                });
+        static async captureIt(iframeOrPopup2Capture, onLoadFn, isPopup) {
+            const captureFn = async function () {
+                console.log("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
+                const win = isPopup ? iframeOrPopup2Capture : iframeOrPopup2Capture.contentWindow;
+
+                if (!isPopup) {
+                    // Titel und Url ins Hauptfenster übernehmen
+                    document.title = win.document.title; // rootDocument!
+                    win.addEventListener("unload", function () {
+                        console.clear();
+                        setTimeout(function () {
+                            const newUrl = win.location.href;
+                            window.history.replaceState({}, "", newUrl); // rootWindow
+                        }, 0);
+                    });
+                } else {
+                    win.addEventListener("unload", function () {
+                        console.log("POPUP_UNLOAD!!")
+                        setTimeout(function () {
+                            win.addEventListener("load", captureFn);
+                        }, 0);
+                    });
+                }
 
                 // Popup-Catcher
-                const original = iframe2Capture.contentWindow.open;
-                iframe2Capture.contentWindow.open = function (...args) {
+                const original = win.open;
+                win.open = function (...args) {
                     const popup = original(...args);
+                    _.IFrameCapture.captureIt(popup, onLoadFn, true);
                     console.log("POPUP!!");
+                    let previousUrl = popup.location.href;
+
+                    let intervalId = setInterval(() => {
+                        if (popup.location.href !== previousUrl) {
+                            console.log("Popup URL changed to:", popup.location.href);
+                            previousUrl = popup.location.href;
+                            // Perform actions based on the new URL
+                        }
+                    }, 100); // Check every 100 milliseconds
                     // TODO: auch das Popup verarbeiten und auf Navigationen horchen
                     return popup;
                 }
 
                 // Cross-Site Navigation im Iframe muss unter allen Umständen abgefangen werden, da ansonsten root und iframe nicht mehr kommunizieren können.
-                const navigation = iframe2Capture.contentWindow.navigation;
+                const navigation = win.navigation;
                 if (navigation) { // für Chromium nicht für FF
                     navigation.addEventListener("navigate", function (ev) {
                         if (!ev.destination.url.startsWith(document.location.origin)) {
@@ -1765,15 +1785,16 @@ class demawiRepository {
                         }
                     })
                 } else {
-                    const wrappedDocument = iframe2Capture.contentWindow.document;
+                    const wrappedDocument = win.document;
                     // Sicherstellen, dass alle Iframe-Navigationen die ausserhalb der Origin liegen über target="_top" abgewickelt werden. Zuvor gesetzt "_blank" wäre auch ok.
                     for (const cur of wrappedDocument.querySelectorAll("a[href^='http']:not([href^='" + wrappedDocument.location.origin + "'])")) {
                         if (!cur.target) cur.target = "_top";
                     }
                 }
 
-                onLoadFn();
-            });
+                await onLoadFn(win, win.document);
+            };
+            iframeOrPopup2Capture.addEventListener("load", captureFn);
         }
     }
 
@@ -1783,16 +1804,16 @@ class demawiRepository {
          * Wird aktuell nur für das MainFrame aufgerufen nicht für Popups.
          * Deswegen macht es aktuell auch noch keinen Sinn
          */
-        static async startMod(innerWindow, innerDocument) {
-            const view = _.WoD.getView(innerWindow);
-            console.log("MAIN_FRAME: " + view);
-            await _.WoDWorldDb.placeSeasonElem(innerDocument);
+        static async startMod(myWindow, myDocument) {
+            const view = _.WoD.getView(myWindow);
+            myWindow.console.log("MAIN_FRAME: " + view);
+            await _.WoDWorldDb.placeSeasonElem(myDocument);
             switch (view) {
                 case _.WoD.VIEW.MY_HEROES:
-                    await _.WoDWorldDb.onMeineHeldenAnsicht(innerDocument);
+                    await _.WoDWorldDb.onMeineHeldenAnsicht(myDocument);
                     break;
                 case _.WoD.VIEW.SKILL:
-                    await _.WoDSkillsDb.onSkillPage(innerDocument);
+                    await _.WoDSkillsDb.onSkillPage(myDocument);
                     break;
             }
         }
@@ -2938,6 +2959,7 @@ class demawiRepository {
             ITEMS_STORE: "storage",
             EVENTLIST: "eventlist",
             PLAY: "play",
+            HERO_CLASS: "heroClass",
         }
 
         static #viewCache;
@@ -2991,6 +3013,8 @@ class demawiRepository {
                     return this.VIEW.EVENTLIST;
                 case "play.php":
                     return this.VIEW.PLAY;
+                case "class.php":
+                    return this.VIEW.HERO_CLASS;
             }
         }
 
@@ -4489,7 +4513,7 @@ class demawiRepository {
         static start(zusatz) {
             if (!window.location.href.includes("silent=true")) {
                 const mode = _.CSProxy.dbMode || "local";
-                console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + "@" + demawiRepository.csProxyV + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
+                console.log(GM.info.script.name + " (" + GM.info.script.version + " repo:" + demawiRepository.version + (mode ? " dbMode:" + mode : "") + ")" + (zusatz ? " " + zusatz : ""));
             }
         }
 
