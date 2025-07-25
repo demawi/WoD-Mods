@@ -1733,8 +1733,8 @@ class demawiRepository {
 
         static async captureIt(iframeOrPopup2Capture, onLoadFn, isPopup) {
             const captureFn = async function () {
-                console.log("CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC")
                 const win = isPopup ? iframeOrPopup2Capture : iframeOrPopup2Capture.contentWindow;
+                console.log("IIIIIIIIII", isPopup, iframeOrPopup2Capture.contentWindow)
 
                 if (!isPopup) {
                     // Titel und Url ins Hauptfenster übernehmen
@@ -1747,8 +1747,8 @@ class demawiRepository {
                         }, 0);
                     });
                 } else {
+                    // Da wir beim Popup direkt auf dem Window den load-Eventlistener haben, wird dieser nach einem unload abgeräumt
                     win.addEventListener("unload", function () {
-                        console.log("POPUP_UNLOAD!!")
                         setTimeout(function () {
                             win.addEventListener("load", captureFn);
                         }, 0);
@@ -1760,17 +1760,6 @@ class demawiRepository {
                 win.open = function (...args) {
                     const popup = original(...args);
                     _.IFrameCapture.captureIt(popup, onLoadFn, true);
-                    console.log("POPUP!!");
-                    let previousUrl = popup.location.href;
-
-                    let intervalId = setInterval(() => {
-                        if (popup.location.href !== previousUrl) {
-                            console.log("Popup URL changed to:", popup.location.href);
-                            previousUrl = popup.location.href;
-                            // Perform actions based on the new URL
-                        }
-                    }, 100); // Check every 100 milliseconds
-                    // TODO: auch das Popup verarbeiten und auf Navigationen horchen
                     return popup;
                 }
 
