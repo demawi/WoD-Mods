@@ -4,8 +4,9 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
-// @match          http*://*.world-of-dungeons.de/wod/spiel/*
+//
 // @match          http*://*.world-of-dungeons.de/
+// @match          http*://*.world-of-dungeons.de/wod/spiel/*
 // @match          http*://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 //
@@ -39,7 +40,6 @@
 
             const view = _.WoD.getView();
             demawiRepository.startMod("View: '" + view + "'");
-            await _.WoDWorldDb.placeSeasonElem();
             await MySettings.getFresh();
             this.isAdmin = _.WoD.isInAdminViewMode();
 
@@ -58,9 +58,6 @@
                     break;
                 case _.WoD.VIEW.QUEST:
                     await QuestAuswahl.start();
-                    break;
-                case _.WoD.VIEW.HEROES:
-                    await _.WoDWorldDb.onMeineHeldenAnsicht();
                     break;
                 case _.WoD.VIEW.MOVE:
                     await this.onMovePage();
@@ -1285,7 +1282,7 @@
 
     class Ausruestung {
         static async start() {
-            let naechsterDungeonName = _.WoDParser.getNaechsterDungeonName();
+            let naechsterDungeonName = _.WoD.getNaechsterDungeonName();
             if (!naechsterDungeonName) return;
             // const ausruestungsTabelleKomplett = document.querySelectorAll("table:has(table #ausruestungstabelle_0):not(table:has(table table #ausruestungstabelle_0))")[0];
             const tabelle2 = document.querySelector("#ausruestungstabelle_2");
@@ -3209,7 +3206,8 @@
         /**
          * Holt den Content und formatiert zusätzlich das Datum noch um
          */
-        static getPlainMainContent() {
+        static getPlainMainContent(doc) {
+            doc = doc || document;
             const titleFormatter = function (doc) {
                 const titleElem = doc.getElementsByTagName("h2")[0];
                 const titleSplit = titleElem.textContent.split(/-(.*)/);
@@ -3217,7 +3215,9 @@
                 const absoluteTime = _.WoD.getTimeString(titleSplit[0].trim());
                 titleElem.innerHTML = absoluteTime + " - " + title;
             }
-            return _.WoDParser.getPlainMainContent(titleFormatter);
+            const result = _.WoDParser.getPlainMainContent(doc);
+            titleFormatter(result);
+            return result;
         }
     }
 

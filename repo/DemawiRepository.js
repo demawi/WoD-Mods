@@ -46,7 +46,7 @@ class demawiRepository {
         }
 
         static getRootWindow(win) {
-            win = win || window;
+            win = win || unsafeWindow || window;
             if (win.opener) return this.getRootWindow(win.opener);
             if (win.top && win.top !== win) return this.getRootWindow(win.top);
             return win;
@@ -1341,7 +1341,7 @@ class demawiRepository {
          * @return  [boolean, String] [scriptExecution, witchDbToUse]
          *                                              witchDbToUse "p"=proxy, "l"=local
          */
-        static check() {
+        static async check() {
             if (!this.#supported.includes(GM.info.scriptHandler)) {
                 alert(GM.info.script.name + "\nScriptEngine: '" + GM.info.scriptHandler + "' wird aktuell nicht unterstützt.\nBitte kontaktiere den Entwickler für eine entsprechende Unterstützung.");
                 return [false];
@@ -1357,18 +1357,13 @@ class demawiRepository {
                 } else return [false];
             }
 
-            if (this.ensureIframeWrap()) return [false];
+            if (await this.ensureIframeWrap()) return [false];
 
-            // Sicherstellen, dass alle Iframe-Navigationen die ausserhalb der Origin liegen über target="_top" abgewickelt werden. Zuvor gesetzt "_blank" wäre auch ok.
-            if (!_.WindowManager.getMark("_topLinks")) {
-                for (const cur of document.querySelectorAll("a[href^='http']:not([href^='" + document.location.origin + "'])")) {
-                    if (!cur.target) cur.target = "_top";
-                }
-                _.WindowManager.mark("_topLinks");
-            }
             const rootWindow = _.WindowManager.getRootWindow();
             const usedVersion = _.WindowManager.getMark("csProxyV", rootWindow);
             const installedBy = _.WindowManager.getMark("csProxyM", rootWindow);
+            // TODO: hmm.. der Check hier auf der Seite bringt gar nicht so viel, da es ja relevant ist, was im CS-Domain-Iframe für ein Skript läuft und das bekommen wir von hier aus gar nicht raus
+            // TODO: wir könnten es höchstens als Parameter in die URL schreiben.
             if (GM.info.script.name === installedBy) _.WindowManager.mark("csProxyInstallerVisited", true); // auf dem aktuellen Iframe-Window nicht auf dem Root
             if (usedVersion !== _.csProxyV) { // Die Version hat sich geändert, alles nochmal laden.
                 // Fall 1: Mod hat sich nach dem ersten Laden der Seite aktualisiert
@@ -1407,10 +1402,10 @@ class demawiRepository {
          * nur wenn iframe-wrap noch nicht erstellt wurde
          * (Same-origin) Popups sollten das iframe ihres parents nutzen.
          */
-        static ensureIframeWrap() {
+        static async ensureIframeWrap() {
             const isLogin = document.getElementById("WodLoginBox");
             if (!isLogin && window.top === window && !window.opener) { // keinLogin und benötigt Wrap => wrap
-                if (!document.querySelector("#iframeWrap")) this.#ensureIframeWrapDoIt();
+                await this.#ensureIframeWrapDoIt();
                 return true;
             } else if (isLogin) {
                 if (window.top !== window) { // Login und Wrap gefunden => unwrap
@@ -1420,27 +1415,27 @@ class demawiRepository {
             }
         }
 
-        static #ensureIframeWrapDoIt() {
+        static async #ensureIframeWrapDoIt() {
+            if (document.querySelector("#innerMainframe")) return;
             console.log("Iframe-Wrap wurde erstellt!");
             _.WindowManager.mark("csProxyV", _.csProxyV);
             _.WindowManager.mark("csProxyM", GM.info.script.name);
-            const iframeWrap = document.createElement("iframe");
-            iframeWrap.style.width = "100%";
-            iframeWrap.style.height = "100%";
-            iframeWrap.style.position = "absolute";
-            iframeWrap.style.border = "0px";
-            iframeWrap.style.zIndex = 100;
-            iframeWrap.id = "iframeWrap";
+            const innerMainframe = document.createElement("iframe");
+            innerMainframe.style.width = "100%";
+            innerMainframe.style.height = "100%";
+            innerMainframe.style.position = "absolute";
+            innerMainframe.style.border = "0px";
+            innerMainframe.style.zIndex = 100;
+            innerMainframe.id = "innerMainframe";
 
             const rootBody = document.body;
             rootBody.style.overflow = "hidden";
             rootBody.style.margin = "0px";
+            rootBody.insertBefore(innerMainframe, rootBody.children[0]);
 
-            iframeWrap.src = window.location.href;
-            rootBody.insertBefore(iframeWrap, rootBody.children[0]);
+            await _.MyMod.init();
 
-            iframeWrap.addEventListener("load", function () {
-                let cur;
+            const rebuildPageOnce = function () {
                 // Elemente lieber nicht entfernen, da ansonsten Seiten-Skripte ins Leere laufen und die Konsole spammen z.B. bei der Dungeon-Ansicht die Progress-Bar
                 //while (cur = document.head.children[0]) cur.remove();
                 //while (cur = rootBody.children[1])  cur.remove();
@@ -1453,25 +1448,19 @@ class demawiRepository {
                     }
                 }
                 for (const cur of rootBody.children) {
-                    if (cur !== iframeWrap) cur.style.display = "none";
+                    if (cur !== innerMainframe) cur.style.display = "none";
                 }
-                document.title = iframeWrap.contentWindow.document.title;
+                const theForm = document.getElementsByName("the_form")[0];
+                if (theForm) theForm.remove(); // Damit es nicht zu Verwechselungen kommt
+                innerMainframe.removeEventListener("load", rebuildPageOnce);
+            }
+            innerMainframe.addEventListener("load", rebuildPageOnce);
 
-                const wrappedDocument = iframeWrap.contentWindow.document;
-                // Sicherstellen, dass alle Iframe-Navigationen die ausserhalb der Origin liegen über target="_top" abgewickelt werden. Zuvor gesetzt "_blank" wäre auch ok.
-                for (const cur of wrappedDocument.querySelectorAll("a[href^='http']:not([href^='" + wrappedDocument.location.origin + "'])")) {
-                    if (!cur.target) cur.target = "_top";
-                }
-
-                //iframeWrap.contentWindow.addEventListener("beforeunload", function () {});
-                iframeWrap.contentWindow.addEventListener("unload", function () {
-                    console.clear();
-                    setTimeout(function () {
-                        const newUrl = iframeWrap.contentWindow.location.href;
-                        window.history.replaceState({}, "", newUrl);
-                    }, 0);
-                });
+            _.IFrameCapture.captureIt(innerMainframe, async function () {
+                await _.MyMod.startMod(innerMainframe.contentWindow, innerMainframe.contentDocument);
             });
+            innerMainframe.src = window.location.href;
+
         }
 
         /**
@@ -1581,16 +1570,15 @@ class demawiRepository {
                 throw Error(GM.info.script.name + " kann nicht mit '" + responderHttp + "' kommunizieren. " + JSON.stringify(GM.info.script.includes));
             }
 
-            const mainTopWindow = (window.opener || window).top;
+            const rootWindow = _.WindowManager.getRootWindow();
 
-            let messengerId = mainTopWindow.messengerId;
-            if (!messengerId) messengerId = mainTopWindow.messengerId = 1;
+            let messengerId = rootWindow.messengerId;
+            if (!messengerId) messengerId = rootWindow.messengerId = 1;
             else {
-                mainTopWindow.messengerId++;
-                messengerId = mainTopWindow.messengerId;
+                rootWindow.messengerId++;
+                messengerId = rootWindow.messengerId;
             }
             const csProxy = new CSProxy(messengerId, targetUrl, debug);
-            const _this = this;
             const messageListener = async (event) => {
                 const data = event.data;
                 if (data.mid === csProxy.messengerId) {
@@ -1599,9 +1587,9 @@ class demawiRepository {
                     await csProxy.onMessage(data);
                 }
             };
-            mainTopWindow.addEventListener("message", messageListener, false);
+            rootWindow.addEventListener("message", messageListener, false);
             window.addEventListener("unload", function () {
-                mainTopWindow.removeEventListener("message", messageListener);
+                rootWindow.removeEventListener("message", messageListener);
             });
 
             return csProxy.onReady;
@@ -1743,6 +1731,79 @@ class demawiRepository {
         }
     }
 
+    static IFrameCapture = class IFrameCapture {
+
+        static async captureIt(iframe2Capture, onLoadFn) {
+            iframe2Capture.addEventListener("load", function () {
+                // Titel und Url ins Hauptfenster übernehmen
+                document.title = iframe2Capture.contentWindow.document.title;
+                iframe2Capture.contentWindow.addEventListener("unload", function () {
+                    console.clear();
+                    setTimeout(function () {
+                        const newUrl = iframe2Capture.contentWindow.location.href;
+                        window.history.replaceState({}, "", newUrl);
+                    }, 0);
+                });
+
+                // Popup-Catcher
+                const original = iframe2Capture.contentWindow.open;
+                iframe2Capture.contentWindow.open = function (...args) {
+                    const popup = original(...args);
+                    // TODO: auch das Popup verarbeiten und auf Navigationen horchen
+                    return popup;
+                }
+
+                // Cross-Site Navigation im Iframe muss unter allen Umständen abgefangen werden, da ansonsten root und iframe nicht mehr kommunizieren können.
+                const navigation = iframe2Capture.contentWindow.navigation;
+                if (navigation) { // für Chromium nicht für FF
+                    navigation.addEventListener("navigate", function (ev) {
+                        if (!ev.destination.url.startsWith(document.location.origin)) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            window.location.href = ev.destination.url;
+                        }
+                    })
+                } else {
+                    const wrappedDocument = iframe2Capture.contentWindow.document;
+                    // Sicherstellen, dass alle Iframe-Navigationen die ausserhalb der Origin liegen über target="_top" abgewickelt werden. Zuvor gesetzt "_blank" wäre auch ok.
+                    for (const cur of wrappedDocument.querySelectorAll("a[href^='http']:not([href^='" + wrappedDocument.location.origin + "'])")) {
+                        if (!cur.target) cur.target = "_top";
+                    }
+                }
+
+                onLoadFn();
+            });
+        }
+    }
+
+    static MyMod = class MyMod {
+
+        /**
+         * Wird aktuell nur für das MainFrame aufgerufen nicht für Popups.
+         * Deswegen macht es aktuell auch noch keinen Sinn
+         */
+        static async startMod(innerWindow, innerDocument) {
+            const view = _.WoD.getView(innerWindow);
+            console.log("MAIN_FRAME: " + view);
+            await _.WoDWorldDb.placeSeasonElem(innerDocument);
+            switch (view) {
+                case _.WoD.VIEW.MY_HEROES:
+                    await _.WoDWorldDb.onMeineHeldenAnsicht(innerDocument);
+                    break;
+                case _.WoD.VIEW.SKILL:
+                    await _.WoDSkillsDb.onSkillPage(innerDocument);
+                    break;
+            }
+        }
+
+        static async init() {
+            const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
+            const indexedDb = _.WoDStorages.initWodDbProxy("wodDBMain", "___", messengerPromise);
+            await messengerPromise;
+        }
+
+    }
+
     /**
      * TODO: Anzeige an der Oberfläche
      */
@@ -1845,7 +1906,7 @@ class demawiRepository {
         }
 
         static async tryConnectToMainDomain(modDbName, debug) {
-            const [scriptExecution, dbType] = _.CSProxy.check();
+            const [scriptExecution, dbType] = await _.CSProxy.check();
 
             if (scriptExecution) {
                 if (dbType === "l") { // cant proxy
@@ -2229,20 +2290,23 @@ class demawiRepository {
         /**
          * Muss bei Ansicht der "Meine Helden"-Übersicht aufgerufen werden, damit die Welt-Saison getrackt werden kann.
          */
-        static async onMeineHeldenAnsicht() {
-            const title = document.querySelector("h1");
+        static async onMeineHeldenAnsicht(doc) {
+            doc = doc || document;
+            const title = doc.querySelector("h1");
             if (title.textContent.trim() === "Meine Helden") {
                 const myWorld = _.WoD.getMyWorld();
                 const playerName = _.WoD.getMyUserName();
-                const meineHelden = _.WoDParser.getMyHerosFromOverview();
+                const meineHelden = _.MyHeroesView.getIdStufenMap();
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
                 await this.getWorldSeason(myWorld, meineHelden, true, playerName, true); // report World-Season
             }
         }
 
-        static async placeSeasonElem() {
-            const nameElem = document.querySelector(".hero_full");
+        static async placeSeasonElem(doc) {
+            doc = doc || document;
+            const nameElem = doc.querySelector(".hero_full");
             if (nameElem) {
+                if (nameElem.getElementsByClassName("wodSeason").length) return;
                 nameElem.style.position = "relative";
                 const seasonElem = await this.createSeasonElem();
                 seasonElem.style.fontSize = "120%";
@@ -2254,10 +2318,12 @@ class demawiRepository {
             }
         }
 
-        static async createSeasonElem(seasonNr) {
+        static async createSeasonElem(seasonNr, doc) {
             seasonNr = seasonNr || await _.WoD.getMyWorldSeasonNr();
-            const seasonElem = document.createElement("sup");
+            doc = doc || document;
+            const seasonElem = doc.createElement("sup");
             seasonElem.classList.add("nowod");
+            seasonElem.classList.add("wodSeason");
             seasonElem.style.position = "relative";
             seasonElem.style.opacity = "0.7";
             seasonElem.style.fontSize = "60%";
@@ -2268,7 +2334,7 @@ class demawiRepository {
             seasonElem.innerHTML = "<span style='position:relative; opacity: 0.7; top:-0.2em;'>🌐</span>"; // 📅🗓⏰🕗📆🌍
             seasonElem.title = "Die aktuelle Welt-Saisonnummer: " + seasonNr + "\nFalls diese nach einem Weltneustart falsch sein sollte, hat die Automatik nicht funktioniert. Dann bitte in den Kampfberichte-Archiv-Einstellungen eine neue Saison erzwingen.";
 
-            const innerElem = document.createElement("span");
+            const innerElem = doc.createElement("span");
             innerElem.style.display = "inline-block";
             innerElem.style.position = "absolute";
             innerElem.style.height = "100%";
@@ -2339,7 +2405,7 @@ class demawiRepository {
                 return [foundSeason, foundSeasonNr];
             } else { // Welt-Reset entdeckt
                 if (!istHeldenAnsichtUebermittlung) { // World-Reset vorerst verhindern, das geht dann nur über die "Meine Helden"-Seite.
-                    if (!this.worldSeasonAlerted && _.WoD.getView() !== _.WoD.VIEW.HEROES) {
+                    if (!this.worldSeasonAlerted && _.WoD.getView() !== _.WoD.VIEW.MY_HEROES) {
                         alert("Es wurde ein noch unbekannter Held in der Saison erkannt. Zur vollständigen Saisonbestimmung bitte einmalig die 'Meine Helden'-Seite aufrufen!");
                         this.worldSeasonAlerted = true;
                     }
@@ -2485,7 +2551,8 @@ class demawiRepository {
         /**
          * Wird für geparste als auch für Source-Items gleichermaßen genutzt.
          */
-        static createItem(itemName, silent) {
+        static createItem(itemName, doc, silent) {
+            doc = doc || document;
             if (!this.isValidItemName(itemName)) {
                 if (!silent) {
                     console.error("ItemName ist nicht korrekt: '" + itemName + "'");
@@ -2500,7 +2567,7 @@ class demawiRepository {
                 ts: now,
                 data: 0,
                 world: {
-                    [_.WoD.getMyWorld()]: {
+                    [_.WoD.getMyWorld(doc)]: {
                         ts: now,
                         valid: 1,
                     }
@@ -2633,10 +2700,10 @@ class demawiRepository {
             return skillTyp === _.WoDSkillsDb.TYP.ANGRIFF || skillTyp === _.WoDSkillsDb.TYP.VERSCHLECHTERUNG;
         }
 
-        static async onSkillPage() {
+        static async onSkillPage(doc) {
             const _this = this;
             return _.WindowManager.onlyOnce("onSkillPage", async function () {
-                return await _this.onSkillPageDirect();
+                return await _this.onSkillPageDirect(doc);
             });
         }
 
@@ -2648,7 +2715,7 @@ class demawiRepository {
                 id: skillName.toLowerCase(),
                 name: skillName,
                 dv: this.#skillDataVersion,
-                world: _.WoD.getMyWorld(),
+                world: _.WoD.getMyWorld(doc),
                 ts: now
             };
             this.#parseSkillBeschreibung(doc, skill);
@@ -2660,7 +2727,7 @@ class demawiRepository {
             const skillSource = {
                 id: skillName.toLowerCase(),
                 src: content,
-                world: _.WoD.getMyWorld(),
+                world: _.WoD.getMyWorld(doc),
                 ts: now
             };
             console.log("Skill wurde der Datenbank hinzugefügt", skillSource, skill);
@@ -2858,7 +2925,7 @@ class demawiRepository {
             ITEMS_GEAR: "gear",
             DUNGEONS: "dungeons",
             QUEST: "quest",
-            HEROES: "heroes",
+            MY_HEROES: "myHeroes",
             MOVE: "move",
             ITEM: "item",
             REPORT_OVERVIEW: "report_overview",
@@ -2874,18 +2941,20 @@ class demawiRepository {
 
         static #viewCache;
 
-        static getView() {
+        static getView(win) {
+            if (win) return this.#getViewIntern(win);
             if (this.#viewCache) return this.#viewCache;
             this.#viewCache = this.#getViewIntern();
             return this.#viewCache;
         }
 
-        static #getViewIntern() {
-            const pathname = window.location.pathname;
+        static #getViewIntern(win) {
+            win = win || window;
+            const pathname = win.location.pathname;
             if (pathname.includes("/item/")) return this.VIEW.ITEM;
             if (pathname.includes("/skill/")) return this.VIEW.SKILL;
 
-            const page = _.util.getWindowPage();
+            const page = _.util.getWindowPage(win);
             switch (page) {
                 case "tombola.php":
                     return this.VIEW.TOMBOLA;
@@ -2893,7 +2962,7 @@ class demawiRepository {
                 case "news.php":
                     return this.VIEW.NEWS;
                 case "items.php":
-                    const view = _.WoD.getItemsView();
+                    const view = _.WoD.getItemsView(win);
                     if (view === "") return this.VIEW.ITEMS_STORE;
                     return view;
                 case "dungeon.php":
@@ -2902,15 +2971,15 @@ class demawiRepository {
                 case "quests.php":
                     return this.VIEW.QUEST;
                 case "heroes.php":
-                    return this.VIEW.HEROES;
+                    return this.VIEW.MY_HEROES;
                 case "move.php":
                     return this.VIEW.MOVE;
                 case "item.php":
                     return this.VIEW.ITEM;
                 case "combat_report.php": // Schlacht
                 case "report.php": // Dungeon
-                    const title = document.getElementsByTagName("h1")[0];
-                    if (title.textContent.trim() === "Kampfberichte") {
+                    const title = win.document.getElementsByTagName("h1")[0];
+                    if (title.textContent.trim().startsWith("Kampfberichte")) {
                         return this.VIEW.REPORT_OVERVIEW;
                     } else {
                         return this.VIEW.REPORT; // Statistik, Gegenstände oder Kampfbericht
@@ -3070,6 +3139,32 @@ class demawiRepository {
             return await _.WoDWorldDb.getCurrentWorldSeasonNr(doc);
         }
 
+        static getNaechsterDungeonName() {
+            let elem = document.getElementById("gadgetNextdungeonTime");
+            if (!elem) return;
+            elem = elem.parentElement.getElementsByTagName("a")[0];
+            if (!elem) return;
+            return elem.textContent.trim();
+        }
+
+        /**
+         * @returns {string}
+         */
+        static getNaechsteDungeonZeit(early) {
+            const timeString = this.getNaechsteDungeonZeitString(early);
+            // TODO: wie ist das beim Tageswechsel?
+        }
+
+        // Kann auch "Morgen 01:16" sein odera auch "sofort"
+        static getNaechsteDungeonZeitString(early) {
+            let elem = document.getElementById("gadgetNextdungeonTime");
+            const curTime = elem.textContent;
+            if (!early) return curTime;
+            const earlierButton = elem.parentElement.querySelector("input");
+            if (!earlierButton) return curTime;
+            return earlierButton.value;
+        }
+
         /**
          * "gear": Ausrüstung
          * "groupcellar": Schatzkammer
@@ -3077,9 +3172,10 @@ class demawiRepository {
          * "cellar": Keller
          * "": Lager
          */
-        static getItemsView() {
-            let view = new URL(window.location.href).searchParams.get("view");
-            if (!view) view = this.getValueFromMainForm("view");
+        static getItemsView(win) {
+            win = win || window;
+            let view = new URL(win.location.href).searchParams.get("view");
+            if (!view) view = this.getValueFromMainForm("view", win.document);
             return view;
         }
 
@@ -3295,24 +3391,6 @@ class demawiRepository {
             return Number(new URL(aElem.href, document.baseURI).searchParams.get("id"));
         }
 
-        static getNaechsterDungeonName() {
-            let elem = document.getElementById("gadgetNextdungeonTime");
-            if (!elem) return;
-            elem = elem.parentElement.getElementsByTagName("a")[0];
-            if (!elem) return;
-            return elem.textContent.trim();
-        }
-
-        static getMyHerosFromOverview() {
-            const helden = {};
-            const trs = document.querySelectorAll("#main_content .content_table tr");
-            for (let i = 1, l = trs.length; i < l; i++) {
-                const curTR = trs[i];
-                const heroId = Number(new URL(curTR.children[0].querySelector("a").href, document.baseURI).searchParams.get("id"));
-                helden[heroId] = Number(curTR.children[2].textContent);
-            }
-            return helden;
-        }
 
         static getFirstHeroTableOnKampfbericht(doc) {
             doc = doc || document;
@@ -3599,8 +3677,9 @@ class demawiRepository {
          * Wir greifen nicht alleinig den Main_Content ab, um auch CSS und "the_form" etc. mit zu bekommen
          * Stellt sicher, dass alle URLs relativ zur Domain definiert sind.
          */
-        static getPlainMainContent(functionAfterClone) {
-            const myDocument = document.cloneNode(true);
+        static getPlainMainContent(doc) {
+            doc = doc || document;
+            const myDocument = doc.cloneNode(true);
 
             let gadgetTable = myDocument.querySelector("#gadgettable tbody");
             if (gadgetTable) { // existiert in nem Popup nicht
@@ -3650,8 +3729,6 @@ class demawiRepository {
                     aElem.setAttribute("onclick", "return wo(this.href);");
                 }
             }
-
-            if (functionAfterClone) functionAfterClone(myDocument);
             return myDocument;
         }
 
@@ -3690,6 +3767,42 @@ class demawiRepository {
                 const value = converter(cur.getAttribute("href"));
                 if (value) cur.href = value;
             }
+        }
+    }
+
+    static MyHeroesView = class {
+
+        /**
+         * id -> Stufe
+         */
+        static getIdStufenMap() {
+            const helden = {};
+            const trs = document.querySelectorAll("#main_content .content_table tr");
+            for (let i = 1, l = trs.length; i < l; i++) {
+                const curTR = trs[i];
+                const heroId = Number(new URL(curTR.children[0].querySelector("a").href, document.baseURI).searchParams.get("id"));
+                helden[heroId] = Number(curTR.children[2].textContent);
+            }
+            return helden;
+        }
+
+        static getFullInformation() {
+            const helden = [];
+            const trs = document.querySelectorAll("#main_content .content_table tr");
+            for (let i = 1, l = trs.length; i < l; i++) {
+                const curHero = {}
+                const curTR = trs[i];
+                const aElemns = curTR.children[0].querySelectorAll("a");
+                const heroAElem = aElemns[0];
+                curHero.id = Number(new URL(heroAElem.href, document.baseURI).searchParams.get("id"));
+                curHero.name = heroAElem.textContent;
+                curHero.klasse = aElemns[1].textContent;
+                curHero.stufe = Number(curTR.children[2].textContent);
+                const dungeonTD = curTR.children[4];
+                // TODO: name im "onmouseover"
+                curHero.nextDungeonTime = dungeonTD.textContent;
+            }
+            return helden;
         }
     }
 
@@ -4438,8 +4551,9 @@ class demawiRepository {
             return JSON.parse(JSON.stringify(obj));
         }
 
-        static getWindowPage() {
-            var pathname = window.location.pathname.split("/");
+        static getWindowPage(win) {
+            win = win || window;
+            var pathname = win.location.pathname.split("/");
             return pathname[pathname.length - 1];
         }
 
@@ -5631,7 +5745,7 @@ class demawiRepository {
         static async reportNonExistingItem(itemName) {
             let itemIndex = await this.getItemIndexDB().getValue(itemName.toLowerCase());
             if (!itemIndex) {
-                itemIndex = _.WoDItemDb.createItem(itemName, true);
+                itemIndex = _.WoDItemDb.createItem(itemName, document, true);
                 if (!itemIndex) { // no valid name
                     await this.getItemSourceDB().deleteValue(itemName.toLowerCase());
                     return;
@@ -5655,24 +5769,26 @@ class demawiRepository {
             await this.getItemIndexDB().setValue(itemIndex);
         }
 
-        static async onItemPage() {
+        static async onItemPage(doc) {
+            if (doc) return await this.#onItemPage(doc);
             const _this = this;
             return _.WindowManager.onlyOnce("onItemPage", async function () {
                 return await _this.#onItemPage();
             });
         }
 
-        static async #onItemPage() {
-            let link = document.getElementById("link");
+        static async #onItemPage(doc) {
+            doc = doc || document;
+            let link = doc.getElementById("link");
             if (!link) {
-                if (document.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
-                    const itemName = document.querySelector("form input[name='name']").value;
+                if (doc.documentElement.textContent.includes("Der Gegenstand existiert nicht")) {
+                    const itemName = doc.querySelector("form input[name='name']").value;
                     console.log("Gegenstand existiert nicht '" + itemName + "'");
                     await this.reportNonExistingItem(itemName.trim());
                 }
                 return;
             }
-            const all = document.getElementsByTagName("h1")[0];
+            const all = doc.getElementsByTagName("h1")[0];
             const itemName = all.getElementsByTagName("a")[0].childNodes[0].textContent.trim();
             if (this.hasSetOrGemBonus(link)) {
                 console.log("Set oder gem-boni entdeckt! Item wird nicht für die Datenbank verwendet!");
@@ -5683,8 +5799,8 @@ class demawiRepository {
             const itemDB = this.getItemDB();
             const itemIndexDB = this.getItemIndexDB();
 
-            const itemIndex = await itemIndexDB.getValue(itemName.toLowerCase()) || _.WoDItemDb.createItem(itemName);
-            const myWorld = _.WoD.getMyWorld();
+            const itemIndex = await itemIndexDB.getValue(itemName.toLowerCase()) || _.WoDItemDb.createItem(itemName, doc);
+            const myWorld = _.WoD.getMyWorld(doc);
             const now = new Date().getTime();
             itemIndex.ts = now;
             itemIndex.data = 1;
@@ -5701,7 +5817,7 @@ class demawiRepository {
             delete itemSource.details; // nur für alte Versionen
             delete itemSource.link; // nur für alte Versionen
             delete itemSource.nodata; // nur für alte Versionen
-            itemSource.src = _.WoDParser.getPlainMainContent().querySelector(".main_content").innerHTML;
+            itemSource.src = _.WoDParser.getPlainMainContent(doc).querySelector(".main_content").innerHTML;
             await itemSourcesDB.setValue(itemSource);
             await itemIndexDB.setValue(itemIndex);
 

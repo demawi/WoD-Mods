@@ -4,8 +4,9 @@
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
 //
+// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+// @match          http*://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
 // @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
@@ -30,14 +31,23 @@
         static dbname = "wodDB";
 
         static async startMod() {
-            if (_.WoD.getView() === _.WoD.VIEW.ITEMS_GEAR) {
-                const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
-                if (!indexedDb) return;
-                await MyStorage.initMyStorage(indexedDb);
+            const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
+            if (!indexedDb) return;
+            await MyStorage.initMyStorage(indexedDb);
+            demawiRepository.startMod();
 
-                demawiRepository.startMod();
-                await Ausruester.start();
+            switch (_.WoD.getView()) {
+                case _.WoD.VIEW.ITEMS_GEAR:
+                    await Ausruester.start();
+                    break;
+                case _.WoD.VIEW.MY_HEROES:
+                    await MeineHeldenView.start();
+                    break;
             }
+        }
+
+        static async #initDb() {
+
         }
 
     }
@@ -51,6 +61,33 @@
             await SelectOptimizer.init();
         }
 
+    }
+
+    class MeineHeldenView {
+        static async start() {
+            const contentTable = document.querySelector(".content_table");
+            if (!contentTable) return;
+            let first = true;
+            for (const curTr of contentTable.querySelectorAll("tr")) {
+                if (first) {
+                    first = false;
+                    const th = document.createElement("th");
+                    th.colSpan = 2;
+                    th.innerHTML = "Ausrüstung";
+                    curTr.append(th);
+                } else {
+                    const heroId = new URL(curTr.querySelector("a").href).searchParams.get("id");
+                    const myWorld = _.WoD.getMyWorld();
+                    const myEquip = await EquipConfig.loadIt(heroId, myWorld);
+                    const tdName = document.createElement("td");
+                    curTr.append(tdName);
+                    if (myEquip && myEquip.current) tdName.innerHTML = myEquip.current;
+                    const tdTime = document.createElement("td");
+                    curTr.append(tdTime);
+                    if(myEquip && myEquip.ts) tdTime.innerHTML = _.util.formatDateAndTime(myEquip.ts);
+                }
+            }
+        }
     }
 
     class ControlBar {
@@ -1165,8 +1202,9 @@
 
         static async setCurrent(profileName, diretSave) {
             this.#equipConfigs.current = profileName;
+            this.#equipConfigs.ts = new Date().getTime();
             if (diretSave) {
-                await MyStorage.equipHeroe.setValue(this.#equipConfigs);
+                await MyStorage.equipHero.setValue(this.#equipConfigs);
             }
         }
 
@@ -1213,7 +1251,7 @@
             }
             this.setCurrent(profileName, false);
             equipConfig.ts = now;
-            await MyStorage.equipHeroe.setValue(this.#equipConfigs);
+            await MyStorage.equipHero.setValue(this.#equipConfigs);
             await MyStorage.equipLoadout.setValue(equipConfig);
         }
 
@@ -1221,12 +1259,16 @@
             return this.#myWorld + this.#heroId + "|" + profileName;
         }
 
+        static async loadIt(heroId, world) {
+            return await MyStorage.equipHero.getValue(world + heroId);
+        }
+
         static async #load() {
-            this.#equipConfigs = await MyStorage.equipHeroe.getValue(this.#myWorld + this.#heroId);
+            this.#equipConfigs = await MyStorage.equipHero.getValue(this.#myWorld + this.#heroId);
         }
 
         static async #save() {
-            await MyStorage.equipHeroe.setValue(this.#equipConfigs);
+            await MyStorage.equipHero.setValue(this.#equipConfigs);
         }
 
     }
@@ -1641,7 +1683,6 @@
             for (const slotName of this.getAllSlotNames()) {
                 let idx = 0;
                 const wantedEquipIds = equipChangesId[slotName] || [];
-                console.log("KKKKK", slotName, wantedEquipIds);
                 for (const cur of wantedEquipIds) {
                     const itemId = getId(cur);
                     const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
@@ -1652,7 +1693,6 @@
                 }
                 // Überprüfen, was abgelegt werden soll
                 const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
-                console.log("DefaultEquipSlot: ", defaultEquipSlot);
                 if (defaultEquipSlot) { // tasche kann auch mal komplett nicht vorhanden sein
                     for (const itemId of defaultEquipSlot) {
                         if (!wantedEquipIds.includes(itemId)) {
@@ -1753,7 +1793,7 @@
         }
 
         static async initThisStorage(indexedDb) {
-            this.equipHeroe = indexedDb.createObjectStorage("equipHero", "id");
+            this.equipHero = indexedDb.createObjectStorage("equipHero", "id");
             this.equipLoadout = indexedDb.createObjectStorage("equipLoadout", "id");
         }
 
