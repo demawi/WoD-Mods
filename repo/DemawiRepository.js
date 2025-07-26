@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.2.0";
+    static version = "1.1.7";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1458,7 +1458,6 @@ class demawiRepository {
 
             _.IFrameCapture.captureIt(innerMainframe, _.MyMod.startMod);
             innerMainframe.src = window.location.href;
-
         }
 
         /**
@@ -1729,13 +1728,16 @@ class demawiRepository {
         }
     }
 
+    /**
+     * Beobachtet ein innerFrame. Wenn sich die URL ändert wird neuer Titel und URL ins Hauptfenster übernommen.
+     * Auch Popups, die im innerFrame per window.open aufgerufen werden, werden beobachtet.
+     * Die onLoadFn-Callback Methode wird immer mit den entsprechenden window und document aufgerufen.
+     */
     static IFrameCapture = class IFrameCapture {
 
         static async captureIt(iframeOrPopup2Capture, onLoadFn, isPopup) {
             const captureFn = async function () {
                 const win = isPopup ? iframeOrPopup2Capture : iframeOrPopup2Capture.contentWindow;
-                console.log("IIIIIIIIII", isPopup, iframeOrPopup2Capture.contentWindow)
-
                 if (!isPopup) {
                     // Titel und Url ins Hauptfenster übernehmen
                     document.title = win.document.title; // rootDocument!
@@ -3166,12 +3168,16 @@ class demawiRepository {
          */
         static getNaechsteDungeonZeit(early) {
             const timeString = this.getNaechsteDungeonZeitString(early);
+            if (!timeString) return;
+            if (timeString.toLowerCase() === "sofort") return new Date().getTime();
             // TODO: wie ist das beim Tageswechsel?
+            return _.WoD.getTimestampFromString(timeString);
         }
 
         // Kann auch "Morgen 01:16" sein odera auch "sofort"
         static getNaechsteDungeonZeitString(early) {
             let elem = document.getElementById("gadgetNextdungeonTime");
+            if (!elem) return;
             const curTime = elem.textContent;
             if (!early) return curTime;
             const earlierButton = elem.parentElement.querySelector("input");
@@ -3207,7 +3213,7 @@ class demawiRepository {
         }
 
         /**
-         * z.B. "Heute 12:13" => "12.12.2024 12:13"
+         * z.B. "Heute 12:13" => "12.12.2024 12:13", sowie auch "Morgen", "Gestern" und "sofort"
          */
         static getTimeString(wodTimeString, dateFormatter) {
             if (!dateFormatter) dateFormatter = _.util.formatDate;
@@ -3217,6 +3223,14 @@ class demawiRepository {
                 const date = new Date();
                 date.setDate(date.getDate() - 1);
                 wodTimeString = wodTimeString.replace("Gestern", dateFormatter(date));
+            } else if (wodTimeString.includes("Morgen")) {
+                const date = new Date();
+                date.setDate(date.getDate() + 1);
+                wodTimeString = wodTimeString.replace("Morgen", dateFormatter(date));
+            } else if (wodTimeString.toLowerCase() === "sofort") {
+                wodTimeString = _.util.formatDateAndTime(new Date());
+            } else if (!wodTimeString.includes(".")) { // nur Uhrzeit
+                wodTimeString = dateFormatter(new Date()) + " " + wodTimeString;
             }
             return wodTimeString;
         }
@@ -3647,14 +3661,20 @@ class demawiRepository {
             let maxSuccessLevel = 0;
             let maxLevel;
 
-            const getNumbers = function (maxSuccessLevel, finishedRooms) {
+            const getSucceededNumbers = function (roomsSucceeded, roomsCount, levelsSucceeded, levelCount) {
                 if (locName === "Offene Rechnung" || locName === "Bühne frei!") {
-                    if (maxSuccessLevel > 0) {
-                        maxSuccessLevel++;
-                        finishedRooms++;
+                    if (roomsSucceeded > 0) {
+                        roomsSucceeded++;
+                        levelsSucceeded++;
+                    }
+                } else if (locName === "Das Schloss in den Wolken") {
+                    // wenn Altes Goldstück in neues Goldstück eingetauscht wird: Level 9 als Belohnungslevel wird nicht gezählt
+                    if (levelsSucceeded === 8 && levelCount === 9 && roomsSucceeded === 9 && roomsCount === 10) {
+                        roomsSucceeded++;
+                        levelsSucceeded++;
                     }
                 }
-                return [maxSuccessLevel, finishedRooms];
+                return [roomsSucceeded, levelsSucceeded];
             }
             const kos = {};
 
@@ -3668,7 +3688,7 @@ class demawiRepository {
 
                 let curFinishedRoom = Number(roomSplit[0]);
                 let curSuccessLevel = Number(levelSplit[0]);
-                [curFinishedRoom, curSuccessLevel] = getNumbers(curFinishedRoom, curSuccessLevel);
+                [curFinishedRoom, curSuccessLevel] = getSucceededNumbers(curFinishedRoom, Number(roomSplit[1]), curSuccessLevel, Number(levelSplit[1]));
                 if (curSuccessLevel > maxSuccessLevel) maxSuccessLevel = curSuccessLevel;
                 if (!maxLevel) maxLevel = Number(levelSplit[1]);
                 if (curSuccessLevel >= maxLevel) fullSuccessMembers++;
@@ -3801,20 +3821,23 @@ class demawiRepository {
         }
 
         static getFullInformation() {
-            const helden = [];
+            const helden = {};
             const trs = document.querySelectorAll("#main_content .content_table tr");
             for (let i = 1, l = trs.length; i < l; i++) {
-                const curHero = {}
+                const curHero = {};
                 const curTR = trs[i];
-                const aElemns = curTR.children[0].querySelectorAll("a");
+                const aElemns = curTR.querySelectorAll("a");
                 const heroAElem = aElemns[0];
                 curHero.id = Number(new URL(heroAElem.href, document.baseURI).searchParams.get("id"));
+                helden[curHero.id] = curHero;
                 curHero.name = heroAElem.textContent;
+                curHero.active = heroAElem.classList.contains("hero_active");
                 curHero.klasse = aElemns[1].textContent;
                 curHero.stufe = Number(curTR.children[2].textContent);
                 const dungeonTD = curTR.children[4];
-                // TODO: name im "onmouseover"
-                curHero.nextDungeonTime = dungeonTD.textContent;
+                const mouseOverMatch = ("" + dungeonTD.onmouseover).match(/wodToolTip\(this,'(.*)'\)/);
+                if (mouseOverMatch) curHero.nextDungeon = mouseOverMatch[1];
+                curHero.nextDungeonTime = _.WoD.getTimestampFromString(dungeonTD.textContent.trim());
             }
             return helden;
         }

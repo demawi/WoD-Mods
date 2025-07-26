@@ -59,14 +59,18 @@
             await EquipConfig.init();
             await ControlBar.init();
             await SelectOptimizer.init();
+            await EquipConfig.isUptodate();
         }
 
     }
 
     class MeineHeldenView {
+
+
         static async start() {
             const contentTable = document.querySelector(".content_table");
             if (!contentTable) return;
+            const alleHeldenInfo = _.MyHeroesView.getFullInformation();
             let first = true;
             for (const curTr of contentTable.querySelectorAll("tr")) {
                 if (first) {
@@ -84,7 +88,29 @@
                     if (myEquip && myEquip.current) tdName.innerHTML = myEquip.current;
                     const tdTime = document.createElement("td");
                     curTr.append(tdTime);
-                    if(myEquip && myEquip.ts) tdTime.innerHTML = _.util.formatDateAndTime(myEquip.ts);
+                    if (myEquip && myEquip.ts) {
+                        const myEquipTs = myEquip.ts;
+                        tdTime.title = _.util.formatDateAndTime(myEquipTs) + " (Letzte Änderung am Loadout)";
+
+                        const dirtyMode = myEquip.dirtyMode || EquipConfig.DIRTY_MODE.EVERY_RUN;
+                        if (dirtyMode.startsWith(EquipConfig.DIRTY_MODE.HOURS)) {
+                            const hours = dirtyMode.split(":")[1];
+                            tdTime.title += "\n\nDirtyMode: Nach " + hours + " wird die Ausrüstung als dirty markiert";
+                        } else {
+                            switch (dirtyMode) {
+                                case EquipConfig.DIRTY_MODE.EVERY_RUN:
+                                    tdTime.title += "\n\nDirtyMode: Nach jedem Dungeon-Run wird die Ausrüstung als dirty markiert";
+                                    break;
+                                case EquipConfig.DIRTY_MODE.NONE:
+                                    tdTime.title += "\n\nDirtyMode: ist aus";
+                                    break;
+                            }
+                        }
+                        tdTime.style.cursor = "pointer";
+                        const heldenInfo = alleHeldenInfo[heroId];
+                        const equipIsExpired = await EquipConfig.isDirty(myEquip, heldenInfo.nextDungeonTime)
+                        if (equipIsExpired !== undefined) tdTime.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? " ⚠️" : " ✓");
+                    }
                 }
             }
         }
@@ -1030,6 +1056,12 @@
         static #serverEquipOhneVGs;
         static #serverEquipUniqueVgs;
 
+        static DIRTY_MODE = {
+            EVERY_RUN: "eachRun", // jeden Run sollte die Konfig geprüft werden (DEFAULT)
+            HOURS: "hours", // nach einer bestimmten Stundenzahl sollte die Konfig geprüft werden
+            NONE: "none", // ausgeschaltet
+        }
+
         static async init() {
             this.#heroId = _.WoD.getMyHeroId();
             this.#myWorld = _.WoD.getMyWorld();
@@ -1058,6 +1090,57 @@
             } else {
                 this.checkValidationOnEquip(slotName);
             }
+        }
+
+        /**
+         * TODO: prüfen ob die Ausrüstung uptodate ist
+         */
+        static async isUptodate() {
+            // Das aktuelle Loadout fehlerfrei
+        }
+
+        /**
+         * 1: dirty
+         * -1: nicht dirty
+         * 0: unbekannt
+         * undefined: nicht relevant
+         */
+        static async isDirty(myEquip, currentNextDungeonTime) {
+            const lastSaved = myEquip.ts;
+            const dirtyMode = myEquip.dirtyMode || this.DIRTY_MODE.EVERY_RUN;
+            console.log("AAAA", dirtyMode, myEquip);
+            if (dirtyMode.startsWith(this.DIRTY_MODE.HOURS)) {
+                const hours = dirtyMode.split(":");
+                const result = (currentNextDungeonTime - lastSaved || 0) / 3600000 > hours;
+                return result ? 1 : -1;
+            }
+            switch (dirtyMode) {
+                case this.DIRTY_MODE.EVERY_RUN:
+                    const nxtDngTimeOnSave = myEquip.next;
+                    const result = this.isEquipTimeNonDirty(lastSaved, nxtDngTimeOnSave, currentNextDungeonTime);
+                    console.log("CHECKTIME", result, lastSaved, nxtDngTimeOnSave, currentNextDungeonTime)
+                    if (result === true) return -1;
+                    else if (result === false) return 1;
+                    else return 0;
+                case this.DIRTY_MODE.NONE:
+                    return;
+            }
+        }
+
+        /**
+         * Wir nehmen hier das Interval, falls die DungeonZeit beim Speichern der Ausrüstung noch nicht verkürzt wurde.
+         */
+        static #isSameDungeonInterval(time1, time2, hours) {
+            return Math.abs(time1 - time2) < (hours * 3600000);
+        }
+
+        // equipSaveTime und currentNextDungeonTime sind immer gesetzt
+        static isEquipTimeNonDirty(equipSaveTime, nextDungeonTimeOnEquipSave, currentNextDungeonTime) {
+            if (nextDungeonTimeOnEquipSave) return this.#isSameDungeonInterval(nextDungeonTimeOnEquipSave, currentNextDungeonTime, 5);
+            // nextDungeonTimeOnEquipSave ist leer, wenn zu dem Zeitpunkt des Ausrüstungsspeicherns kein Dungeon gesetzt war
+            const diffInHours = (currentNextDungeonTime - equipSaveTime) / 3600000;
+            if (diffInHours < 7) return true;
+            if (diffInHours > 10) return false;
         }
 
         static async checkValidationOnEquip(slotName, initial) {
@@ -1203,9 +1286,9 @@
         static async setCurrent(profileName, diretSave) {
             this.#equipConfigs.current = profileName;
             this.#equipConfigs.ts = new Date().getTime();
-            if (diretSave) {
-                await MyStorage.equipHero.setValue(this.#equipConfigs);
-            }
+            this.#equipConfigs.next = _.WoD.getNaechsteDungeonZeit(true);
+            this.#equipConfigs.dirtyMode = this.DIRTY_MODE.EVERY_RUN;
+            if (diretSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
         }
 
         static async hasLoadout(loadoutName) {
