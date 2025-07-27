@@ -51,6 +51,14 @@ class demawiRepository {
             if (win.top && win.top !== win) return this.getRootWindow(win.top);
             return win;
         }
+
+        static addRevisitListener(doc, callback) {
+            doc.addEventListener("visibilitychange", (event) => {
+                if (document.visibilityState === "visible") {
+                    callback(event);
+                }
+            });
+        }
     }
 
     /**
@@ -1453,11 +1461,13 @@ class demawiRepository {
                 const theForm = document.getElementsByName("the_form")[0];
                 if (theForm) theForm.remove(); // Damit es nicht zu Verwechselungen kommt
                 innerMainframe.removeEventListener("load", rebuildPageOnce);
+                _.WindowManager.addRevisitListener(document, _.MyMod.revisit);
             }
             innerMainframe.addEventListener("load", rebuildPageOnce);
 
             _.IFrameCapture.captureIt(innerMainframe, _.MyMod.startMod);
             innerMainframe.src = window.location.href;
+
         }
 
         /**
@@ -1807,6 +1817,10 @@ class demawiRepository {
                     await _.WoDSkillsDb.onSkillPage(myDocument);
                     break;
             }
+        }
+
+        static async revisit() {
+            console.log("WWWWWWWWWWWWWWWWWWWWWW");
         }
 
         static async init() {
