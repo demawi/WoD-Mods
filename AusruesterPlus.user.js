@@ -988,7 +988,23 @@
             const stackSize = stackInfo.stackSize; // max stacksize in general
             const amountSum = stackInfo.sum; // Anzahl an VGs
             const avgStackCountInPercent = (amountSum / stackCount) / stackSize; // in percent
-            return avgStackCountInPercent / alreadyConsumedSlots / minStackSizeFound;
+            const alreadyMinConsumed = this.#getMinAmount(slotUsage.info.stacks, alreadyConsumedSlots);
+            return avgStackCountInPercent / alreadyMinConsumed;
+        }
+
+        static #getMinAmount(stacks, stackNumber) {
+            const consumed = {};
+            let result = 0;
+            for (let i = 0; i < stackNumber; i++) {
+                for (const [size, stackArray] of Object.entries(stacks)) {
+                    if ((consumed[size] || 0) < stackArray.length) {
+                        consumed[size] = (consumed[size] || 0) + 1;
+                        result += Number(size);
+                        break;
+                    }
+                }
+            }
+            return result;
         }
 
         /**
