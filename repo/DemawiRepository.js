@@ -52,12 +52,28 @@ class demawiRepository {
             return win;
         }
 
-        static addRevisitListener(doc, callback) {
-            doc.addEventListener("visibilitychange", (event) => {
+        /**
+         *
+         * @param doc
+         * @param callback
+         */
+        static addRevisitListener(win, callback) {
+            let triggered = true;
+            const handleRevisit = function (evt) {
+                if (triggered) {
+                    triggered = false;
+                    setTimeout(() => {
+                        triggered = true;
+                    }, 100);
+                    callback(evt);
+                }
+            }
+            win.document.addEventListener("visibilitychange", evt => {
                 if (document.visibilityState === "visible") {
-                    callback(event);
+                    handleRevisit(evt);
                 }
             });
+            win.addEventListener("focus", handleRevisit);
         }
     }
 
@@ -1461,13 +1477,11 @@ class demawiRepository {
                 const theForm = document.getElementsByName("the_form")[0];
                 if (theForm) theForm.remove(); // Damit es nicht zu Verwechselungen kommt
                 innerMainframe.removeEventListener("load", rebuildPageOnce);
-                _.WindowManager.addRevisitListener(document, _.MyMod.revisit);
             }
             innerMainframe.addEventListener("load", rebuildPageOnce);
 
-            _.IFrameCapture.captureIt(innerMainframe, _.MyMod.startMod);
+            _.IFrameCapture.captureIt(innerMainframe, _.MyMod.startMod, _.MyMod.revisit);
             innerMainframe.src = window.location.href;
-
         }
 
         /**
@@ -1745,8 +1759,8 @@ class demawiRepository {
      */
     static IFrameCapture = class IFrameCapture {
 
-        static async captureIt(iframeOrPopup2Capture, onLoadFn, isPopup) {
-            const captureFn = async function () {
+        static async captureIt(iframeOrPopup2Capture, onLoadFn, onRevisitFn, isPopup) {
+            const captureFn = async function (evt) {
                 const win = isPopup ? iframeOrPopup2Capture : iframeOrPopup2Capture.contentWindow;
                 if (!isPopup) {
                     // Titel und Url ins Hauptfenster übernehmen
@@ -1771,7 +1785,7 @@ class demawiRepository {
                 const original = win.open;
                 win.open = function (...args) {
                     const popup = original(...args);
-                    _.IFrameCapture.captureIt(popup, onLoadFn, true);
+                    _.IFrameCapture.captureIt(popup, onLoadFn, onRevisitFn, true);
                     return popup;
                 }
 
@@ -1792,8 +1806,11 @@ class demawiRepository {
                         if (!cur.target) cur.target = "_top";
                     }
                 }
-
-                await onLoadFn(win, win.document);
+                win.focus();
+                _.WindowManager.addRevisitListener(win, evt => {
+                    onRevisitFn(win, win.document, evt);
+                });
+                await onLoadFn(win, win.document, evt);
             };
             iframeOrPopup2Capture.addEventListener("load", captureFn);
         }
@@ -1819,8 +1836,8 @@ class demawiRepository {
             }
         }
 
-        static async revisit() {
-            console.log("WWWWWWWWWWWWWWWWWWWWWW");
+        static async revisit(win, doc, evt) {
+
         }
 
         static async init() {
