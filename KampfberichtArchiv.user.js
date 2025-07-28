@@ -1980,18 +1980,7 @@
             const container = document.createElement("span");
             const input = document.createElement("select");
             container.append(input);
-            const deleteButton = _.UI.createButton("<span style='font-size:0.8em'> ❌</span>", async function () {
-                input.value = "";
-                input.dispatchEvent(new Event("change"));
-            })
-            deleteButton.style.visibility = "hidden";
-            container.onmouseenter = function () {
-                deleteButton.style.visibility = "";
-            }
-            container.onmouseleave = function () {
-                deleteButton.style.visibility = "hidden";
-            }
-            container.append(deleteButton);
+            _.UI.addDeleteButtonForSelect(input);
             input.onchange = onchangeFn;
             return [input, container];
         }

@@ -90,16 +90,17 @@
                     curTr.append(tdTime);
                     if (myEquip && myEquip.ts) {
                         const myEquipTs = myEquip.ts;
-                        tdTime.title = _.util.formatDateAndTime(myEquipTs) + " (Letzte Änderung am Loadout)";
+                        const hoursExpired = Math.round((new Date().getTime() - myEquipTs) / 360000) / 10;
+                        tdTime.title = "Vor: " + hoursExpired + "h " + " (Letzte Änderung am Loadout: " + _.util.formatDateAndTime(myEquipTs) + ")";
 
                         const dirtyMode = myEquip.dirtyMode || EquipConfig.DIRTY_MODE.EVERY_RUN;
                         if (dirtyMode.startsWith(EquipConfig.DIRTY_MODE.HOURS)) {
                             const hours = dirtyMode.split(":")[1];
-                            tdTime.title += "\n\nDirtyMode: Nach " + hours + " wird die Ausrüstung als dirty markiert";
+                            tdTime.title += "\n\nDirtyMode: " + hours + " Stunden (Nach " + hours + " Stunden soll die Ausrüstung geprüft werden)";
                         } else {
                             switch (dirtyMode) {
                                 case EquipConfig.DIRTY_MODE.EVERY_RUN:
-                                    tdTime.title += "\n\nDirtyMode: Nach jedem Dungeon-Run wird die Ausrüstung als dirty markiert";
+                                    tdTime.title += "\n\nDirtyMode: Dungeon-Run (Nach jedem Dungeon-Run soll die Ausrüstung geprüft werden)";
                                     break;
                                 case EquipConfig.DIRTY_MODE.NONE:
                                     tdTime.title += "\n\nDirtyMode: ist aus";
@@ -109,7 +110,9 @@
                         tdTime.style.cursor = "pointer";
                         const heldenInfo = alleHeldenInfo[heroId];
                         const equipIsExpired = await EquipConfig.isDirty(myEquip, heldenInfo.nextDungeonTime)
-                        if (equipIsExpired !== undefined) tdTime.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? " ⚠️" : " ✓");
+                        if (equipIsExpired !== undefined) {
+                            tdTime.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? " ⚠️ <sup>" + hoursExpired + "h</sup>" : " ✓");
+                        }
                     }
                 }
             }
@@ -473,7 +476,6 @@
             [this.hasChange_UI_Loadout_Equip, this.hasChange_UI_Loadout_VGConfig] = (!this.hasSelectedLoadout() && [false, false]) || await EquipConfig.differs_UI_Loadout(selectedLoadoutName);
             [this.hasChange_UI_CurrentLoadout_Equip, this.hasChange_UI_CurrentLoadout_VGConfig] = (!EquipConfig.getCurrentLoadoutName() && [false, false]) || await EquipConfig.differs_UI_Loadout(EquipConfig.getCurrentLoadoutName());
             this.hasChange_UI_Loadout = this.hasChange_UI_Loadout_Equip || this.hasChange_UI_Loadout_VGConfig;
-
             this.hasChange_Loadout_Server = !this.hasSelectedLoadout() || await EquipConfig.differs_Loadout_Server(selectedLoadoutName);
             this.hasChange_UI_Server = await EquipConfig.differs_UI_Server();
             console.log("DIFF", selectedLoadoutName, "UI<>Loadout:" + this.hasChange_UI_Loadout, "Loadout<>Server:" + this.hasChange_Loadout_Server, "UI<>Server:" + this.hasChange_UI_Server);
@@ -600,24 +602,24 @@
             const theForm = FormHandler.getTheForm();
             const allSlots = FormHandler.getAllExistingSlots();
             for (const [slotName, slotIdx] of allSlots) {
-                const selectField = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
-                this.addSlotImagesToSelect(selectField);
-                this.rearrangeOptions(selectField);
-                selectField.onchange = async function () {
+                const selectInput = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
+                this.addSlotImagesToSelect(selectInput);
+                this.rearrangeOptions(selectInput);
+                selectInput.onchange = async function () {
                     VGKonfig.onEquipSelectChange(slotName, slotIdx);
                     EquipConfig.onEquipSlotChanged(slotName, slotIdx, false);
                     await ControlBar.onDataChange();
                     FormHandler.sortInOrder(slotName);
-                    for (const cur of selectField.parentElement.querySelectorAll("img")) {
+                    for (const cur of selectInput.parentElement.querySelectorAll("img")) {
                         if (cur.tagName === "IMG" && cur.src.includes("/gem_")) {
                             cur.remove();
                         }
                     }
-                    const firstZustandImgElem = selectField.parentElement.children[0];
+                    const firstZustandImgElem = selectInput.parentElement.children[0];
                     firstZustandImgElem.src = "/wod/css//skins/skin-8/images/icons/zustand_leer.gif";
-                    const curItemId = FormHandler.getSelectedValue(selectField);
+                    const curItemId = FormHandler.getSelectedValue(selectInput);
                     if (curItemId) {
-                        const parent = selectField.parentElement;
+                        const parent = selectInput.parentElement;
                         const lastElem = parent.querySelector("input[type='submit']");
                         const slotImages = GemHandler.getSlotImagesSrcs(curItemId);
                         if (slotImages) {
@@ -628,12 +630,14 @@
                             }
                         }
                     }
-                    selectField.nextSibling.style.boxShadow = "0px 0px 3px 3px rgba(0, 255, 0, 0.5)";
+                    selectInput.nextSibling.style.boxShadow = "0px 0px 3px 3px rgba(0, 255, 0, 0.5)";
                     setTimeout(function () {
-                        selectField.nextSibling.style.boxShadow = "";
+                        selectInput.nextSibling.style.boxShadow = "";
                     }, 1000);
-                }
-                _.Libs.betterSelect2(selectField, {templateResult: _this.addSlotImgs});
+                };
+                _.Libs.betterSelect2(selectInput, {templateResult: _this.addSlotImgs});
+                const deleteButton = _.UI.addDeleteButtonForSelect(selectInput, selectInput.options[0].value);
+
             }
 
             ControlBar.revalidateAll();

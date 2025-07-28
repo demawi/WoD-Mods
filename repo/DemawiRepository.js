@@ -4162,6 +4162,7 @@ class demawiRepository {
             WARN: "⚠️",
             ERROR: "💥",
             MISSING: "�",
+            DELETE: "❌",
         }
 
         static WOD_SIGNS = {
@@ -4173,6 +4174,34 @@ class demawiRepository {
             const spinner = document.createElement("i");
             spinner.className = "fa fa-spinner fa-spin";
             return spinner;
+        }
+
+        static addDeleteButtonForSelect(selectInput, deleteValue) {
+            if (deleteValue === undefined) deleteValue = "";
+            const container = selectInput.parentElement;
+            const deleteButton = _.UI.createButton("<span style='font-size:0.8em'> ❌</span>", async function () {
+                selectInput.value = deleteValue;
+                selectInput.dispatchEvent(new Event("change"));
+            })
+            const anchor = document.createElement("span");
+            anchor.style.display = "inline-block";
+            anchor.style.position = "absolute";
+            anchor.style.height = "100%";
+
+            deleteButton.style.display = "none";
+            container.addEventListener("mouseenter", function () {
+                if (selectInput.options[selectInput.selectedIndex].text !== "") deleteButton.style.display = "";
+            });
+            container.addEventListener("mouseleave", function () {
+                deleteButton.style.display = "none";
+            });
+            container.style.position = "relative";
+            this.insertAfter(anchor, selectInput);
+            anchor.append(deleteButton);
+            deleteButton.style.position = "relative";
+            deleteButton.style.left = "-17px";
+            deleteButton.style.top = "4px";
+            return deleteButton;
         }
 
         static createElem(type, innerHTML) {
@@ -4276,6 +4305,13 @@ class demawiRepository {
                 if (next2) parent2.insertBefore(elem1, next2);
                 else parent2.appendChild(elem1);
             }
+        }
+
+        static insertAfter(newElement, child) {
+            const parent = child.parentNode;
+            const next = child.nextSibling;
+            if (next) parent.insertBefore(newElement, next);
+            else parent.appendChild(newElement);
         }
 
         static insertAtIndex(parent, child, idx) {
