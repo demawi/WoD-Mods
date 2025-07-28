@@ -3,12 +3,12 @@
  */
 class demawiRepository {
 
-    static version = "1.1.7";
+    static version = "1.1.8";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
      */
-    static csProxyV = "1.1";
+    static csProxyV = "1.2";
 
     /**
      * Erlaubt Skript-übergreifende Markierungen am 'window'-Objekt.
@@ -1386,8 +1386,11 @@ class demawiRepository {
             const rootWindow = _.WindowManager.getRootWindow();
             const usedVersion = _.WindowManager.getMark("demRepV", rootWindow);
             const installedBy = _.WindowManager.getMark("demRepM", rootWindow);
-            // Seite wurde von einer URL aufgerufen, wo generell kein DB-Mainframe istalliert wird, insofern bringt auch ein Reload nichts.
-            if(usedVersion === undefined) return [false];
+            // Seite wurde von einer Mainframe-URL aufgerufen, wo generell kein DB-Mainframe istalliert wird, insofern bringt auch ein Reload nichts.
+            if (usedVersion === undefined) {
+                console.warn(GM.info.script.name + ": Über das Hauptfenster'" + rootWindow.location.href + "' wird keine Datenbank-Verbindung hergestellt, deswegen können wir auch hier nicht auf die Datenbank zugreifen!");
+                return [false];
+            }
             // Sicherstellen, dass die aktuelle Version im Haupfenster läuft (wg. MyMod.start()), was im CS-Iframe läuft bekommen wir von hier aus allerdings nicht mit.
             // TODO: ggf. dem Iframe nen Parameter mit der csProxyVersion mitgeben, damit dort sichergestellt werden kann, dass die aktuelle Version läuft!?
             if (GM.info.script.name === installedBy) _.WindowManager.mark("csProxyInstallerVisited", true); // auf dem aktuellen Iframe-Window nicht auf dem Root
