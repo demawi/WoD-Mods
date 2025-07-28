@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.15
+// @version        0.8.16
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
 //
+// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+// @match          http*://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
 // @match          http*://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
@@ -30,14 +31,23 @@
         static dbname = "wodDB";
 
         static async startMod() {
-            if (_.WoD.getView() === _.WoD.VIEW.ITEMS_GEAR) {
-                const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
-                if (!indexedDb) return;
-                await MyStorage.initMyStorage(indexedDb);
+            const indexedDb = await _.WoDStorages.tryConnectToMainDomain(Mod.dbname);
+            if (!indexedDb) return;
+            await MyStorage.initMyStorage(indexedDb);
+            demawiRepository.startMod();
 
-                demawiRepository.startMod();
-                await Ausruester.start();
+            switch (_.WoD.getView()) {
+                case _.WoD.VIEW.ITEMS_GEAR:
+                    await Ausruester.start();
+                    break;
+                case _.WoD.VIEW.MY_HEROES:
+                    await MeineHeldenView.start();
+                    break;
             }
+        }
+
+        static async #initDb() {
+
         }
 
     }
@@ -49,8 +59,64 @@
             await EquipConfig.init();
             await ControlBar.init();
             await SelectOptimizer.init();
+            await EquipConfig.isUptodate();
         }
 
+    }
+
+    class MeineHeldenView {
+
+
+        static async start() {
+            const contentTable = document.querySelector(".content_table");
+            if (!contentTable) return;
+            const alleHeldenInfo = _.MyHeroesView.getFullInformation();
+            let first = true;
+            for (const curTr of contentTable.querySelectorAll("tr")) {
+                if (first) {
+                    first = false;
+                    const th = document.createElement("th");
+                    th.colSpan = 2;
+                    th.innerHTML = "Ausrüstung";
+                    curTr.append(th);
+                } else {
+                    const heroId = new URL(curTr.querySelector("a").href).searchParams.get("id");
+                    const myWorld = _.WoD.getMyWorld();
+                    const myEquip = await EquipConfig.loadIt(heroId, myWorld);
+                    const tdName = document.createElement("td");
+                    curTr.append(tdName);
+                    if (myEquip && myEquip.current) tdName.innerHTML = myEquip.current;
+                    const tdTime = document.createElement("td");
+                    //curTr.append(tdTime); // TODO: erstmal noch deaktiviert
+                    if (myEquip && myEquip.ts) {
+                        const myEquipTs = myEquip.ts;
+                        const hoursExpired = Math.round((new Date().getTime() - myEquipTs) / 360000) / 10;
+                        tdTime.title = "Vor: " + hoursExpired + "h " + " (Letzte Änderung am Loadout: " + _.util.formatDateAndTime(myEquipTs) + ")";
+
+                        const dirtyMode = myEquip.dirtyMode || EquipConfig.DIRTY_MODE.EVERY_RUN;
+                        if (dirtyMode.startsWith(EquipConfig.DIRTY_MODE.HOURS)) {
+                            const hours = dirtyMode.split(":")[1];
+                            tdTime.title += "\n\nDirtyMode: " + hours + " Stunden (Nach " + hours + " Stunden soll die Ausrüstung geprüft werden)";
+                        } else {
+                            switch (dirtyMode) {
+                                case EquipConfig.DIRTY_MODE.EVERY_RUN:
+                                    tdTime.title += "\n\nDirtyMode: Dungeon-Run (Nach jedem Dungeon-Run soll die Ausrüstung geprüft werden)";
+                                    break;
+                                case EquipConfig.DIRTY_MODE.NONE:
+                                    tdTime.title += "\n\nDirtyMode: ist aus";
+                                    break;
+                            }
+                        }
+                        tdTime.style.cursor = "pointer";
+                        const heldenInfo = alleHeldenInfo[heroId];
+                        const equipIsExpired = await EquipConfig.isDirty(myEquip, heldenInfo.nextDungeonTime)
+                        if (equipIsExpired !== undefined) {
+                            tdTime.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? " ⚠️ <sup>" + hoursExpired + "h</sup>" : " ✓");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     class ControlBar {
@@ -410,7 +476,6 @@
             [this.hasChange_UI_Loadout_Equip, this.hasChange_UI_Loadout_VGConfig] = (!this.hasSelectedLoadout() && [false, false]) || await EquipConfig.differs_UI_Loadout(selectedLoadoutName);
             [this.hasChange_UI_CurrentLoadout_Equip, this.hasChange_UI_CurrentLoadout_VGConfig] = (!EquipConfig.getCurrentLoadoutName() && [false, false]) || await EquipConfig.differs_UI_Loadout(EquipConfig.getCurrentLoadoutName());
             this.hasChange_UI_Loadout = this.hasChange_UI_Loadout_Equip || this.hasChange_UI_Loadout_VGConfig;
-
             this.hasChange_Loadout_Server = !this.hasSelectedLoadout() || await EquipConfig.differs_Loadout_Server(selectedLoadoutName);
             this.hasChange_UI_Server = await EquipConfig.differs_UI_Server();
             console.log("DIFF", selectedLoadoutName, "UI<>Loadout:" + this.hasChange_UI_Loadout, "Loadout<>Server:" + this.hasChange_Loadout_Server, "UI<>Server:" + this.hasChange_UI_Server);
@@ -537,24 +602,24 @@
             const theForm = FormHandler.getTheForm();
             const allSlots = FormHandler.getAllExistingSlots();
             for (const [slotName, slotIdx] of allSlots) {
-                const selectField = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
-                this.addSlotImagesToSelect(selectField);
-                this.rearrangeOptions(selectField);
-                selectField.onchange = async function () {
+                const selectInput = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
+                this.addSlotImagesToSelect(selectInput);
+                this.rearrangeOptions(selectInput);
+                selectInput.onchange = async function () {
                     VGKonfig.onEquipSelectChange(slotName, slotIdx);
                     EquipConfig.onEquipSlotChanged(slotName, slotIdx, false);
                     await ControlBar.onDataChange();
                     FormHandler.sortInOrder(slotName);
-                    for (const cur of selectField.parentElement.querySelectorAll("img")) {
+                    for (const cur of selectInput.parentElement.querySelectorAll("img")) {
                         if (cur.tagName === "IMG" && cur.src.includes("/gem_")) {
                             cur.remove();
                         }
                     }
-                    const firstZustandImgElem = selectField.parentElement.children[0];
+                    const firstZustandImgElem = selectInput.parentElement.children[0];
                     firstZustandImgElem.src = "/wod/css//skins/skin-8/images/icons/zustand_leer.gif";
-                    const curItemId = FormHandler.getSelectedValue(selectField);
+                    const curItemId = FormHandler.getSelectedValue(selectInput);
                     if (curItemId) {
-                        const parent = selectField.parentElement;
+                        const parent = selectInput.parentElement;
                         const lastElem = parent.querySelector("input[type='submit']");
                         const slotImages = GemHandler.getSlotImagesSrcs(curItemId);
                         if (slotImages) {
@@ -565,12 +630,14 @@
                             }
                         }
                     }
-                    selectField.nextSibling.style.boxShadow = "0px 0px 3px 3px rgba(0, 255, 0, 0.5)";
+                    selectInput.nextSibling.style.boxShadow = "0px 0px 3px 3px rgba(0, 255, 0, 0.5)";
                     setTimeout(function () {
-                        selectField.nextSibling.style.boxShadow = "";
+                        selectInput.nextSibling.style.boxShadow = "";
                     }, 1000);
-                }
-                _.Libs.betterSelect2(selectField, {templateResult: _this.addSlotImgs});
+                };
+                _.Libs.betterSelect2(selectInput, {templateResult: _this.addSlotImgs});
+                const deleteButton = _.UI.addDeleteButtonForSelect(selectInput, selectInput.options[0].value);
+
             }
 
             ControlBar.revalidateAll();
@@ -877,6 +944,7 @@
                 if (debug) console.log("Initial SlotUsage: ", _.util.cloneObject(slotUsages));
 
                 // 3. Slot-Priorisierung: Die noch freien Slots vergeben
+                if (slotUsages.length === 0) return result; // nix zu nix vergeben
                 for (let i = 0, l = freeSlots - realUsedSlots; i < l; i++) {
                     const best = slotUsages.reduce(function (prev, current) {
                         return (prev && prev.prio > current.prio) ? prev : current
@@ -925,7 +993,23 @@
             const stackSize = stackInfo.stackSize; // max stacksize in general
             const amountSum = stackInfo.sum; // Anzahl an VGs
             const avgStackCountInPercent = (amountSum / stackCount) / stackSize; // in percent
-            return avgStackCountInPercent / alreadyConsumedSlots / minStackSizeFound;
+            const alreadyMinConsumed = this.#getMinAmount(slotUsage.info.stacks, alreadyConsumedSlots);
+            return avgStackCountInPercent / alreadyMinConsumed;
+        }
+
+        static #getMinAmount(stacks, stackNumber) {
+            const consumed = {};
+            let result = 0;
+            for (let i = 0; i < stackNumber; i++) {
+                for (const [size, stackArray] of Object.entries(stacks)) {
+                    if ((consumed[size] || 0) < stackArray.length) {
+                        consumed[size] = (consumed[size] || 0) + 1;
+                        result += Number(size);
+                        break;
+                    }
+                }
+            }
+            return result;
         }
 
         /**
@@ -993,6 +1077,12 @@
         static #serverEquipOhneVGs;
         static #serverEquipUniqueVgs;
 
+        static DIRTY_MODE = {
+            EVERY_RUN: "eachRun", // jeden Run sollte die Konfig geprüft werden (DEFAULT)
+            HOURS: "hours", // nach einer bestimmten Stundenzahl sollte die Konfig geprüft werden
+            NONE: "none", // ausgeschaltet
+        }
+
         static async init() {
             this.#heroId = _.WoD.getMyHeroId();
             this.#myWorld = _.WoD.getMyWorld();
@@ -1021,6 +1111,57 @@
             } else {
                 this.checkValidationOnEquip(slotName);
             }
+        }
+
+        /**
+         * TODO: prüfen ob die Ausrüstung uptodate ist
+         */
+        static async isUptodate() {
+            // Das aktuelle Loadout fehlerfrei
+        }
+
+        /**
+         * 1: dirty
+         * -1: nicht dirty
+         * 0: unbekannt
+         * undefined: nicht relevant
+         */
+        static async isDirty(myEquip, currentNextDungeonTime) {
+            const lastSaved = myEquip.ts;
+            const dirtyMode = myEquip.dirtyMode || this.DIRTY_MODE.EVERY_RUN;
+            //console.log("AAAA", dirtyMode, myEquip);
+            if (dirtyMode.startsWith(this.DIRTY_MODE.HOURS)) {
+                const hours = dirtyMode.split(":");
+                const result = (currentNextDungeonTime - lastSaved || 0) / 3600000 > hours;
+                return result ? 1 : -1;
+            }
+            switch (dirtyMode) {
+                case this.DIRTY_MODE.EVERY_RUN:
+                    const nxtDngTimeOnSave = myEquip.next;
+                    const result = this.isEquipTimeNonDirty(lastSaved, nxtDngTimeOnSave, currentNextDungeonTime);
+                    //console.log("CHECKTIME", result, lastSaved, nxtDngTimeOnSave, currentNextDungeonTime)
+                    if (result === true) return -1;
+                    else if (result === false) return 1;
+                    else return 0;
+                case this.DIRTY_MODE.NONE:
+                    return;
+            }
+        }
+
+        /**
+         * Wir nehmen hier das Interval, falls die DungeonZeit beim Speichern der Ausrüstung noch nicht verkürzt wurde.
+         */
+        static #isSameDungeonInterval(time1, time2, hours) {
+            return Math.abs(time1 - time2) < (hours * 3600000);
+        }
+
+        // equipSaveTime und currentNextDungeonTime sind immer gesetzt
+        static isEquipTimeNonDirty(equipSaveTime, nextDungeonTimeOnEquipSave, currentNextDungeonTime) {
+            if (nextDungeonTimeOnEquipSave) return this.#isSameDungeonInterval(nextDungeonTimeOnEquipSave, currentNextDungeonTime, 5);
+            // nextDungeonTimeOnEquipSave ist leer, wenn zu dem Zeitpunkt des Ausrüstungsspeicherns kein Dungeon gesetzt war
+            const diffInHours = (currentNextDungeonTime - equipSaveTime) / 3600000;
+            if (diffInHours < 7) return true;
+            if (diffInHours > 10) return false;
         }
 
         static async checkValidationOnEquip(slotName, initial) {
@@ -1165,9 +1306,10 @@
 
         static async setCurrent(profileName, diretSave) {
             this.#equipConfigs.current = profileName;
-            if (diretSave) {
-                await MyStorage.equipHeroe.setValue(this.#equipConfigs);
-            }
+            this.#equipConfigs.ts = new Date().getTime();
+            this.#equipConfigs.next = _.WoD.getNaechsteDungeonZeit(true);
+            this.#equipConfigs.dirtyMode = this.DIRTY_MODE.EVERY_RUN;
+            if (diretSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
         }
 
         static async hasLoadout(loadoutName) {
@@ -1213,7 +1355,7 @@
             }
             this.setCurrent(profileName, false);
             equipConfig.ts = now;
-            await MyStorage.equipHeroe.setValue(this.#equipConfigs);
+            await MyStorage.equipHero.setValue(this.#equipConfigs);
             await MyStorage.equipLoadout.setValue(equipConfig);
         }
 
@@ -1221,12 +1363,16 @@
             return this.#myWorld + this.#heroId + "|" + profileName;
         }
 
+        static async loadIt(heroId, world) {
+            return await MyStorage.equipHero.getValue(world + heroId);
+        }
+
         static async #load() {
-            this.#equipConfigs = await MyStorage.equipHeroe.getValue(this.#myWorld + this.#heroId);
+            this.#equipConfigs = await MyStorage.equipHero.getValue(this.#myWorld + this.#heroId);
         }
 
         static async #save() {
-            await MyStorage.equipHeroe.setValue(this.#equipConfigs);
+            await MyStorage.equipHero.setValue(this.#equipConfigs);
         }
 
     }
@@ -1641,7 +1787,6 @@
             for (const slotName of this.getAllSlotNames()) {
                 let idx = 0;
                 const wantedEquipIds = equipChangesId[slotName] || [];
-                console.log("KKKKK", slotName, wantedEquipIds);
                 for (const cur of wantedEquipIds) {
                     const itemId = getId(cur);
                     const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
@@ -1652,7 +1797,6 @@
                 }
                 // Überprüfen, was abgelegt werden soll
                 const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
-                console.log("DefaultEquipSlot: ", defaultEquipSlot);
                 if (defaultEquipSlot) { // tasche kann auch mal komplett nicht vorhanden sein
                     for (const itemId of defaultEquipSlot) {
                         if (!wantedEquipIds.includes(itemId)) {
@@ -1753,7 +1897,7 @@
         }
 
         static async initThisStorage(indexedDb) {
-            this.equipHeroe = indexedDb.createObjectStorage("equipHero", "id");
+            this.equipHero = indexedDb.createObjectStorage("equipHero", "id");
             this.equipLoadout = indexedDb.createObjectStorage("equipLoadout", "id");
         }
 
