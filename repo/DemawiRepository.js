@@ -1829,7 +1829,7 @@ class demawiRepository {
          */
         static async startMod(myWindow, myDocument) {
             const view = _.WoD.getView(myWindow);
-            myWindow.console.log("MAIN_FRAME: " + view);
+            myWindow.console.log("[WoD] MAIN_FRAME: " + view);
             await _.WoDWorldDb.placeSeasonElem(myDocument);
             switch (view) {
                 case _.WoD.VIEW.MY_HEROES:

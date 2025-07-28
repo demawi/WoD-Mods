@@ -87,7 +87,7 @@
                     curTr.append(tdName);
                     if (myEquip && myEquip.current) tdName.innerHTML = myEquip.current;
                     const tdTime = document.createElement("td");
-                    curTr.append(tdTime);
+                    //curTr.append(tdTime); // TODO: erstmal noch deaktiviert
                     if (myEquip && myEquip.ts) {
                         const myEquipTs = myEquip.ts;
                         const hoursExpired = Math.round((new Date().getTime() - myEquipTs) / 360000) / 10;
@@ -1128,7 +1128,7 @@
         static async isDirty(myEquip, currentNextDungeonTime) {
             const lastSaved = myEquip.ts;
             const dirtyMode = myEquip.dirtyMode || this.DIRTY_MODE.EVERY_RUN;
-            console.log("AAAA", dirtyMode, myEquip);
+            //console.log("AAAA", dirtyMode, myEquip);
             if (dirtyMode.startsWith(this.DIRTY_MODE.HOURS)) {
                 const hours = dirtyMode.split(":");
                 const result = (currentNextDungeonTime - lastSaved || 0) / 3600000 > hours;
@@ -1138,7 +1138,7 @@
                 case this.DIRTY_MODE.EVERY_RUN:
                     const nxtDngTimeOnSave = myEquip.next;
                     const result = this.isEquipTimeNonDirty(lastSaved, nxtDngTimeOnSave, currentNextDungeonTime);
-                    console.log("CHECKTIME", result, lastSaved, nxtDngTimeOnSave, currentNextDungeonTime)
+                    //console.log("CHECKTIME", result, lastSaved, nxtDngTimeOnSave, currentNextDungeonTime)
                     if (result === true) return -1;
                     else if (result === false) return 1;
                     else return 0;
