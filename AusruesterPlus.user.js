@@ -944,6 +944,7 @@
                 if (debug) console.log("Initial SlotUsage: ", _.util.cloneObject(slotUsages));
 
                 // 3. Slot-Priorisierung: Die noch freien Slots vergeben
+                if (slotUsages.length === 0) return result; // nix zu nix vergeben
                 for (let i = 0, l = freeSlots - realUsedSlots; i < l; i++) {
                     const best = slotUsages.reduce(function (prev, current) {
                         return (prev && prev.prio > current.prio) ? prev : current
