@@ -1285,9 +1285,9 @@
             let naechsterDungeonName = _.WoD.getNaechsterDungeonName();
             if (!naechsterDungeonName) return;
             // const ausruestungsTabelleKomplett = document.querySelectorAll("table:has(table #ausruestungstabelle_0):not(table:has(table table #ausruestungstabelle_0))")[0];
-            const tabelle2 = document.querySelector("#ausruestungstabelle_2");
-            if (!tabelle2) return; // nur wenn verfügbar
-            const ausruestungsTabelle = tabelle2.parentElement.parentElement;
+            let ausruestungsTabelle = document.querySelector("form table")?.children[0]?.children[0]?.children[1];
+            console.log("LAST_RUN: ", ausruestungsTabelle);
+            if (!ausruestungsTabelle) return; // nur wenn verfügbar
 
             let items;
             let locVersion;
@@ -3169,6 +3169,7 @@
 
         static async submitLoot(report, reportLoot) {
             if (Mod.isAdmin) return;
+            console.log("Submit Loot ", report, reportLoot);
             const loots = {};
             for (const member of Object.values(reportLoot.members)) {
                 if (member.loot) {

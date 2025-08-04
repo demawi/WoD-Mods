@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.8";
+    static version = "1.1.8.1";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1485,7 +1485,7 @@ class demawiRepository {
             }
             innerMainframe.addEventListener("load", rebuildPageOnce);
 
-            _.IFrameCapture.captureIt(innerMainframe, _.MyMod.startMod, _.MyMod.revisit);
+            _.IFrameCapture.captureIt(innerMainframe, (win, doc) => _.MyMod.startMod(win, doc), (win, doc) => _.MyMod.revisit(win, doc));
             innerMainframe.src = window.location.href;
         }
 
@@ -1842,7 +1842,23 @@ class demawiRepository {
         }
 
         static async revisit(win, doc, evt) {
+            this.nextDungeonTimeDirty(win, doc);
+        }
 
+        static nextDungeonTimeDirty(win, doc) {
+            const nextDungeonTime = _.WoD.getNaechsteDungeonZeit(false, doc);
+            if (!nextDungeonTime) return;
+            const now = new Date().getTime();
+            if (now > nextDungeonTime) {
+                const elem = doc.getElementById("gadgetNextdungeonTime");
+                if (!elem.parentElement.getElementsByClassName("outdatedMarker").length) {
+                    const div = doc.createElement("div");
+                    div.innerHTML = "Der Dungeon-Run hat bereits stattgefunden!";
+                    div.style.color = "red";
+                    div.className = "outdatedMarker";
+                    elem.parentElement.append(div);
+                }
+            }
         }
 
         static async init() {
@@ -3200,10 +3216,11 @@ class demawiRepository {
         }
 
         /**
-         * @returns {string}
+         * @returns {number}
          */
-        static getNaechsteDungeonZeit(early) {
-            const timeString = this.getNaechsteDungeonZeitString(early);
+        static getNaechsteDungeonZeit(early, doc) {
+            doc = doc || document;
+            const timeString = this.getNaechsteDungeonZeitString(early, doc);
             if (!timeString) return;
             if (timeString.toLowerCase() === "sofort") return new Date().getTime();
             // TODO: wie ist das beim Tageswechsel?
@@ -3211,8 +3228,9 @@ class demawiRepository {
         }
 
         // Kann auch "Morgen 01:16" sein odera auch "sofort"
-        static getNaechsteDungeonZeitString(early) {
-            let elem = document.getElementById("gadgetNextdungeonTime");
+        static getNaechsteDungeonZeitString(early, doc) {
+            doc = doc || document;
+            let elem = doc.getElementById("gadgetNextdungeonTime");
             if (!elem) return;
             const curTime = elem.textContent;
             if (!early) return curTime;
