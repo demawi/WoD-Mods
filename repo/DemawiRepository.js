@@ -1823,20 +1823,25 @@ class demawiRepository {
 
     static MyMod = class MyMod {
 
+        static nextDungeonTimeEarly;
+        static nextDungeonTimeReal;
+
         /**
          * Wird aktuell nur für das MainFrame aufgerufen nicht für Popups.
          * Deswegen macht es aktuell auch noch keinen Sinn
          */
-        static async startMod(myWindow, myDocument) {
-            const view = _.WoD.getView(myWindow);
-            myWindow.console.log("[WoD] MAIN_FRAME: " + view);
-            await _.WoDWorldDb.placeSeasonElem(myDocument);
+        static async startMod(win, doc) {
+            this.nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
+            this.nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
+            const view = _.WoD.getView(win);
+            win.console.log("[WoD] MAIN_FRAME: " + view);
+            await _.WoDWorldDb.placeSeasonElem(doc);
             switch (view) {
                 case _.WoD.VIEW.MY_HEROES:
-                    await _.WoDWorldDb.onMeineHeldenAnsicht(myDocument);
+                    await _.WoDWorldDb.onMeineHeldenAnsicht(doc);
                     break;
                 case _.WoD.VIEW.SKILL:
-                    await _.WoDSkillsDb.onSkillPage(myDocument);
+                    await _.WoDSkillsDb.onSkillPage(doc);
                     break;
             }
         }
@@ -1846,14 +1851,29 @@ class demawiRepository {
         }
 
         static nextDungeonTimeDirty(win, doc) {
-            const nextDungeonTime = _.WoD.getNaechsteDungeonZeit(false, doc);
-            if (!nextDungeonTime) return;
+            if (!this.nextDungeonTimeEarly) return;
             const now = new Date().getTime();
-            if (now > nextDungeonTime) {
+            let warning;
+
+            if (now > this.nextDungeonTimeReal) {
+                warning = "Der Dungeon-Run hat bereits stattgefunden!";
+            } else {
+                const nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
+                const nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
+                if (now > this.nextDungeonTimeEarly) {
+                    if (nextDungeonTimeEarly === nextDungeonTimeReal) {
+                        warning = "Der Dungeon-Run hat bereits stattgefunden!";
+                    } else {
+                        warning = "Der Dungeon-Run hat evtl. bereits stattgefunden!"; // falls woanders auf den Button gedrückt wurde.
+                    }
+                }
+            }
+
+            if (warning) {
                 const elem = doc.getElementById("gadgetNextdungeonTime");
                 if (!elem.parentElement.getElementsByClassName("outdatedMarker").length) {
                     const div = doc.createElement("div");
-                    div.innerHTML = "Der Dungeon-Run hat bereits stattgefunden!";
+                    div.innerHTML = warning;
                     div.style.color = "red";
                     div.className = "outdatedMarker";
                     elem.parentElement.append(div);

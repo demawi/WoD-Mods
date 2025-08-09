@@ -511,6 +511,7 @@
             } else if (!this.hasChange_UI_Server && !this.hasChange_UI_Loadout_VGConfig) {
                 this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
                 this.applyUi2Loadout2Server.style.opacity = this.notPreferredOpacity;
+                this.applyUi2Loadout2Server.style.display = "none";
                 this.applyUi2Loadout2Server.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             } else {
                 this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
@@ -528,6 +529,7 @@
             }
             if (this.hasChange_UI_CurrentLoadout_VGConfig) { // eigentlich sollte es hier this.hasChange_UI_Server_VGConfig heißen!?
                 this.applyUi2ServerButton.innerHTML = this.marker_Warn + " Anwenden " + this.marker_Right;
+                this.applyUi2ServerButton.style.opacity = this.notPreferredOpacity;
                 this.applyUi2ServerButton.title = "Gemachte Änderungen von der Oberfläche auf den Server übernehmen\n" + this.marker_Warn + ": Änderungen an der VG-Konfig werden somit nicht gespeichert!";
             } else {
                 this.applyUi2ServerButton.innerHTML = "Anwenden " + this.marker_Right;
