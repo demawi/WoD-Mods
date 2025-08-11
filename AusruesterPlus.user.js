@@ -82,38 +82,47 @@
                 } else {
                     const heroId = new URL(curTr.querySelector("a").href).searchParams.get("id");
                     const myWorld = _.WoD.getMyWorld();
-                    const myEquip = await EquipConfig.loadIt(heroId, myWorld);
+                    const equipConfigs = await EquipConfig.loadIt(heroId, myWorld);
                     const tdName = document.createElement("td");
                     curTr.append(tdName);
-                    if (myEquip && myEquip.current) tdName.innerHTML = myEquip.current;
-                    const tdTime = document.createElement("td");
-                    curTr.append(tdTime);
-                    if (myEquip && myEquip.ts) {
-                        const myEquipTs = myEquip.ts;
+                    if (equipConfigs && equipConfigs.current) tdName.innerHTML = equipConfigs.current;
+                    const timeCheck = document.createElement("td");
+                    curTr.append(timeCheck);
+                    if (!equipConfigs) continue;
+                    const myEquipTs = equipConfigs.ts;
+                    let tooltip = "";
+                    if (myEquipTs) {
                         const hoursExpired = Math.round((new Date().getTime() - myEquipTs) / 360000) / 10;
-                        tdTime.title = "Vor: " + hoursExpired + "h " + " (Letzter Ausrüstungs-Check: " + _.util.formatDateAndTime(myEquipTs) + ")";
+                        tooltip = "Letzter Check: <b>" + hoursExpired + "h</b> " + " (" + _.util.formatDateAndTime(myEquipTs) + ")";
 
-                        const checkMode = myEquip.dirtyMode || EquipConfig.CHECK_MODE.EVERY_RUN;
+                        const checkMode = equipConfigs.dirtyMode || EquipConfig.CHECK_MODE.EVERY_RUN;
                         if (checkMode.startsWith(EquipConfig.CHECK_MODE.HOURS)) {
                             const hours = checkMode.split(":")[1];
-                            tdTime.title += "\n\nCheckMode: " + hours + " Stunden (Nach " + hours + " Stunden soll die Ausrüstung geprüft werden)";
+                            //tooltip += "<br><br>CheckMode: " + hours + " Stunden (Nach " + hours + " Stunden soll die Ausrüstung geprüft werden)";
                         } else {
                             switch (checkMode) {
                                 case EquipConfig.CHECK_MODE.EVERY_RUN:
-                                    tdTime.title += "\n\nCheckMode: Dungeon-Run (Nach jedem Dungeon-Run soll die Ausrüstung geprüft werden)";
+                                    //tooltip += "<br><br>CheckMode: Dungeon-Run (Nach jedem Dungeon-Run soll die Ausrüstung geprüft werden)";
                                     break;
                                 case EquipConfig.CHECK_MODE.NONE:
-                                    tdTime.title += "\n\nCheckMode: ist aus";
+                                    //tooltip += "<br><br>CheckMode: ist aus";
                                     break;
                             }
                         }
-                        tdTime.style.cursor = "pointer";
+                        timeCheck.style.cursor = "pointer";
                         const heldenInfo = alleHeldenInfo[heroId];
-                        const equipIsExpired = await EquipConfig.isDirty(myEquip, heldenInfo.nextDungeonTime)
+                        const equipIsExpired = await EquipConfig.isDirty(equipConfigs, heldenInfo.nextDungeonTime)
                         if (equipIsExpired !== undefined) {
-                            tdTime.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? " ⚠️ <sup>" + hoursExpired + "h</sup>" : " ✓");
+                            timeCheck.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? "⚠️ <sup>" + hoursExpired + "h</sup>" : "");
                         }
                     }
+                    if (equipConfigs.curErrors) {
+                        if (tooltip.length > 0) tooltip += "<br><br>";
+                        tooltip += _.UI.SIGNS.ERROR + "<br>" + Object.values(equipConfigs.curErrors).join("<br>");
+                        timeCheck.innerHTML += _.UI.SIGNS.ERROR;
+                    }
+                    if (timeCheck.innerHTML === "") timeCheck.innerHTML = "✓";
+                    if (tooltip !== "") _.WoD.addTooltip(timeCheck, tooltip);
                 }
             }
         }
@@ -1126,7 +1135,10 @@
 
         static async isUptodate() {
             // Das aktuelle Loadout fehlerfrei
-            if (!ControlBar.hasErrors()) EquipConfig.setCurrentTimestamps(true);
+            if (!ControlBar.hasErrors()) {
+                await EquipConfig.setCurrentTimestamps(false);
+                await EquipConfig.setErrors(undefined, true);
+            } else await EquipConfig.setErrors(ControlBar.errors, true);
         }
 
         /**
@@ -1316,6 +1328,12 @@
         static async setCurrentTimestamps(directSave) {
             this.#equipConfigs.ts = new Date().getTime();
             this.#equipConfigs.next = _.WoD.getNaechsteDungeonZeit(true);
+            if (directSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
+        }
+
+        static async setErrors(errors, directSave) {
+            if (errors) this.#equipConfigs.curErrors = errors;
+            else delete this.#equipConfigs.curErrors;
             if (directSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
         }
 
