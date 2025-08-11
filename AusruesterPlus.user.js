@@ -85,7 +85,15 @@
                     const equipConfigs = await EquipConfig.loadIt(heroId, myWorld);
                     const tdName = document.createElement("td");
                     curTr.append(tdName);
-                    if (equipConfigs && equipConfigs.current) tdName.innerHTML = equipConfigs.current;
+                    if (equipConfigs && equipConfigs.current) {
+                        const aHref = document.createElement("a");
+                        const url = new URL("/wod/spiel/hero/items.php", document.baseURI);
+                        url.searchParams.append("view", "gear");
+                        url.searchParams.append("session_hero_id", heroId);
+                        aHref.innerHTML = equipConfigs.current;
+                        aHref.href = url;
+                        tdName.append(aHref);
+                    }
                     const timeCheck = document.createElement("td");
                     curTr.append(timeCheck);
                     if (!equipConfigs) continue;
