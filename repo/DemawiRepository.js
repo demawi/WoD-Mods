@@ -1823,16 +1823,15 @@ class demawiRepository {
 
     static MyMod = class MyMod {
 
-        static nextDungeonTimeEarly;
-        static nextDungeonTimeReal;
+        static #nextDungeonTimeEarly;
+        static #nextDungeonTimeReal;
+        static #everyPageRuns;
 
-        /**
-         * Wird aktuell nur für das MainFrame aufgerufen nicht für Popups.
-         * Deswegen macht es aktuell auch noch keinen Sinn
-         */
         static async startMod(win, doc) {
-            this.nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
-            this.nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
+            for (const runnable of Object.values(this.#everyPageRuns)) {
+                eval(runnable);
+            }
+            this.handleNextDungeon(win, doc);
             const view = _.WoD.getView(win);
             win.console.log("[WoD] MAIN_FRAME: " + view);
             await _.WoDWorldDb.placeSeasonElem(doc);
@@ -1846,21 +1845,46 @@ class demawiRepository {
             }
         }
 
+        static activate(id) {
+            _.WindowManager.mark("MyMod_" + id, true, _.WindowManager.getRootWindow());
+        }
+
+        static isActivated(id) {
+            return _.WindowManager.isMarked("MyMod_" + id);
+        }
+
+        static onEveryPage(id, execFn) {
+            const everyPageRuns = _.WindowManager.getMark("MyModRunnables", _.WindowManager.getRootWindow());
+            everyPageRuns[id] = "(" + execFn.toString() + ")()";
+        }
+
+        static handleNextDungeon(win, doc) {
+            const nextDungeonSpan = doc.querySelector("#gadgetNextdungeonTime");
+            if (nextDungeonSpan) {
+                this.nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
+                this.nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
+                if (this.isActivated("equipper")) {
+                    const dungeonId = nextDungeonSpan.parentElement.querySelector("div[id^='CombatDungeonConfigSelector']").id.split("|")[1];
+                    console.log("CURRENT_DUNGEON_ID: " + dungeonId);
+                }
+            }
+        }
+
         static async revisit(win, doc, evt) {
             this.nextDungeonTimeDirty(win, doc);
         }
 
         static nextDungeonTimeDirty(win, doc) {
-            if (!this.nextDungeonTimeEarly) return;
+            if (!this.#nextDungeonTimeEarly) return;
             const now = new Date().getTime();
             let warning;
 
-            if (now > this.nextDungeonTimeReal) {
+            if (now > this.#nextDungeonTimeReal) {
                 warning = "Der Dungeon-Run hat bereits stattgefunden!";
             } else {
                 const nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
                 const nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
-                if (now > this.nextDungeonTimeEarly) {
+                if (now > this.#nextDungeonTimeEarly) {
                     if (nextDungeonTimeEarly === nextDungeonTimeReal) {
                         warning = "Der Dungeon-Run hat bereits stattgefunden!";
                     } else {
@@ -1885,6 +1909,9 @@ class demawiRepository {
             const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
             const indexedDb = _.WoDStorages.initWodDbProxy("wodDBMain", "___", messengerPromise);
             await messengerPromise;
+
+            this.#everyPageRuns = {};
+            _.WindowManager.mark("MyModRunnables", this.#everyPageRuns, _.WindowManager.getRootWindow());
         }
 
     }

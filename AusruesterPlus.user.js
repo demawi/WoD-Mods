@@ -35,6 +35,10 @@
             if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
             demawiRepository.startMod();
+            await _.MyMod.activate("equipper");
+            _.MyMod.onEveryPage("equipper", function() {
+                console.log("Im HERE!!!!");
+            });
 
             switch (_.WoD.getView()) {
                 case _.WoD.VIEW.ITEMS_GEAR:
@@ -127,7 +131,7 @@
                     if (equipConfigs.curErrors) {
                         if (tooltip.length > 0) tooltip += "<br><br>";
                         tooltip += _.UI.SIGNS.ERROR + "<br>" + Object.values(equipConfigs.curErrors).join("<br>");
-                        timeCheck.innerHTML += _.UI.SIGNS.ERROR;
+                        timeCheck.innerHTML = _.UI.SIGNS.ERROR + timeCheck.innerHTML;
                     }
                     if (timeCheck.innerHTML === "") timeCheck.innerHTML = "✓";
                     if (tooltip !== "") _.WoD.addTooltip(timeCheck, tooltip);
