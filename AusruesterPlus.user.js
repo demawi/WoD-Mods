@@ -35,10 +35,7 @@
             if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
             demawiRepository.startMod();
-            await _.MyMod.activate("equipper");
-            _.MyMod.onEveryPage("equipper", function() {
-                console.log("Im HERE!!!!");
-            });
+            Mod.onEveryPage();
 
             switch (_.WoD.getView()) {
                 case _.WoD.VIEW.ITEMS_GEAR:
@@ -50,10 +47,37 @@
             }
         }
 
+        static onEveryPage() {
+            _.MyMod.onEveryPage("equipper", async function () {
+                const heroId = _.WoD.getMyHeroId(doc);
+                const myWorld = _.WoD.getMyWorld(doc);
+                const nextDungeonSpan = doc.querySelector("#gadgetNextdungeonTime");
+                if (nextDungeonSpan) {
+                    const myEquipCfg = await _.WoDStorages.getCreateObjectStore("equipHero").getValue(myWorld + heroId);
+                    const currentCfg = myEquipCfg.current;
+                    if (currentCfg) {
+                        const combatConfigElem = nextDungeonSpan.parentElement.querySelector("div[id^='CombatDungeonConfigSelector']");
+                        const dungeonId = combatConfigElem.id.split("|")[1];
+                        combatConfigElem.insertBefore(doc.createTextNode("Verhalten: "), combatConfigElem.querySelector("a"));
+                        const myElem = doc.createElement("div");
+                        nextDungeonSpan.parentElement.append(myElem);
+                        myElem.append(doc.createTextNode("Ausrüstung: "));
+                        const aHref = document.createElement("a");
+                        const url = new URL("/wod/spiel/hero/items.php", document.baseURI);
+                        url.searchParams.append("view", "gear");
+                        url.searchParams.append("session_hero_id", heroId);
+                        aHref.innerHTML = currentCfg;
+                        aHref.href = url;
+                        myElem.append(aHref);
+                    }
+                }
+
+            });
+        }
+
         static async #initDb() {
 
         }
-
     }
 
     class Ausruester {
@@ -192,8 +216,6 @@
 
         static async init() {
             const _this = this;
-
-            _.Libs.addCSS("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css");
 
             const panel = document.createElement("div");
             panel.style.textAlign = "right";

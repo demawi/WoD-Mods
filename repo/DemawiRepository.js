@@ -1764,14 +1764,43 @@ class demawiRepository {
      */
     static IFrameCapture = class IFrameCapture {
 
+        static addLoadingIndicator(win, doc) {
+            const loadingWrapper = doc.createElement("div");
+            loadingWrapper.style.position = "fixed";
+            loadingWrapper.style.top = "40px";
+            loadingWrapper.style.left = 0;
+            loadingWrapper.style.right = 0;
+            loadingWrapper.style.margin = "auto";
+            loadingWrapper.style.width = "20px";
+            loadingWrapper.style.height = "20px";
+            loadingWrapper.style.display = "none";
+
+            loadingWrapper.style.overflow = "hidden";
+            loadingWrapper.style.zIndex = "10000";
+
+            const loadingIndicator = _.UI.createSpinner();
+            loadingWrapper.append(loadingIndicator);
+            doc.body.append(loadingWrapper);
+            return loadingWrapper;
+        }
+
         static async captureIt(iframeOrPopup2Capture, onLoadFn, onRevisitFn, isPopup) {
-            const captureFn = async function (evt) {
+            const _this = this;
+            const captureLoadFn = async function (evt) {
                 const win = isPopup ? iframeOrPopup2Capture : iframeOrPopup2Capture.contentWindow;
+                const doc = win.document;
+                _.Libs.addCSSDirect("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css", doc);
+                const loadingIndicator = _this.addLoadingIndicator(win, win.document); // preloaded
                 if (!isPopup) {
                     // Titel und Url ins Hauptfenster übernehmen
                     document.title = win.document.title; // rootDocument!
+
+                    win.addEventListener("beforeunload", function () {
+                        console.log("ADD INDICATOR");
+                        loadingIndicator.style.display = "";
+                    });
                     win.addEventListener("unload", function () {
-                        console.clear();
+                        //console.clear();
                         setTimeout(function () {
                             const newUrl = win.location.href;
                             window.history.replaceState({}, "", newUrl); // rootWindow
@@ -1781,7 +1810,7 @@ class demawiRepository {
                     // Da wir beim Popup direkt auf dem Window den load-Eventlistener haben, wird dieser nach einem unload abgeräumt
                     win.addEventListener("unload", function () {
                         setTimeout(function () {
-                            win.addEventListener("load", captureFn);
+                            win.addEventListener("load", captureLoadFn);
                         }, 0);
                     });
                 }
@@ -1817,7 +1846,7 @@ class demawiRepository {
                 });
                 await onLoadFn(win, win.document, evt);
             };
-            iframeOrPopup2Capture.addEventListener("load", captureFn);
+            iframeOrPopup2Capture.addEventListener("load", captureLoadFn);
         }
     }
 
@@ -1829,6 +1858,7 @@ class demawiRepository {
 
         static async startMod(win, doc) {
             for (const runnable of Object.values(this.#everyPageRuns)) {
+                // console.log("RUN", runnable);
                 eval(runnable);
             }
             this.handleNextDungeon(win, doc);
@@ -1845,14 +1875,10 @@ class demawiRepository {
             }
         }
 
-        static activate(id) {
-            _.WindowManager.mark("MyMod_" + id, true, _.WindowManager.getRootWindow());
-        }
-
-        static isActivated(id) {
-            return _.WindowManager.isMarked("MyMod_" + id);
-        }
-
+        /**
+         * Es muss eine isolierte Funktion übergeben werden, diese wird im MyMod.startMod - Kontext ausgeführt.
+         * Es muss somit "win" und "doc" verwendet werden.
+         */
         static onEveryPage(id, execFn) {
             const everyPageRuns = _.WindowManager.getMark("MyModRunnables", _.WindowManager.getRootWindow());
             everyPageRuns[id] = "(" + execFn.toString() + ")()";
@@ -1863,10 +1889,6 @@ class demawiRepository {
             if (nextDungeonSpan) {
                 this.nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
                 this.nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
-                if (this.isActivated("equipper")) {
-                    const dungeonId = nextDungeonSpan.parentElement.querySelector("div[id^='CombatDungeonConfigSelector']").id.split("|")[1];
-                    console.log("CURRENT_DUNGEON_ID: " + dungeonId);
-                }
             }
         }
 
@@ -2055,42 +2077,42 @@ class demawiRepository {
         }
 
         static getItemIndexDb() {
-            return this.#getCreateObjectStore("itemIndex", "id");
+            return this.getCreateObjectStore("itemIndex", "id");
         }
 
         static getItemDb() {
-            return this.#getCreateObjectStore("item", "id");
+            return this.getCreateObjectStore("item", "id");
         }
 
         static getItemSourcesDb() {
-            return this.#getCreateObjectStore("itemSources", "id");
+            return this.getCreateObjectStore("itemSources", "id");
         }
 
         static getLootDb() {
-            return this.#getCreateObjectStore("itemLoot", "id");
+            return this.getCreateObjectStore("itemLoot", "id");
         }
 
         static getSettingsDb() {
-            return this.#getCreateObjectStore("settings", "name");
+            return this.getCreateObjectStore("settings", "name");
         }
 
         static getSkillsDb() {
-            return this.#getCreateObjectStore("skill", "id");
+            return this.getCreateObjectStore("skill", "id");
         }
 
         /**
          * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
          */
         static getLocationDb() {
-            return this.#getCreateObjectStore("location", "name");
+            return this.getCreateObjectStore("location", "name");
         }
 
         static getSkillsSourceDb() {
-            return this.#getCreateObjectStore("skillSources", "id");
+            return this.getCreateObjectStore("skillSources", "id");
         }
 
         static getWorldDb() {
-            return this.#getCreateObjectStore("world", "id");
+            return this.getCreateObjectStore("world", "id");
         }
 
         /**
@@ -2098,13 +2120,13 @@ class demawiRepository {
          * können über diese Datenbank spezifiziert werden.
          */
         static getSkillsUnknownDb() {
-            return this.#getCreateObjectStore("skillUnknown", "id");
+            return this.getCreateObjectStore("skillUnknown", "id");
         }
 
         /**
          * Liefert den Object-Store, wenn er noch nicht existiert, wird er angelegt.
          */
-        static #getCreateObjectStore(name, key, indizes) {
+        static getCreateObjectStore(name, key, indizes) {
             return this.getWodDb().createObjectStorage(name, key, indizes);
         }
 
@@ -4152,15 +4174,21 @@ class demawiRepository {
         }
 
         static addCSS(url) {
-            if (this.#alreadyLoaded[url]) return;
-            const result = document.createElement("link");
+            let searchUrl = url;
+            const idx = searchUrl.indexOf("?");
+            if (idx > -1) searchUrl = searchUrl.substring(0, idx);
+            if (this.#alreadyLoaded[searchUrl]) return;
+            this.addCSSDirect(url);
+            this.#alreadyLoaded[searchUrl] = result;
+        }
+
+        static addCSSDirect(url, doc) {
+            doc = doc || document;
+            const result = doc.createElement("link");
             result.rel = "stylesheet";
             result.type = "text/css";
             result.href = url;
-            const idx = url.indexOf("?");
-            if (idx > -1) url = url.substring(0, idx);
-            this.#alreadyLoaded[url] = result;
-            document.head.append(result);
+            doc.head.append(result);
         }
 
         static removeCSS(url) {
