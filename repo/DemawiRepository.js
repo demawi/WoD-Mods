@@ -4178,8 +4178,7 @@ class demawiRepository {
             const idx = searchUrl.indexOf("?");
             if (idx > -1) searchUrl = searchUrl.substring(0, idx);
             if (this.#alreadyLoaded[searchUrl]) return;
-            this.addCSSDirect(url);
-            this.#alreadyLoaded[searchUrl] = result;
+            this.#alreadyLoaded[searchUrl] = this.addCSSDirect(url);
         }
 
         static addCSSDirect(url, doc) {
@@ -4189,6 +4188,7 @@ class demawiRepository {
             result.type = "text/css";
             result.href = url;
             doc.head.append(result);
+            return result;
         }
 
         static removeCSS(url) {
