@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.8.16
+// @version        0.8.17
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
@@ -28,6 +28,7 @@
     const _ = demawiRepository;
 
     class Mod {
+        static modname = "AusrüsterPlus";
         static dbname = "wodDB";
 
         static async startMod() {
@@ -35,6 +36,7 @@
             if (!indexedDb) return;
             await MyStorage.initMyStorage(indexedDb);
             demawiRepository.startMod();
+            Mod.onEveryPage();
 
             switch (_.WoD.getView()) {
                 case _.WoD.VIEW.ITEMS_GEAR:
@@ -46,22 +48,158 @@
             }
         }
 
+        static onEveryPage() {
+            _.MyMod.onEveryPage("equipper", async function () {
+                const heroId = _.WoD.getMyHeroId(doc);
+                const myWorld = _.WoD.getMyWorld(doc);
+                const nextDungeonSpan = doc.querySelector("#gadgetNextdungeonTime");
+                if (nextDungeonSpan) {
+                    const myEquipCfg = await _.WoDStorages.getCreateObjectStore("equipHero").getValue(myWorld + heroId);
+                    const currentCfg = myEquipCfg.current;
+                    if (currentCfg) {
+                        const combatConfigElem = nextDungeonSpan.parentElement.querySelector("div[id^='CombatDungeonConfigSelector']");
+                        const dungeonId = combatConfigElem.id.split("|")[1];
+                        combatConfigElem.insertBefore(doc.createTextNode("Verhalten: "), combatConfigElem.querySelector("a"));
+                        const myElem = doc.createElement("div");
+                        nextDungeonSpan.parentElement.append(myElem);
+                        myElem.append(doc.createTextNode("Ausrüstung: "));
+                        const aHref = document.createElement("a");
+                        const url = new URL("/wod/spiel/hero/items.php", document.baseURI);
+                        url.searchParams.append("view", "gear");
+                        url.searchParams.append("session_hero_id", heroId);
+                        aHref.innerHTML = currentCfg;
+                        aHref.href = url;
+                        myElem.append(aHref);
+                    }
+                }
+
+            });
+        }
+
         static async #initDb() {
 
         }
-
     }
 
     class Ausruester {
 
         static async start() {
+            await MySettings.getFresh();
+            _.WoDUI.addTitleButtonBar([
+                {
+                    button: _.UI.createButton(" ↩"),
+                    content: undefined,
+                },
+                {
+                    button: _.UI.createButton(" ⚙"),
+                    content: SettingsView.getSettingsView,
+                }
+            ]);
             await GemHandler.init();
             await EquipConfig.init();
             await ControlBar.init();
             await SelectOptimizer.init();
             await EquipConfig.isUptodate();
+            await SettingsView.init();
         }
 
+    }
+
+    class SettingsView {
+        static async getSettingsView() {
+            const settings = await MySettings.get();
+
+            const settingTable = document.createElement("div");
+
+            let tableContent = [];
+            tableContent.push(["Buttons immer sichtbar: ", _.UI.createCheckBox(() => settings.get(MySettings.SETTING.BUTTONS_ALWAYS_VISIBLE),
+                async function (value) {
+                    settings.set(MySettings.SETTING.BUTTONS_ALWAYS_VISIBLE, value);
+                    await settings.save();
+                })]);
+            settingTable.append(_.UI.createTable(tableContent));
+            tableContent = [];
+
+            _.SettingsPage.addHeader(settingTable, "Pro Held", "");
+            const equipCfg = await EquipConfig.get();
+
+            const elements = document.createElement("div");
+
+            const updateElements = function () {
+                elements.style.display = equipCfg.deactivatedSlots ? "" : "none";
+            }
+            tableContent.push(["Slot Deaktivierung: ", _.UI.createCheckBox(() => !!equipCfg.deactivatedSlots,
+                async function (value) {
+                    if (value) equipCfg.deactivatedSlots = {};
+                    else delete equipCfg.deactivatedSlots;
+                    await MyStorage.equipHero.setValue(equipCfg);
+                    updateElements();
+                })]);
+            updateElements();
+            const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+            let lastSlotName;
+            for (const [slotName, idx] of FormHandler.getAllExistingSlots()) {
+                if (lastSlotName === slotName) continue;
+                lastSlotName = slotName;
+                const slotElem = document.createElement("span");
+                slotElem.innerHTML = slotName;
+                slotElem.style.cursor = "pointer";
+                if (elements.children.length > 0) elements.append(document.createElement("br"));
+                elements.append(slotElem);
+                let slotIsDeactivated = deactivatedSlots[slotName] || false;
+                let updateColor = function () {
+                    if (slotIsDeactivated) {
+                        slotElem.innerHTML = slotName + " <img src='" + _.UI.WOD_SIGNS.NO + "' />";
+                        //slotElem.style.color = _.UI.COLORS.RED;
+                    } else {
+                        slotElem.innerHTML = slotName + " <img src='" + _.UI.WOD_SIGNS.YES + "' />";
+                        //slotElem.style.color = _.UI.COLORS.GREEN;
+                    }
+                }
+                slotElem.onclick = async function () {
+                    slotIsDeactivated = !slotIsDeactivated;
+                    const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+                    deactivatedSlots[slotName] = slotIsDeactivated;
+                    await MyStorage.equipHero.setValue(equipCfg);
+                    updateColor();
+                }
+                updateColor();
+            }
+            tableContent.push(["", elements]);
+
+            settingTable.append(_.UI.createTable(tableContent));
+            return settingTable;
+        }
+
+        static async init() {
+            if (EquipConfig.withSlotDeactivation()) {
+                const equipCfg = await EquipConfig.get();
+
+                const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+                const theForm = FormHandler.getTheForm();
+                const allSlots = FormHandler.getAllExistingSlots();
+                let lastSlotName;
+                for (const [slotName, slotIdx] of allSlots) {
+                    //if (lastSlotName === slotName) continue;
+                    lastSlotName = slotName;
+                    let slotIsDeactivated = deactivatedSlots[slotName] || false;
+                    const selectInput = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
+
+                    let slotHandler;
+                    const firstTD = selectInput.parentElement.parentElement.children[0];
+                    slotHandler = firstTD;
+
+                    let updateColor = function () {
+                        if (slotIsDeactivated) {
+                            slotHandler.style.color = _.UI.COLORS.RED;
+                        } else {
+                            slotHandler.style.color = "white";
+                        }
+                    }
+                    updateColor();
+                }
+            }
+        }
     }
 
     class MeineHeldenView {
@@ -82,38 +220,55 @@
                 } else {
                     const heroId = new URL(curTr.querySelector("a").href).searchParams.get("id");
                     const myWorld = _.WoD.getMyWorld();
-                    const myEquip = await EquipConfig.loadIt(heroId, myWorld);
+                    const equipConfigs = await EquipConfig.loadIt(heroId, myWorld);
                     const tdName = document.createElement("td");
                     curTr.append(tdName);
-                    if (myEquip && myEquip.current) tdName.innerHTML = myEquip.current;
-                    const tdTime = document.createElement("td");
-                    //curTr.append(tdTime); // TODO: erstmal noch deaktiviert
-                    if (myEquip && myEquip.ts) {
-                        const myEquipTs = myEquip.ts;
+                    if (equipConfigs && equipConfigs.current) {
+                        const aHref = document.createElement("a");
+                        const url = new URL("/wod/spiel/hero/items.php", document.baseURI);
+                        url.searchParams.append("view", "gear");
+                        url.searchParams.append("session_hero_id", heroId);
+                        aHref.innerHTML = equipConfigs.current;
+                        aHref.href = url;
+                        tdName.append(aHref);
+                    }
+                    const timeCheck = document.createElement("td");
+                    curTr.append(timeCheck);
+                    if (!equipConfigs) continue;
+                    const myEquipTs = equipConfigs.ts;
+                    let tooltip = "";
+                    if (myEquipTs) {
                         const hoursExpired = Math.round((new Date().getTime() - myEquipTs) / 360000) / 10;
-                        tdTime.title = "Vor: " + hoursExpired + "h " + " (Letzte Änderung am Loadout: " + _.util.formatDateAndTime(myEquipTs) + ")";
+                        tooltip = "Letzter Check: <b>" + hoursExpired + "h</b> " + " (" + _.util.formatDateAndTime(myEquipTs) + ")";
 
-                        const dirtyMode = myEquip.dirtyMode || EquipConfig.DIRTY_MODE.EVERY_RUN;
-                        if (dirtyMode.startsWith(EquipConfig.DIRTY_MODE.HOURS)) {
-                            const hours = dirtyMode.split(":")[1];
-                            tdTime.title += "\n\nDirtyMode: " + hours + " Stunden (Nach " + hours + " Stunden soll die Ausrüstung geprüft werden)";
+                        const checkMode = equipConfigs.dirtyMode || EquipConfig.CHECK_MODE.EVERY_RUN;
+                        if (checkMode.startsWith(EquipConfig.CHECK_MODE.HOURS)) {
+                            const hours = checkMode.split(":")[1];
+                            //tooltip += "<br><br>CheckMode: " + hours + " Stunden (Nach " + hours + " Stunden soll die Ausrüstung geprüft werden)";
                         } else {
-                            switch (dirtyMode) {
-                                case EquipConfig.DIRTY_MODE.EVERY_RUN:
-                                    tdTime.title += "\n\nDirtyMode: Dungeon-Run (Nach jedem Dungeon-Run soll die Ausrüstung geprüft werden)";
+                            switch (checkMode) {
+                                case EquipConfig.CHECK_MODE.EVERY_RUN:
+                                    //tooltip += "<br><br>CheckMode: Dungeon-Run (Nach jedem Dungeon-Run soll die Ausrüstung geprüft werden)";
                                     break;
-                                case EquipConfig.DIRTY_MODE.NONE:
-                                    tdTime.title += "\n\nDirtyMode: ist aus";
+                                case EquipConfig.CHECK_MODE.NONE:
+                                    //tooltip += "<br><br>CheckMode: ist aus";
                                     break;
                             }
                         }
-                        tdTime.style.cursor = "pointer";
+                        timeCheck.style.cursor = "pointer";
                         const heldenInfo = alleHeldenInfo[heroId];
-                        const equipIsExpired = await EquipConfig.isDirty(myEquip, heldenInfo.nextDungeonTime)
+                        const equipIsExpired = await EquipConfig.isDirty(equipConfigs, heldenInfo.nextDungeonTime)
                         if (equipIsExpired !== undefined) {
-                            tdTime.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? " ⚠️ <sup>" + hoursExpired + "h</sup>" : " ✓");
+                            timeCheck.innerHTML += equipIsExpired === 0 ? " ?" : (equipIsExpired > 0 ? "⚠️ <sup>" + hoursExpired + "h</sup>" : "");
                         }
                     }
+                    if (equipConfigs.curErrors) {
+                        if (tooltip.length > 0) tooltip += "<br><br>";
+                        tooltip += _.UI.SIGNS.ERROR + "<br>" + Object.values(equipConfigs.curErrors).join("<br>");
+                        timeCheck.innerHTML = _.UI.SIGNS.ERROR + timeCheck.innerHTML;
+                    }
+                    if (timeCheck.innerHTML === "") timeCheck.innerHTML = "✓";
+                    if (tooltip !== "") _.WoD.addTooltip(timeCheck, tooltip);
                 }
             }
         }
@@ -172,14 +327,13 @@
         static async init() {
             const _this = this;
 
-            _.Libs.addCSS("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css");
-
             const panel = document.createElement("div");
             panel.style.textAlign = "right";
             this.loadoutNamePanel = document.createElement("div");
             this.loadoutNamePanel.title = "Das aktuelle Loadout, welches beim Neuladen der Seite verwendet wird";
             this.loadoutNamePanel.style.marginBottom = "2px";
             this.loadOutSelect = document.createElement("select");
+            this.loadOutSelect.style.minWidth = "100px";
 
             this.warningPanel = document.createElement("div");
             this.warningPanel.style.color = "#FF5555";
@@ -390,29 +544,38 @@
             const buttonPanel = document.createElement("span");
             selectPanel.style.position = "relative";
             selectPanel.append(buttonPanel);
-            buttonPanel.style.display = "inline-block";
-            buttonPanel.style.position = "absolute";
-            buttonPanel.style.width = "100%";
 
-            buttonPanel.style.textAlign = "left";
+            if (MySettings.isButtonsImmerSichtbar()) {
+                _this.newButton.style.display = "";
+                _this.renameButton.style.display = "";
+                _this.deleteButton.style.display = "";
+            } else {
+                buttonPanel.style.display = "inline-block";
+                buttonPanel.style.position = "absolute";
+                buttonPanel.style.width = "100%";
+                buttonPanel.style.textAlign = "left";
+                selectPanel.onmouseenter = function () {
+                    buttonPanel.style.top = (selectPanel.offsetHeight + 2) + "px";
+                    _this.newButton.style.display = "";
+                    _this.renameButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
+                    _this.deleteButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
+                }
+                const leaveFn = function () {
+                    _this.newButton.style.display = "none";
+                    _this.renameButton.style.display = "none";
+                    _this.deleteButton.style.display = "none";
+                };
+                this.loadOutSelect.onclick = leaveFn;
+                selectPanel.onmouseleave = leaveFn;
+                leaveFn();
+            }
+
+
             buttonPanel.append(this.newButton);
             buttonPanel.append(this.renameButton);
             buttonPanel.append(this.deleteButton);
             selectPanel.append(this.loadOutSelect);
-            selectPanel.onmouseenter = function () {
-                buttonPanel.style.top = (selectPanel.offsetHeight + 2) + "px";
-                _this.newButton.style.display = "";
-                _this.renameButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
-                _this.deleteButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
-            }
-            const leaveFn = function () {
-                _this.newButton.style.display = "none";
-                _this.renameButton.style.display = "none";
-                _this.deleteButton.style.display = "none";
-            };
-            this.loadOutSelect.onclick = leaveFn;
-            selectPanel.onmouseleave = leaveFn;
-            leaveFn();
+
 
             subpanel.append(this.activButton);
             subpanel.append(this.applyLoadout2ServerButton);
@@ -507,6 +670,11 @@
                 this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Überschreiben + Ausrüsten " + this.marker_Right;
                 this.applyUi2Loadout2Server.style.opacity = this.notPreferredOpacity;
                 this.applyUi2Loadout2Server.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
+            } else if (!this.hasChange_UI_Server && !this.hasChange_UI_Loadout_VGConfig) {
+                this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
+                this.applyUi2Loadout2Server.style.opacity = this.notPreferredOpacity;
+                this.applyUi2Loadout2Server.style.display = "none";
+                this.applyUi2Loadout2Server.title = "Angezeigte Ausrüstung im Loadout speichern und auch direkt ausrüsten. VGs werden entsprechend der hinterlegten Konfiguration automatisch befüllt!";
             } else {
                 this.applyUi2Loadout2Server.innerHTML = this.marker_Left + prefix + " Speichern + Ausrüsten " + this.marker_Right;
                 this.applyUi2Loadout2Server.style.opacity = prefix ? this.notPreferredOpacity : "";
@@ -523,6 +691,7 @@
             }
             if (this.hasChange_UI_CurrentLoadout_VGConfig) { // eigentlich sollte es hier this.hasChange_UI_Server_VGConfig heißen!?
                 this.applyUi2ServerButton.innerHTML = this.marker_Warn + " Anwenden " + this.marker_Right;
+                this.applyUi2ServerButton.style.opacity = this.notPreferredOpacity;
                 this.applyUi2ServerButton.title = "Gemachte Änderungen von der Oberfläche auf den Server übernehmen\n" + this.marker_Warn + ": Änderungen an der VG-Konfig werden somit nicht gespeichert!";
             } else {
                 this.applyUi2ServerButton.innerHTML = "Anwenden " + this.marker_Right;
@@ -555,6 +724,10 @@
 
         static errors = {};
         static DEBUG_ERROR_REPORTING = true;
+
+        static hasErrors() {
+            return Object.keys(this.errors).length > 0;
+        }
 
         static reportProblem(id, msg) {
             if (this.DEBUG_ERROR_REPORTING) console.warn("[" + id + "] Report problem: " + msg);
@@ -1077,10 +1250,14 @@
         static #serverEquipOhneVGs;
         static #serverEquipUniqueVgs;
 
-        static DIRTY_MODE = {
+        static CHECK_MODE = {
             EVERY_RUN: "eachRun", // jeden Run sollte die Konfig geprüft werden (DEFAULT)
             HOURS: "hours", // nach einer bestimmten Stundenzahl sollte die Konfig geprüft werden
             NONE: "none", // ausgeschaltet
+        }
+
+        static get() {
+            return this.#equipConfigs;
         }
 
         static async init() {
@@ -1113,11 +1290,27 @@
             }
         }
 
-        /**
-         * TODO: prüfen ob die Ausrüstung uptodate ist
-         */
+        static withSlotDeactivation() {
+            return this.#equipConfigs._deactivatedSlots;
+        }
+
+        static getSlotDeactivations() {
+            if (!this.#equipConfigs._deactivatedSlots) return {};
+            return this.#equipConfigs.deactivatedSlots;
+        }
+
+        static isSlotDeactivated(slotName) {
+            const deactivations = this.getSlotDeactivations();
+            if (!deactivations) return false;
+            return deactivations[slotName];
+        }
+
         static async isUptodate() {
             // Das aktuelle Loadout fehlerfrei
+            if (!ControlBar.hasErrors()) {
+                await EquipConfig.setCurrentTimestamps(false);
+                await EquipConfig.setErrors(undefined, true);
+            } else await EquipConfig.setErrors(ControlBar.errors, true);
         }
 
         /**
@@ -1128,22 +1321,22 @@
          */
         static async isDirty(myEquip, currentNextDungeonTime) {
             const lastSaved = myEquip.ts;
-            const dirtyMode = myEquip.dirtyMode || this.DIRTY_MODE.EVERY_RUN;
+            const dirtyMode = myEquip.dirtyMode || this.CHECK_MODE.EVERY_RUN;
             //console.log("AAAA", dirtyMode, myEquip);
-            if (dirtyMode.startsWith(this.DIRTY_MODE.HOURS)) {
+            if (dirtyMode.startsWith(this.CHECK_MODE.HOURS)) {
                 const hours = dirtyMode.split(":");
                 const result = (currentNextDungeonTime - lastSaved || 0) / 3600000 > hours;
                 return result ? 1 : -1;
             }
             switch (dirtyMode) {
-                case this.DIRTY_MODE.EVERY_RUN:
+                case this.CHECK_MODE.EVERY_RUN:
                     const nxtDngTimeOnSave = myEquip.next;
                     const result = this.isEquipTimeNonDirty(lastSaved, nxtDngTimeOnSave, currentNextDungeonTime);
                     //console.log("CHECKTIME", result, lastSaved, nxtDngTimeOnSave, currentNextDungeonTime)
                     if (result === true) return -1;
                     else if (result === false) return 1;
                     else return 0;
-                case this.DIRTY_MODE.NONE:
+                case this.CHECK_MODE.NONE:
                     return;
             }
         }
@@ -1160,11 +1353,12 @@
             if (nextDungeonTimeOnEquipSave) return this.#isSameDungeonInterval(nextDungeonTimeOnEquipSave, currentNextDungeonTime, 5);
             // nextDungeonTimeOnEquipSave ist leer, wenn zu dem Zeitpunkt des Ausrüstungsspeicherns kein Dungeon gesetzt war
             const diffInHours = (currentNextDungeonTime - equipSaveTime) / 3600000;
-            if (diffInHours < 7) return true;
+            if (diffInHours < 6.5) return true;
             if (diffInHours > 10) return false;
         }
 
         static async checkValidationOnEquip(slotName, initial) {
+            if (EquipConfig.isSlotDeactivated(slotName)) return;
             const loadout = await EquipConfig.getSelectedLoadout()
             if (!loadout) return;
 
@@ -1190,6 +1384,7 @@
         }
 
         static async checkValidationOnEquipSlot(loadOutEquip, slotName, slotIdx, initial) {
+            if (EquipConfig.isSlotDeactivated(slotName)) return;
             const [instanceId, itemName] = FormHandler.getSlotSelectedItemInformation(slotName, slotIdx);
             const wantedId = loadOutEquip[slotName] && loadOutEquip[slotName].id;
             const wantedName = loadOutEquip[slotName] && loadOutEquip[slotName].name;
@@ -1304,12 +1499,22 @@
             return this.#equipConfigs.loadouts;
         }
 
-        static async setCurrent(profileName, diretSave) {
-            this.#equipConfigs.current = profileName;
+        static async setCurrentTimestamps(directSave) {
             this.#equipConfigs.ts = new Date().getTime();
             this.#equipConfigs.next = _.WoD.getNaechsteDungeonZeit(true);
-            this.#equipConfigs.dirtyMode = this.DIRTY_MODE.EVERY_RUN;
-            if (diretSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
+            if (directSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
+        }
+
+        static async setErrors(errors, directSave) {
+            if (errors) this.#equipConfigs.curErrors = errors;
+            else delete this.#equipConfigs.curErrors;
+            if (directSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
+        }
+
+        static async setCurrent(profileName, directSave) {
+            this.#equipConfigs.current = profileName;
+            this.#equipConfigs.checkMode = this.CHECK_MODE.EVERY_RUN;
+            this.setCurrentTimestamps(directSave);
         }
 
         static async hasLoadout(loadoutName) {
@@ -1718,7 +1923,11 @@
             const vgs = VGKonfig.getDynamicVGs(loadout.vgs);
             console.log("APPLY_EQUIP", equip, vgs);
 
+            const slotDeactivations = EquipConfig.getSlotDeactivations();
+            console.log("Slot Deactivations", slotDeactivations);
+
             for (const [slotName, itemIds] of Object.entries(equip)) {
+                if (slotDeactivations[slotName]) continue;
                 const slotList = equipChangesId[slotName] = [];
                 if (Array.isArray(itemIds)) {
                     for (const itemId of itemIds) {
@@ -1729,6 +1938,7 @@
                 }
             }
             for (const [slotName, itemIds] of Object.entries(vgs)) {
+                if (slotDeactivations[slotName]) continue;
                 const slotList = equipChangesId[slotName] || (equipChangesId[slotName] = []);
                 if (Array.isArray(itemIds)) {
                     for (const itemId of itemIds) {
@@ -1785,6 +1995,7 @@
             }
 
             for (const slotName of this.getAllSlotNames()) {
+                if (slotDeactivations[slotName]) continue;
                 let idx = 0;
                 const wantedEquipIds = equipChangesId[slotName] || [];
                 for (const cur of wantedEquipIds) {
@@ -1887,6 +2098,33 @@
 
             return this._allVGItemStats[slotName];
         }
+    }
+
+    class MySettings {
+        static SETTING = {
+            BUTTONS_ALWAYS_VISIBLE: "buttonsAlwaysVisible",
+        }
+        static #settingsDef = {
+            modName: Mod.modname,
+            defaultSettings: {
+                [this.SETTING.BUTTONS_ALWAYS_VISIBLE]: false,
+            },
+        }
+
+        static #settingsHandler;
+
+        static async get() {
+            return this.#settingsHandler;
+        }
+
+        static async getFresh() {
+            return this.#settingsHandler = await _.Settings.getHandler(this.#settingsDef);
+        }
+
+        static isButtonsImmerSichtbar() {
+            return this.#settingsHandler.get(this.SETTING.BUTTONS_ALWAYS_VISIBLE);
+        }
+
     }
 
     class MyStorage {

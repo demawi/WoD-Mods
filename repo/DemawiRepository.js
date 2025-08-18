@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.8";
+    static version = "1.1.9";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1485,7 +1485,7 @@ class demawiRepository {
             }
             innerMainframe.addEventListener("load", rebuildPageOnce);
 
-            _.IFrameCapture.captureIt(innerMainframe, _.MyMod.startMod, _.MyMod.revisit);
+            _.IFrameCapture.captureIt(innerMainframe, (win, doc) => _.MyMod.startMod(win, doc), (win, doc) => _.MyMod.revisit(win, doc));
             innerMainframe.src = window.location.href;
         }
 
@@ -1764,12 +1764,40 @@ class demawiRepository {
      */
     static IFrameCapture = class IFrameCapture {
 
+        static addLoadingIndicator(win, doc) {
+            const loadingWrapper = doc.createElement("div");
+            loadingWrapper.style.position = "fixed";
+            loadingWrapper.style.top = "40px";
+            loadingWrapper.style.left = 0;
+            loadingWrapper.style.right = 0;
+            loadingWrapper.style.margin = "auto";
+            loadingWrapper.style.width = "20px";
+            loadingWrapper.style.height = "20px";
+            loadingWrapper.style.display = "none";
+
+            loadingWrapper.style.overflow = "hidden";
+            loadingWrapper.style.zIndex = "10000";
+
+            const loadingIndicator = _.UI.createSpinner();
+            loadingWrapper.append(loadingIndicator);
+            doc.body.append(loadingWrapper);
+            return loadingWrapper;
+        }
+
         static async captureIt(iframeOrPopup2Capture, onLoadFn, onRevisitFn, isPopup) {
-            const captureFn = async function (evt) {
+            const _this = this;
+            const captureLoadFn = async function (evt) {
                 const win = isPopup ? iframeOrPopup2Capture : iframeOrPopup2Capture.contentWindow;
+                const doc = win.document;
+                _.Libs.addCSSDirect("https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css", doc);
+                const loadingIndicator = _this.addLoadingIndicator(win, win.document); // preloaded
                 if (!isPopup) {
                     // Titel und Url ins Hauptfenster übernehmen
                     document.title = win.document.title; // rootDocument!
+
+                    win.addEventListener("beforeunload", function () {
+                        loadingIndicator.style.display = "";
+                    });
                     win.addEventListener("unload", function () {
                         console.clear();
                         setTimeout(function () {
@@ -1781,7 +1809,7 @@ class demawiRepository {
                     // Da wir beim Popup direkt auf dem Window den load-Eventlistener haben, wird dieser nach einem unload abgeräumt
                     win.addEventListener("unload", function () {
                         setTimeout(function () {
-                            win.addEventListener("load", captureFn);
+                            win.addEventListener("load", captureLoadFn);
                         }, 0);
                     });
                 }
@@ -1817,38 +1845,94 @@ class demawiRepository {
                 });
                 await onLoadFn(win, win.document, evt);
             };
-            iframeOrPopup2Capture.addEventListener("load", captureFn);
+            iframeOrPopup2Capture.addEventListener("load", captureLoadFn);
         }
     }
 
     static MyMod = class MyMod {
 
-        /**
-         * Wird aktuell nur für das MainFrame aufgerufen nicht für Popups.
-         * Deswegen macht es aktuell auch noch keinen Sinn
-         */
-        static async startMod(myWindow, myDocument) {
-            const view = _.WoD.getView(myWindow);
-            myWindow.console.log("[WoD] MAIN_FRAME: " + view);
-            await _.WoDWorldDb.placeSeasonElem(myDocument);
+        static #nextDungeonTimeEarly;
+        static #nextDungeonTimeReal;
+        static #everyPageRuns;
+
+        static async startMod(win, doc) {
+            for (const runnable of Object.values(this.#everyPageRuns)) {
+                // console.log("RUN", runnable);
+                eval(runnable);
+            }
+            this.handleNextDungeon(win, doc);
+            const view = _.WoD.getView(win);
+            win.console.log("[WoD] MAIN_FRAME: " + view);
+            await _.WoDWorldDb.placeSeasonElem(doc);
             switch (view) {
                 case _.WoD.VIEW.MY_HEROES:
-                    await _.WoDWorldDb.onMeineHeldenAnsicht(myDocument);
+                    await _.WoDWorldDb.onMeineHeldenAnsicht(doc);
                     break;
                 case _.WoD.VIEW.SKILL:
-                    await _.WoDSkillsDb.onSkillPage(myDocument);
+                    await _.WoDSkillsDb.onSkillPage(doc);
                     break;
             }
         }
 
-        static async revisit(win, doc, evt) {
+        /**
+         * Es muss eine isolierte Funktion übergeben werden, diese wird im MyMod.startMod - Kontext ausgeführt.
+         * Es muss somit "win" und "doc" verwendet werden.
+         */
+        static onEveryPage(id, execFn) {
+            const everyPageRuns = _.WindowManager.getMark("MyModRunnables", _.WindowManager.getRootWindow());
+            everyPageRuns[id] = "(" + execFn.toString() + ")()";
+        }
 
+        static handleNextDungeon(win, doc) {
+            const nextDungeonSpan = doc.querySelector("#gadgetNextdungeonTime");
+            if (nextDungeonSpan) {
+                this.nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
+                this.nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
+            }
+        }
+
+        static async revisit(win, doc, evt) {
+            this.nextDungeonTimeDirty(win, doc);
+        }
+
+        static nextDungeonTimeDirty(win, doc) {
+            if (!this.#nextDungeonTimeEarly) return;
+            const now = new Date().getTime();
+            let warning;
+
+            if (now > this.#nextDungeonTimeReal) {
+                warning = "Der Dungeon-Run hat bereits stattgefunden!";
+            } else {
+                const nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
+                const nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
+                if (now > this.#nextDungeonTimeEarly) {
+                    if (nextDungeonTimeEarly === nextDungeonTimeReal) {
+                        warning = "Der Dungeon-Run hat bereits stattgefunden!";
+                    } else {
+                        warning = "Der Dungeon-Run hat evtl. bereits stattgefunden!"; // falls woanders auf den Button gedrückt wurde.
+                    }
+                }
+            }
+
+            if (warning) {
+                const elem = doc.getElementById("gadgetNextdungeonTime");
+                if (!elem.parentElement.getElementsByClassName("outdatedMarker").length) {
+                    const div = doc.createElement("div");
+                    div.innerHTML = warning;
+                    div.style.color = "red";
+                    div.className = "outdatedMarker";
+                    elem.parentElement.append(div);
+                }
+            }
         }
 
         static async init() {
             const messengerPromise = _.CSProxy.getProxyFor("https://world-of-dungeons.de/wod/spiel/impressum/contact.php", false);
             const indexedDb = _.WoDStorages.initWodDbProxy("wodDBMain", "___", messengerPromise);
             await messengerPromise;
+
+            this.#everyPageRuns = {};
+            _.WindowManager.mark("MyModRunnables", this.#everyPageRuns, _.WindowManager.getRootWindow());
         }
 
     }
@@ -1936,6 +2020,27 @@ class demawiRepository {
 
     }
 
+    static SettingsPage = class {
+        static addHeader(settingTable, ueberschriftTxt, descTxt, infoTxt) {
+            const ueberschrift = document.createElement("h2");
+            ueberschrift.style.fontStyle = "italic";
+            ueberschrift.style.textDecoration = "underline";
+            ueberschrift.style.marginBottom = "2px";
+            ueberschrift.innerHTML = ueberschriftTxt;
+            if (infoTxt) {
+                ueberschrift.innerHTML += " 🛈";
+                ueberschrift.title = infoTxt;
+            }
+            settingTable.append(ueberschrift);
+            const description = document.createElement("div");
+            description.innerHTML = descTxt.replaceAll("\n", "<br>");
+            description.style.fontStyle = "italic";
+            description.style.fontSize = "12px";
+            description.style.marginBottom = "10px";
+            settingTable.append(description);
+        }
+    }
+
     /**
      * Hier finden sich gemeinsam genutzte Datenbanken und Datenoperation.
      *
@@ -1992,42 +2097,42 @@ class demawiRepository {
         }
 
         static getItemIndexDb() {
-            return this.#getCreateObjectStore("itemIndex", "id");
+            return this.getCreateObjectStore("itemIndex", "id");
         }
 
         static getItemDb() {
-            return this.#getCreateObjectStore("item", "id");
+            return this.getCreateObjectStore("item", "id");
         }
 
         static getItemSourcesDb() {
-            return this.#getCreateObjectStore("itemSources", "id");
+            return this.getCreateObjectStore("itemSources", "id");
         }
 
         static getLootDb() {
-            return this.#getCreateObjectStore("itemLoot", "id");
+            return this.getCreateObjectStore("itemLoot", "id");
         }
 
         static getSettingsDb() {
-            return this.#getCreateObjectStore("settings", "name");
+            return this.getCreateObjectStore("settings", "name");
         }
 
         static getSkillsDb() {
-            return this.#getCreateObjectStore("skill", "id");
+            return this.getCreateObjectStore("skill", "id");
         }
 
         /**
          * Informationen über die Locations (Dungeons, Schlachten). Z.B. Erkennung der Dungeonversion.
          */
         static getLocationDb() {
-            return this.#getCreateObjectStore("location", "name");
+            return this.getCreateObjectStore("location", "name");
         }
 
         static getSkillsSourceDb() {
-            return this.#getCreateObjectStore("skillSources", "id");
+            return this.getCreateObjectStore("skillSources", "id");
         }
 
         static getWorldDb() {
-            return this.#getCreateObjectStore("world", "id");
+            return this.getCreateObjectStore("world", "id");
         }
 
         /**
@@ -2035,13 +2140,13 @@ class demawiRepository {
          * können über diese Datenbank spezifiziert werden.
          */
         static getSkillsUnknownDb() {
-            return this.#getCreateObjectStore("skillUnknown", "id");
+            return this.getCreateObjectStore("skillUnknown", "id");
         }
 
         /**
          * Liefert den Object-Store, wenn er noch nicht existiert, wird er angelegt.
          */
-        static #getCreateObjectStore(name, key, indizes) {
+        static getCreateObjectStore(name, key, indizes) {
             return this.getWodDb().createObjectStorage(name, key, indizes);
         }
 
@@ -3200,10 +3305,11 @@ class demawiRepository {
         }
 
         /**
-         * @returns {string}
+         * @returns {number}
          */
-        static getNaechsteDungeonZeit(early) {
-            const timeString = this.getNaechsteDungeonZeitString(early);
+        static getNaechsteDungeonZeit(early, doc) {
+            doc = doc || document;
+            const timeString = this.getNaechsteDungeonZeitString(early, doc);
             if (!timeString) return;
             if (timeString.toLowerCase() === "sofort") return new Date().getTime();
             // TODO: wie ist das beim Tageswechsel?
@@ -3211,8 +3317,9 @@ class demawiRepository {
         }
 
         // Kann auch "Morgen 01:16" sein odera auch "sofort"
-        static getNaechsteDungeonZeitString(early) {
-            let elem = document.getElementById("gadgetNextdungeonTime");
+        static getNaechsteDungeonZeitString(early, doc) {
+            doc = doc || document;
+            let elem = doc.getElementById("gadgetNextdungeonTime");
             if (!elem) return;
             const curTime = elem.textContent;
             if (!early) return curTime;
@@ -4087,15 +4194,21 @@ class demawiRepository {
         }
 
         static addCSS(url) {
-            if (this.#alreadyLoaded[url]) return;
-            const result = document.createElement("link");
+            let searchUrl = url;
+            const idx = searchUrl.indexOf("?");
+            if (idx > -1) searchUrl = searchUrl.substring(0, idx);
+            if (this.#alreadyLoaded[searchUrl]) return;
+            this.#alreadyLoaded[searchUrl] = this.addCSSDirect(url);
+        }
+
+        static addCSSDirect(url, doc) {
+            doc = doc || document;
+            const result = doc.createElement("link");
             result.rel = "stylesheet";
             result.type = "text/css";
             result.href = url;
-            const idx = url.indexOf("?");
-            if (idx > -1) url = url.substring(0, idx);
-            this.#alreadyLoaded[url] = result;
-            document.head.append(result);
+            doc.head.append(result);
+            return result;
         }
 
         static removeCSS(url) {
@@ -4161,13 +4274,63 @@ class demawiRepository {
         }
     }
 
+    static WoDUI = class {
+        static addTitleButtonBar(buttonContentArray) {
+            const wodTitle = document.getElementsByTagName("h1")[0];
+            const buttonBar = document.createElement("sup");
+
+            const wodOriginalContent = document.createElement("div");
+            const titleParent = wodTitle.parentElement;
+            const titleIdx = Array.prototype.indexOf.call(titleParent.childNodes, wodTitle);
+            for (let i = titleIdx + 1, l = titleParent.childNodes.length; i < l; i++) {
+                wodOriginalContent.append(titleParent.childNodes[i]);
+                i--;
+                l--;
+            }
+            const contentAnchor = document.createElement("div");
+            titleParent.append(contentAnchor);
+            contentAnchor.append(wodOriginalContent);
+            wodTitle.append(buttonBar);
+
+            let currentButton = buttonContentArray[0].button;
+            currentButton.style.display = "none";
+
+            for (const buttonDef of buttonContentArray) {
+                const button = buttonDef.button;
+                const content = buttonDef.content;
+                button.onclick = async function () {
+                    contentAnchor.innerHTML = "";
+                    currentButton.style.display = "";
+                    button.style.display = "none";
+                    currentButton = button;
+                    if (content) {
+                        contentAnchor.append(await content());
+                    } else {
+                        contentAnchor.append(wodOriginalContent);
+                    }
+                    if(buttonDef.title) wodTitle.childNodes[0].nodeValue = buttonDef.title;
+                }
+                buttonBar.append(button);
+            }
+
+            return [wodOriginalContent, contentAnchor];
+        }
+    }
+
     static UI = class {
 
         static SIGNS = {
             WARN: "⚠️",
-            ERROR: "💥",
+            ERROR: "💥", // ☠
             MISSING: "�",
             DELETE: "❌",
+            SETTINGS: "⚙",
+        }
+
+        static COLORS = {
+            GREEN: "rgb(62, 156, 62)",
+            RED: "rgb(203, 47, 47)",
+            YELLOW: "rgb(194, 194, 41)",
         }
 
         static WOD_SIGNS = {
@@ -4223,6 +4386,16 @@ class demawiRepository {
             button.style.cursor = "pointer";
             button.onclick = callback;
             return button;
+        }
+
+        static createCheckBox(supplier, consumer) {
+            const result = document.createElement("input");
+            result.type = "checkbox";
+            result.checked = supplier();
+            result.onchange = async function () {
+                await consumer(result.checked);
+            }
+            return result;
         }
 
         static createRealButton(htmlContent, callback) {
