@@ -28,6 +28,7 @@
     const _ = demawiRepository;
 
     class Mod {
+        static modname = "AusrüsterPlus";
         static dbname = "wodDB";
 
         static async startMod() {
@@ -83,13 +84,122 @@
     class Ausruester {
 
         static async start() {
+            await MySettings.getFresh();
+            _.WoDUI.addTitleButtonBar([
+                {
+                    button: _.UI.createButton(" ↩"),
+                    content: undefined,
+                },
+                {
+                    button: _.UI.createButton(" ⚙"),
+                    content: SettingsView.getSettingsView,
+                }
+            ]);
             await GemHandler.init();
             await EquipConfig.init();
             await ControlBar.init();
             await SelectOptimizer.init();
             await EquipConfig.isUptodate();
+            await SettingsView.init();
         }
 
+    }
+
+    class SettingsView {
+        static async getSettingsView() {
+            const settings = await MySettings.get();
+
+            const settingTable = document.createElement("div");
+
+            let tableContent = [];
+            tableContent.push(["Buttons immer sichtbar: ", _.UI.createCheckBox(() => settings.get(MySettings.SETTING.BUTTONS_ALWAYS_VISIBLE),
+                async function (value) {
+                    settings.set(MySettings.SETTING.BUTTONS_ALWAYS_VISIBLE, value);
+                    await settings.save();
+                })]);
+            settingTable.append(_.UI.createTable(tableContent));
+            tableContent = [];
+
+            _.SettingsPage.addHeader(settingTable, "Pro Held", "");
+            const equipCfg = await EquipConfig.get();
+
+            const elements = document.createElement("div");
+
+            const updateElements = function () {
+                elements.style.display = equipCfg.deactivatedSlots ? "" : "none";
+            }
+            tableContent.push(["Slot Deaktivierung: ", _.UI.createCheckBox(() => !!equipCfg.deactivatedSlots,
+                async function (value) {
+                    if (value) equipCfg.deactivatedSlots = {};
+                    else delete equipCfg.deactivatedSlots;
+                    await MyStorage.equipHero.setValue(equipCfg);
+                    updateElements();
+                })]);
+            updateElements();
+            const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+            let lastSlotName;
+            for (const [slotName, idx] of FormHandler.getAllExistingSlots()) {
+                if (lastSlotName === slotName) continue;
+                lastSlotName = slotName;
+                const slotElem = document.createElement("span");
+                slotElem.innerHTML = slotName;
+                slotElem.style.cursor = "pointer";
+                if (elements.children.length > 0) elements.append(document.createElement("br"));
+                elements.append(slotElem);
+                let slotIsDeactivated = deactivatedSlots[slotName] || false;
+                let updateColor = function () {
+                    if (slotIsDeactivated) {
+                        slotElem.innerHTML = slotName + " <img src='" + _.UI.WOD_SIGNS.NO + "' />";
+                        //slotElem.style.color = _.UI.COLORS.RED;
+                    } else {
+                        slotElem.innerHTML = slotName + " <img src='" + _.UI.WOD_SIGNS.YES + "' />";
+                        //slotElem.style.color = _.UI.COLORS.GREEN;
+                    }
+                }
+                slotElem.onclick = async function () {
+                    slotIsDeactivated = !slotIsDeactivated;
+                    const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+                    deactivatedSlots[slotName] = slotIsDeactivated;
+                    await MyStorage.equipHero.setValue(equipCfg);
+                    updateColor();
+                }
+                updateColor();
+            }
+            tableContent.push(["", elements]);
+
+            settingTable.append(_.UI.createTable(tableContent));
+            return settingTable;
+        }
+
+        static async init() {
+            if (EquipConfig.withSlotDeactivation()) {
+                const equipCfg = await EquipConfig.get();
+
+                const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+                const theForm = FormHandler.getTheForm();
+                const allSlots = FormHandler.getAllExistingSlots();
+                let lastSlotName;
+                for (const [slotName, slotIdx] of allSlots) {
+                    //if (lastSlotName === slotName) continue;
+                    lastSlotName = slotName;
+                    let slotIsDeactivated = deactivatedSlots[slotName] || false;
+                    const selectInput = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
+
+                    let slotHandler;
+                    const firstTD = selectInput.parentElement.parentElement.children[0];
+                    slotHandler = firstTD;
+
+                    let updateColor = function () {
+                        if (slotIsDeactivated) {
+                            slotHandler.style.color = _.UI.COLORS.RED;
+                        } else {
+                            slotHandler.style.color = "white";
+                        }
+                    }
+                    updateColor();
+                }
+            }
+        }
     }
 
     class MeineHeldenView {
@@ -434,29 +544,38 @@
             const buttonPanel = document.createElement("span");
             selectPanel.style.position = "relative";
             selectPanel.append(buttonPanel);
-            buttonPanel.style.display = "inline-block";
-            buttonPanel.style.position = "absolute";
-            buttonPanel.style.width = "100%";
 
-            buttonPanel.style.textAlign = "left";
+            if (MySettings.isButtonsImmerSichtbar()) {
+                _this.newButton.style.display = "";
+                _this.renameButton.style.display = "";
+                _this.deleteButton.style.display = "";
+            } else {
+                buttonPanel.style.display = "inline-block";
+                buttonPanel.style.position = "absolute";
+                buttonPanel.style.width = "100%";
+                buttonPanel.style.textAlign = "left";
+                selectPanel.onmouseenter = function () {
+                    buttonPanel.style.top = (selectPanel.offsetHeight + 2) + "px";
+                    _this.newButton.style.display = "";
+                    _this.renameButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
+                    _this.deleteButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
+                }
+                const leaveFn = function () {
+                    _this.newButton.style.display = "none";
+                    _this.renameButton.style.display = "none";
+                    _this.deleteButton.style.display = "none";
+                };
+                this.loadOutSelect.onclick = leaveFn;
+                selectPanel.onmouseleave = leaveFn;
+                leaveFn();
+            }
+
+
             buttonPanel.append(this.newButton);
             buttonPanel.append(this.renameButton);
             buttonPanel.append(this.deleteButton);
             selectPanel.append(this.loadOutSelect);
-            selectPanel.onmouseenter = function () {
-                buttonPanel.style.top = (selectPanel.offsetHeight + 2) + "px";
-                _this.newButton.style.display = "";
-                _this.renameButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
-                _this.deleteButton.style.display = _this.hasSelectedLoadout() ? "" : "none";
-            }
-            const leaveFn = function () {
-                _this.newButton.style.display = "none";
-                _this.renameButton.style.display = "none";
-                _this.deleteButton.style.display = "none";
-            };
-            this.loadOutSelect.onclick = leaveFn;
-            selectPanel.onmouseleave = leaveFn;
-            leaveFn();
+
 
             subpanel.append(this.activButton);
             subpanel.append(this.applyLoadout2ServerButton);
@@ -1137,6 +1256,10 @@
             NONE: "none", // ausgeschaltet
         }
 
+        static get() {
+            return this.#equipConfigs;
+        }
+
         static async init() {
             this.#heroId = _.WoD.getMyHeroId();
             this.#myWorld = _.WoD.getMyWorld();
@@ -1165,6 +1288,21 @@
             } else {
                 this.checkValidationOnEquip(slotName);
             }
+        }
+
+        static withSlotDeactivation() {
+            return this.#equipConfigs._deactivatedSlots;
+        }
+
+        static getSlotDeactivations() {
+            if (!this.#equipConfigs._deactivatedSlots) return {};
+            return this.#equipConfigs.deactivatedSlots;
+        }
+
+        static isSlotDeactivated(slotName) {
+            const deactivations = this.getSlotDeactivations();
+            if (!deactivations) return false;
+            return deactivations[slotName];
         }
 
         static async isUptodate() {
@@ -1220,6 +1358,7 @@
         }
 
         static async checkValidationOnEquip(slotName, initial) {
+            if (EquipConfig.isSlotDeactivated(slotName)) return;
             const loadout = await EquipConfig.getSelectedLoadout()
             if (!loadout) return;
 
@@ -1245,6 +1384,7 @@
         }
 
         static async checkValidationOnEquipSlot(loadOutEquip, slotName, slotIdx, initial) {
+            if (EquipConfig.isSlotDeactivated(slotName)) return;
             const [instanceId, itemName] = FormHandler.getSlotSelectedItemInformation(slotName, slotIdx);
             const wantedId = loadOutEquip[slotName] && loadOutEquip[slotName].id;
             const wantedName = loadOutEquip[slotName] && loadOutEquip[slotName].name;
@@ -1783,7 +1923,11 @@
             const vgs = VGKonfig.getDynamicVGs(loadout.vgs);
             console.log("APPLY_EQUIP", equip, vgs);
 
+            const slotDeactivations = EquipConfig.getSlotDeactivations();
+            console.log("Slot Deactivations", slotDeactivations);
+
             for (const [slotName, itemIds] of Object.entries(equip)) {
+                if (slotDeactivations[slotName]) continue;
                 const slotList = equipChangesId[slotName] = [];
                 if (Array.isArray(itemIds)) {
                     for (const itemId of itemIds) {
@@ -1794,6 +1938,7 @@
                 }
             }
             for (const [slotName, itemIds] of Object.entries(vgs)) {
+                if (slotDeactivations[slotName]) continue;
                 const slotList = equipChangesId[slotName] || (equipChangesId[slotName] = []);
                 if (Array.isArray(itemIds)) {
                     for (const itemId of itemIds) {
@@ -1850,6 +1995,7 @@
             }
 
             for (const slotName of this.getAllSlotNames()) {
+                if (slotDeactivations[slotName]) continue;
                 let idx = 0;
                 const wantedEquipIds = equipChangesId[slotName] || [];
                 for (const cur of wantedEquipIds) {
@@ -1952,6 +2098,33 @@
 
             return this._allVGItemStats[slotName];
         }
+    }
+
+    class MySettings {
+        static SETTING = {
+            BUTTONS_ALWAYS_VISIBLE: "buttonsAlwaysVisible",
+        }
+        static #settingsDef = {
+            modName: Mod.modname,
+            defaultSettings: {
+                [this.SETTING.BUTTONS_ALWAYS_VISIBLE]: false,
+            },
+        }
+
+        static #settingsHandler;
+
+        static async get() {
+            return this.#settingsHandler;
+        }
+
+        static async getFresh() {
+            return this.#settingsHandler = await _.Settings.getHandler(this.#settingsDef);
+        }
+
+        static isButtonsImmerSichtbar() {
+            return this.#settingsHandler.get(this.SETTING.BUTTONS_ALWAYS_VISIBLE);
+        }
+
     }
 
     class MyStorage {

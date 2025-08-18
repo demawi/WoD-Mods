@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.8.2";
+    static version = "1.1.8.3";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1796,11 +1796,10 @@ class demawiRepository {
                     document.title = win.document.title; // rootDocument!
 
                     win.addEventListener("beforeunload", function () {
-                        console.log("ADD INDICATOR");
                         loadingIndicator.style.display = "";
                     });
                     win.addEventListener("unload", function () {
-                        //console.clear();
+                        console.clear();
                         setTimeout(function () {
                             const newUrl = win.location.href;
                             window.history.replaceState({}, "", newUrl); // rootWindow
@@ -2019,6 +2018,27 @@ class demawiRepository {
             await _.WoDStorages.getSettingsDb().setValue(this.data);
         }
 
+    }
+
+    static SettingsPage = class {
+        static addHeader(settingTable, ueberschriftTxt, descTxt, infoTxt) {
+            const ueberschrift = document.createElement("h2");
+            ueberschrift.style.fontStyle = "italic";
+            ueberschrift.style.textDecoration = "underline";
+            ueberschrift.style.marginBottom = "2px";
+            ueberschrift.innerHTML = ueberschriftTxt;
+            if (infoTxt) {
+                ueberschrift.innerHTML += " 🛈";
+                ueberschrift.title = infoTxt;
+            }
+            settingTable.append(ueberschrift);
+            const description = document.createElement("div");
+            description.innerHTML = descTxt.replaceAll("\n", "<br>");
+            description.style.fontStyle = "italic";
+            description.style.fontSize = "12px";
+            description.style.marginBottom = "10px";
+            settingTable.append(description);
+        }
     }
 
     /**
@@ -4254,6 +4274,49 @@ class demawiRepository {
         }
     }
 
+    static WoDUI = class {
+        static addTitleButtonBar(buttonContentArray) {
+            const wodTitle = document.getElementsByTagName("h1")[0];
+            const buttonBar = document.createElement("sup");
+
+            const wodOriginalContent = document.createElement("div");
+            const titleParent = wodTitle.parentElement;
+            const titleIdx = Array.prototype.indexOf.call(titleParent.childNodes, wodTitle);
+            for (let i = titleIdx + 1, l = titleParent.childNodes.length; i < l; i++) {
+                wodOriginalContent.append(titleParent.childNodes[i]);
+                i--;
+                l--;
+            }
+            const contentAnchor = document.createElement("div");
+            titleParent.append(contentAnchor);
+            contentAnchor.append(wodOriginalContent);
+            wodTitle.append(buttonBar);
+
+            let currentButton = buttonContentArray[0].button;
+            currentButton.style.display = "none";
+
+            for (const buttonDef of buttonContentArray) {
+                const button = buttonDef.button;
+                const content = buttonDef.content;
+                button.onclick = async function () {
+                    contentAnchor.innerHTML = "";
+                    currentButton.style.display = "";
+                    button.style.display = "none";
+                    currentButton = button;
+                    if (content) {
+                        contentAnchor.append(await content());
+                    } else {
+                        contentAnchor.append(wodOriginalContent);
+                    }
+                    if(buttonDef.title) wodTitle.childNodes[0].nodeValue = buttonDef.title;
+                }
+                buttonBar.append(button);
+            }
+
+            return [wodOriginalContent, contentAnchor];
+        }
+    }
+
     static UI = class {
 
         static SIGNS = {
@@ -4261,6 +4324,13 @@ class demawiRepository {
             ERROR: "💥", // ☠
             MISSING: "�",
             DELETE: "❌",
+            SETTINGS: "⚙",
+        }
+
+        static COLORS = {
+            GREEN: "rgb(62, 156, 62)",
+            RED: "rgb(203, 47, 47)",
+            YELLOW: "rgb(194, 194, 41)",
         }
 
         static WOD_SIGNS = {
@@ -4316,6 +4386,16 @@ class demawiRepository {
             button.style.cursor = "pointer";
             button.onclick = callback;
             return button;
+        }
+
+        static createCheckBox(supplier, consumer) {
+            const result = document.createElement("input");
+            result.type = "checkbox";
+            result.checked = supplier();
+            result.onchange = async function () {
+                await consumer(result.checked);
+            }
+            return result;
         }
 
         static createRealButton(htmlContent, callback) {
