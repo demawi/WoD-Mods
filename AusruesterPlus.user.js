@@ -5,9 +5,9 @@
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
 //
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
-// @match          http*://world-of-dungeons.de/*
+// @match          *://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+// @match          *://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
+// @match          *://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
 // @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
