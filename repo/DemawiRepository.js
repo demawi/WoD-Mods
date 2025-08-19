@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.9";
+    static version = "1.1.9.1";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -2448,9 +2448,9 @@ class demawiRepository {
             doc = doc || document;
             const title = doc.querySelector("h1");
             if (title.textContent.trim() === "Meine Helden") {
-                const myWorld = _.WoD.getMyWorld();
-                const playerName = _.WoD.getMyUserName();
-                const meineHelden = _.MyHeroesView.getIdStufenMap();
+                const myWorld = _.WoD.getMyWorld(doc);
+                const playerName = _.WoD.getMyUserName(doc);
+                const meineHelden = _.MyHeroesView.getIdStufenMap(doc);
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
                 await this.getWorldSeason(myWorld, meineHelden, true, playerName, true); // report World-Season
             }
@@ -2462,7 +2462,7 @@ class demawiRepository {
             if (nameElem) {
                 if (nameElem.getElementsByClassName("wodSeason").length) return;
                 nameElem.style.position = "relative";
-                const seasonElem = await this.createSeasonElem();
+                const seasonElem = await this.createSeasonElem(undefined, doc);
                 seasonElem.style.fontSize = "120%";
                 seasonElem.style.position = "absolute";
                 seasonElem.style.top = "0px";
@@ -2473,7 +2473,7 @@ class demawiRepository {
         }
 
         static async createSeasonElem(seasonNr, doc) {
-            seasonNr = seasonNr || await _.WoD.getMyWorldSeasonNr();
+            seasonNr = seasonNr || await _.WoD.getMyWorldSeasonNr(doc);
             doc = doc || document;
             const seasonElem = doc.createElement("sup");
             seasonElem.classList.add("nowod");
@@ -3952,12 +3952,13 @@ class demawiRepository {
         /**
          * id -> Stufe
          */
-        static getIdStufenMap() {
+        static getIdStufenMap(doc) {
+            doc = doc || document;
             const helden = {};
-            const trs = document.querySelectorAll("#main_content .content_table tr");
+            const trs = doc.querySelectorAll("#main_content .content_table tr");
             for (let i = 1, l = trs.length; i < l; i++) {
                 const curTR = trs[i];
-                const heroId = Number(new URL(curTR.children[0].querySelector("a").href, document.baseURI).searchParams.get("id"));
+                const heroId = Number(new URL(curTR.children[0].querySelector("a").href, doc.baseURI).searchParams.get("id"));
                 helden[heroId] = Number(curTR.children[2].textContent);
             }
             return helden;
@@ -4308,7 +4309,7 @@ class demawiRepository {
                     } else {
                         contentAnchor.append(wodOriginalContent);
                     }
-                    if(buttonDef.title) wodTitle.childNodes[0].nodeValue = buttonDef.title;
+                    if (buttonDef.title) wodTitle.childNodes[0].nodeValue = buttonDef.title;
                 }
                 buttonBar.append(button);
             }
