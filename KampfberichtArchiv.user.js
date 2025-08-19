@@ -5,9 +5,9 @@
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
 //
-// @match          http*://*.world-of-dungeons.de/
-// @match          http*://*.world-of-dungeons.de/wod/spiel/*
-// @match          http*://world-of-dungeons.de*
+// @match          *://*.world-of-dungeons.de/
+// @match          *://*.world-of-dungeons.de/wod/spiel/*
+// @match          *://world-of-dungeons.de*
 // @require        repo/DemawiRepository.js
 //
 // @require        libs/jszip.min.js

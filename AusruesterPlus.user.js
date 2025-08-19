@@ -5,9 +5,9 @@
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
 //
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
-// @match          http*://world-of-dungeons.de/*
+// @match          *://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+// @match          *://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
+// @match          *://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
 // @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
@@ -63,8 +63,8 @@
                         const myElem = doc.createElement("div");
                         nextDungeonSpan.parentElement.append(myElem);
                         myElem.append(doc.createTextNode("Ausrüstung: "));
-                        const aHref = document.createElement("a");
-                        const url = new URL("/wod/spiel/hero/items.php", document.baseURI);
+                        const aHref = doc.createElement("a");
+                        const url = new URL("/wod/spiel/hero/items.php", doc.baseURI);
                         url.searchParams.append("view", "gear");
                         url.searchParams.append("session_hero_id", heroId);
                         aHref.innerHTML = currentCfg;
