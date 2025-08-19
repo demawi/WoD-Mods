@@ -2540,6 +2540,10 @@ class demawiRepository {
          * @returns {Promise<({season, seasonNr: number[]}|number)[]|*[]>}
          */
         static async getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, istHeldenAnsichtUebermittlung) {
+            if (!playerName) {
+                console.error("Spielername konnte nicht bestimmt werden.");
+                throw new Error("Spielername konnte nicht bestimmt werden.");
+            }
             const worldDb = _.WoDStorages.getWorldDb();
             let world = await worldDb.getValue(worldId);
             const now = new Date().getTime();
