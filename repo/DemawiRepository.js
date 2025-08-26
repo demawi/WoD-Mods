@@ -4185,6 +4185,9 @@ class demawiRepository {
             inputElement.style.fontSize = "14px";
         }
 
+        /**
+         * Übernimmt Breite der aktuellen Auswahl
+         */
         static betterSelect(selectField, cfg) {
             cfg = cfg || {};
             cfg.dropdownAutoWidth = true;
@@ -4194,6 +4197,9 @@ class demawiRepository {
             }, 0);
         }
 
+        /**
+         * mit fester Breite
+         */
         static betterSelect2(selectField, cfg) {
             cfg = cfg || {};
             cfg.dropdownAutoWidth = true;

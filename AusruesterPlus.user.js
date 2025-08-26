@@ -328,7 +328,7 @@
             const _this = this;
 
             const panel = document.createElement("div");
-            panel.style.textAlign = "right";
+            panel.style.textAlign = "left";
             this.loadoutNamePanel = document.createElement("div");
             this.loadoutNamePanel.title = "Das aktuelle Loadout, welches beim Neuladen der Seite verwendet wird";
             this.loadoutNamePanel.style.marginBottom = "2px";
@@ -401,6 +401,8 @@
                         addEntry(cur);
                     }
                 }
+
+                _.Libs.betterSelect2(_this.loadOutSelect);
 
                 if (!initial) _this.onDataChange();
             }
