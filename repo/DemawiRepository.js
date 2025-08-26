@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.10";
+    static version = "1.1.10.1";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -1886,8 +1886,8 @@ class demawiRepository {
         static handleNextDungeon(win, doc) {
             const nextDungeonSpan = doc.querySelector("#gadgetNextdungeonTime");
             if (nextDungeonSpan) {
-                this.nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
-                this.nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
+                this.#nextDungeonTimeEarly = _.WoD.getNaechsteDungeonZeit(true, doc);
+                this.#nextDungeonTimeReal = _.WoD.getNaechsteDungeonZeit(false, doc);
             }
         }
 
@@ -3816,6 +3816,12 @@ class demawiRepository {
                     }
                 } else if (locName === "Das Schloss in den Wolken") {
                     // wenn Altes Goldstück in neues Goldstück eingetauscht wird: Level 9 als Belohnungslevel wird nicht gezählt
+                    if (levelsSucceeded === 8 && levelCount === 9 && roomsSucceeded === 9 && roomsCount === 10) {
+                        roomsSucceeded++;
+                        levelsSucceeded++;
+                    }
+                } else if (locName === "Schiff ahoi!") {
+                    // Level 7: "Baasras Truhe": Der Erfolg in diesem Level ist nicht erforderlich, um den Dungeon erfolgreich abzuschließen.
                     if (levelsSucceeded === 8 && levelCount === 9 && roomsSucceeded === 9 && roomsCount === 10) {
                         roomsSucceeded++;
                         levelsSucceeded++;

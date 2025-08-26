@@ -3128,6 +3128,7 @@
 
             this.itemLoot = indexedDb.createObjectStorage("itemLoot", "id");
             this.item = indexedDb.createObjectStorage("item", "id");
+            this.location = indexedDb.createObjectStorage("location", "name");
 
             //this.skill = indexedDb.createObjectStorage("skill", "name");
             //this.skillSources = indexedDb.createObjectStorage("skillSources", "name");

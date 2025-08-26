@@ -7,7 +7,7 @@
 // @exclude     *://xerasia.world-of-dungeons.de*
 // @exclude     *://*.world-of-dungeons.de/wod/spiel/hero/skills.php?class=*
 // @exclude     *://*.world-of-dungeons.de/wod/spiel/hero/skills.php?subclass=*
-// @version     0.73.1-dirty
+// @version     0.73.1-dirty2
 // @run-at      document-start
 // ==/UserScript==
 "use strict";
@@ -3318,8 +3318,7 @@ class oSkillOptimizerSkills {
                 if (oCellsToParse.includes(oCell.cellIndex)) {
                     if (oCell.cellIndex === 1) { // Skillname
                         oTempOutput += `[td][skill=${oCell.textContent.trim()}][/td]`;
-                    }
-                    else if (oCell.cellIndex === 2) { // Skillrang
+                    } else if (oCell.cellIndex === 2) { // Skillrang
                         if (oCell.children.length > 0) {
                             let oRankContainer = oCell.querySelectorAll("td")[1]
                             let oRanks = oRankContainer.querySelectorAll("div, span");
@@ -5894,6 +5893,12 @@ const oClassSkills = new oSkillOptimizerSkills();
     const oFetchSkillClasses = oClassData.getValues(oClassData.oStorageKeys.sSkillClasses, "skill_classes").then(oSkillClasses => oClassData.oSkillClasses = oSkillClasses);
 
     const oContentLoaded = new Promise((oResolve, oReject) => {
+        console.log("Wait for contentLoad", document.readyState);
+        if(document.readyState === "complete" || document.readyState === "loaded" || document.readyState === "interactive") {
+            oResolve("DOMDONE");
+        } else { // "loading"
+            console.log("LKAHKLKLH", document.readyState);
+        }
         document.addEventListener("DOMContentLoaded", () => {
             console.log("DOMContentLoaded");
             oHero.sName = document.forms["the_form"]["heldenname"].value;
@@ -5906,7 +5911,7 @@ const oClassSkills = new oSkillOptimizerSkills();
                 oClassLayout.addMessage("Bitte Details ausschalten");
                 oReject("error_details_active");
             } else {
-                oResolve("DomDone");
+                oResolve("DOMDONE");
             }
         });
     });
@@ -5961,15 +5966,12 @@ const oClassSkills = new oSkillOptimizerSkills();
 
     const oFetchClass = Promise.all([oContentLoaded]).then(() => {
         return new Promise((oResolve, oReject) => {
+            console.log("FETCH CLASS");
             oClassData.getValues(oClassData.oStorageKeys.sClassPlain, "class_plain", false, true, oHero.sName).then(oClass => {
                 console.log("permanent class", oClass);
                 oResolve(oClass);
-            }).catch(sError => {
-                oReject(sError);
             });
         });
-    }).catch(sError => {
-        throw new Error(sError);
     });
 
     const oStructureRendered = Promise.all([oContentLoaded, oFetchTypes]).then(() => {
@@ -5978,8 +5980,6 @@ const oClassSkills = new oSkillOptimizerSkills();
         oClassSkills.initRender();
         oClassLayout.initRender();
         oClassLayout.fillHiddenOptionsTable();
-    }).catch(sError => {
-        throw new Error(sError);
     });
 
     Promise.all([oStructureRendered, oFetchAttributes]).then(aValues => {
@@ -5991,8 +5991,6 @@ const oClassSkills = new oSkillOptimizerSkills();
          */
         const oAttributes = aValues[1];
         oClassLayout.addAttributeData(oAttributes.attributes);
-    }).catch(sError => {
-        console.error("DOM-Attributes", sError);
     });
 
     const oFetchItemsAndSets = Promise.all([oFetchItems, oFetchSets]).then(() => {
@@ -6057,8 +6055,6 @@ const oClassSkills = new oSkillOptimizerSkills();
 
             oClassData.assignPowerUps(aFolkPowerUp, sFolkName, {blDebug: false});
         }
-    }).catch(sError => {
-        throw new Error(sError);
     });
 
     const oCalcBonusValues = Promise.all([oFetchAttributes, oGetClassData, oFetchItems, oFetchMonument, oFetchSkills]).then(() => {
@@ -6075,8 +6071,6 @@ const oClassSkills = new oSkillOptimizerSkills();
         let oBonusSkillEffectValues = oClassData.getBonusTableSkillEffectValues();
 
         return [oBonusAttackValues, oBonusAttributeValues, oBonusDropValues, oBonusParadeValues, oBonusArmorValues, oBonusDamageValues, oBonusDamageZValues, oBonusDamageFactorValues, oBonusSkillEffectValues];
-    }).catch(sError => {
-        throw new Error(sError);
     });
 
     const oAppliedSetBoni = Promise.all([oCalcBonusValues, oFetchItemsAndSets]).then(aValues => {
@@ -6098,7 +6092,7 @@ const oClassSkills = new oSkillOptimizerSkills();
     });
 
     Promise.all([oStructureRendered, oSavedPermanentData, oAppliedSetBoni]).then(aValues => {
-        console.log("got all");
+        console.log("got all promises");
 
         let [oBonusAttackValues, oBonusAttributeValues, oBonusDropValues, oBonusParadeValues, oBonusArmorValues, oBonusDamageValues, oBonusDamageZValues, oBonusDamageFactorValues, oBonusSkillEffectValues] = aValues[2];
 
