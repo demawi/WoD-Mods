@@ -328,7 +328,7 @@
             const _this = this;
 
             const panel = document.createElement("div");
-            panel.style.textAlign = "left";
+            panel.style.textAlign = "right";
             this.loadoutNamePanel = document.createElement("div");
             this.loadoutNamePanel.title = "Das aktuelle Loadout, welches beim Neuladen der Seite verwendet wird";
             this.loadoutNamePanel.style.marginBottom = "2px";
@@ -604,6 +604,7 @@
             buttonPanel.append(this.renameButton);
             buttonPanel.append(this.deleteButton);
             selectPanel.append(this.loadOutSelect);
+            selectPanel.style.textAlign = "left";
 
 
             subpanel.append(this.activButton);
