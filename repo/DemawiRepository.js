@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.10.1";
+    static version = "1.1.10.2";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -2452,7 +2452,7 @@ class demawiRepository {
                 const playerName = _.WoD.getMyUserName(doc);
                 const meineHelden = _.MyHeroesView.getIdStufenMap(doc);
                 if (!myWorld || Object.keys(meineHelden).length <= 0) return;
-                await this.getWorldSeason(myWorld, meineHelden, true, playerName, true); // report World-Season
+                await this.getWorldSeason(doc, myWorld, meineHelden, true, playerName, true); // report World-Season
             }
         }
 
@@ -2509,16 +2509,16 @@ class demawiRepository {
             const worldId = _.WoD.getMyWorld(doc);
             const heroStufe = _.WoD.getMyStufe(doc);
             const playerName = _.WoD.getMyUserName(doc);
-            return await this.getWorldSeasonNr(worldId, {[heroId]: heroStufe}, document === doc, playerName);
+            return await this.getWorldSeasonNr(doc, worldId, {[heroId]: heroStufe}, document === doc, playerName);
         }
 
-        static #createNewWorldSeason(myheroIdsMitStufen) {
+        static #createNewWorldSeason(worldVersion, myheroIdsMitStufen) {
             const now = new Date().getTime();
-            return {time: [now, now], myheroes: myheroIdsMitStufen};
+            return {time: [now, now], version: worldVersion, myheroes: myheroIdsMitStufen};
         }
 
-        static async getWorldSeasonNr(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName) {
-            const [season, seasonNr] = await this.getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, false);
+        static async getWorldSeasonNr(doc, worldId, myheroIdsMitStufen, aktualisiereZeit, playerName) {
+            const [season, seasonNr] = await this.getWorldSeason(doc, worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, false);
             return seasonNr;
         }
 
@@ -2528,7 +2528,8 @@ class demawiRepository {
             const heroStufe = _.WoD.getMyStufe();
             const worldDb = _.WoDStorages.getWorldDb();
             const world = await worldDb.getValue(worldId);
-            world.seasons.push(this.#createNewWorldSeason({[heroId]: heroStufe}));
+            const worldVersion = _.WoD.getGameDataVersion();
+            world.seasons.push(this.#createNewWorldSeason(worldVersion, {[heroId]: heroStufe}));
             await worldDb.setValue(world);
         }
 
@@ -2539,7 +2540,7 @@ class demawiRepository {
          * Playername kann im Forum nicht ermittelt werden und ist somit undefined
          * @returns {Promise<({season, seasonNr: number[]}|number)[]|*[]>}
          */
-        static async getWorldSeason(worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, istHeldenAnsichtUebermittlung) {
+        static async getWorldSeason(doc, worldId, myheroIdsMitStufen, aktualisiereZeit, playerName, istHeldenAnsichtUebermittlung) {
             if (!playerName) {
                 console.error("Spielername konnte nicht bestimmt werden.");
                 throw new Error("Spielername konnte nicht bestimmt werden.");
@@ -2547,18 +2548,21 @@ class demawiRepository {
             const worldDb = _.WoDStorages.getWorldDb();
             let world = await worldDb.getValue(worldId);
             const now = new Date().getTime();
+            doc = doc || document;
+            const worldVersion = _.WoD.getGameDataVersion(doc);
             if (!world) {
-                const newSeason = this.#createNewWorldSeason(myheroIdsMitStufen);
+                const newSeason = this.#createNewWorldSeason(worldVersion, myheroIdsMitStufen);
                 world = {id: worldId, seasons: [newSeason], player: playerName};
                 await worldDb.setValue(world);
                 return [newSeason, 1];
             }
 
-            let [foundSeasonNr, foundSeason] = this.#findMatchingWorldSeason(world.seasons, myheroIdsMitStufen);
+            let [foundSeasonNr, foundSeason] = this.#findMatchingWorldSeason(world.seasons, worldVersion, myheroIdsMitStufen);
             if (foundSeason) {
                 this.#copyOver(myheroIdsMitStufen, foundSeason.myheroes);
                 if (aktualisiereZeit) foundSeason.time[1] = now;
                 if (playerName) world.player = playerName;
+                if (worldVersion) foundSeason.version = worldVersion;
                 await worldDb.setValue(world);
                 return [foundSeason, foundSeasonNr];
             } else { // Welt-Reset entdeckt
@@ -2579,7 +2583,7 @@ class demawiRepository {
                     confirm = window.confirm(GM.info.script.name + ": Ein World-Rest wurde entdeckt, wollen sie die neue Saison starten? (Aktuelle Saison: " + world.seasons.length + ")");
                 }
                 if (confirm) {
-                    const newSeason = this.#createNewWorldSeason(myheroIdsMitStufen);
+                    const newSeason = this.#createNewWorldSeason(worldVersion, myheroIdsMitStufen);
                     world.seasons.push(newSeason);
                     await worldDb.setValue(world);
                     return [newSeason, world.seasons.length];
@@ -2593,7 +2597,14 @@ class demawiRepository {
             }
         }
 
-        static #findMatchingWorldSeason(seasons, myheroIdsMitStufen) {
+        static #findMatchingWorldSeason(seasons, worldVersion, myheroIdsMitStufen) {
+            for (let i = seasons.length - 1; i >= 0; i--) {
+                const season = seasons[i];
+                if (season.version === worldVersion) {
+                    return [i + 1, season];
+                }
+            }
+
             for (let i = seasons.length - 1; i >= 0; i--) {
                 const season = seasons[i];
                 let foundMatching = false;
@@ -3173,6 +3184,15 @@ class demawiRepository {
                 console.error("Report-Seite konnte nicht ermittelt werden!", title);
                 throw new Error("Report-Seite konnte nicht ermittelt werden!");
             }
+        }
+
+        /**
+         * Gibt die Spieldatenversion (ersichtlich im Footer) der Welt zurück.
+         */
+        static getGameDataVersion(doc) {
+            doc = doc || document;
+            const result = doc.getElementById("footer")?.getElementsByTagName("center")[0]?.textContent.match(/SDVer\.(\d*)\.\d\d/)[1];
+            if (result) return Number(result);
         }
 
         /**
@@ -3974,6 +3994,18 @@ class demawiRepository {
             return helden;
         }
 
+        /**
+         *
+         * {
+         *   357890: {
+         *       name: "Borex",
+         *       active: true|false,
+         *       klasse: "Barbar",
+         *       stufe: 12,
+         *       nextDungeonTime: <MsecTS>,
+         *   }
+         * }
+         */
         static getFullInformation() {
             const helden = {};
             const trs = document.querySelectorAll("#main_content .content_table tr");
