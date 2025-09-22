@@ -6,12 +6,12 @@
 // @grant          GM.getValue
 // @grant          GM.setValue
 // @grant          GM.deleteValue
-// @include        http*://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
-// @include        http*://*/wod/spiel/*dungeon/report.php*
-// @include        http*://*.world-of-dungeons.de/*combat_report.php*
-// @include        http*://*/wod/spiel/*dungeon/combat_report.php*
-// @include        http*://*/wod/spiel/event/play.php*
-// @include        http*://*/wod/spiel/event/eventlist.php*
+// @include        *://*.world-of-dungeons.de/wod/spiel/*dungeon/report.php*
+// @include        *://*/wod/spiel/*dungeon/report.php*
+// @include        *://*.world-of-dungeons.de/*combat_report.php*
+// @include        *://*/wod/spiel/*dungeon/combat_report.php*
+// @include        *://*/wod/spiel/event/play.php*
+// @include        *://*/wod/spiel/event/eventlist.php*
 // @require        repo/DemawiRepositoryOld1.js?version=1
 // ==/UserScript==
 // *************************************************************
