@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.9.2
+// @version        0.9.3
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
 //
-// @match          http*://*.world-of-dungeons.de/wod/spiel/hero/items.php*
-// @match          http*://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
-// @match          http*://world-of-dungeons.de/*
+// @match          *://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+// @match          *://*.world-of-dungeons.de/wod/spiel/settings/heroes.php*
+// @match          *://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
 // @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
@@ -63,8 +63,8 @@
                         const myElem = doc.createElement("div");
                         nextDungeonSpan.parentElement.append(myElem);
                         myElem.append(doc.createTextNode("Ausrüstung: "));
-                        const aHref = document.createElement("a");
-                        const url = new URL("/wod/spiel/hero/items.php", document.baseURI);
+                        const aHref = doc.createElement("a");
+                        const url = new URL("/wod/spiel/hero/items.php", doc.baseURI);
                         url.searchParams.append("view", "gear");
                         url.searchParams.append("session_hero_id", heroId);
                         aHref.innerHTML = currentCfg;
@@ -371,10 +371,39 @@
             const updateSelect = function (profilName, initial) {
                 _this.updateProfileName();
                 _this.loadOutSelect.innerHTML = "";
-                for (const curProfileName of Object.keys(EquipConfig.getLoadouts()).sort(_.util.localeComparator)) {
+                const anzahlTageFuerLastUsed = 8;
+                let lastUsedTime = new Date();
+                lastUsedTime.setDate(lastUsedTime.getDate() - anzahlTageFuerLastUsed);
+                lastUsedTime = lastUsedTime.getTime();
+                const text = "In den letzten "+anzahlTageFuerLastUsed+" Tagen aktiv";
+                const lastUsedProfiles = [];
+                const nonLastUsedProfiles = [];
+
+                for (const [curProfileName, data] of Object.entries(EquipConfig.getLoadouts())) {
+                    if(data.ts >= lastUsedTime) lastUsedProfiles.push(curProfileName);
+                    else nonLastUsedProfiles.push(curProfileName);
+                }
+
+                const addEntry = function(curProfileName) {
                     const selected = profilName === curProfileName ? "selected" : "";
                     _this.loadOutSelect.innerHTML += "<option " + selected + ">" + curProfileName + "</option>";
                 }
+
+                if(nonLastUsedProfiles.length > 0) {
+                    _this.loadOutSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + anzahlTageFuerLastUsed + " Tagen genutzt ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                }
+                for(const cur of lastUsedProfiles.sort(_.util.localeComparator)) {
+                    addEntry(cur);
+                }
+                if(nonLastUsedProfiles.length > 0) {
+                    _this.loadOutSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
+                    for(const cur of nonLastUsedProfiles.sort(_.util.localeComparator)) {
+                        addEntry(cur);
+                    }
+                }
+
+                _.Libs.betterSelect2(_this.loadOutSelect);
+
                 if (!initial) _this.onDataChange();
             }
 
@@ -538,7 +567,7 @@
             let subpanel = this.ui2XXXPanel = document.createElement("div");
             panel.append(subpanel);
 
-            let selectPanel = document.createElement("span");
+            const selectPanel = document.createElement("span");
             subpanel.append(selectPanel);
             selectPanel.style.zIndex = 1;
             const buttonPanel = document.createElement("span");
@@ -575,6 +604,7 @@
             buttonPanel.append(this.renameButton);
             buttonPanel.append(this.deleteButton);
             selectPanel.append(this.loadOutSelect);
+            selectPanel.style.textAlign = "left";
 
 
             subpanel.append(this.activButton);
@@ -1271,6 +1301,11 @@
                     loadouts: {}
                 }
                 await this.#save();
+            } else {
+                // Migration-Skript only need once to check
+                for(const cur of Object.values(this.#equipConfigs.loadouts)) {
+                    cur.tsSaved = cur.tsSaved || cur.ts;
+                }
             }
             this.#equipConfigs.name = this.#heroName;
             [this.#serverEquipOhneVGs, this.#serverEquipUniqueVgs] = FormHandler.getUIEquipOnlyIds(1);
@@ -1500,7 +1535,10 @@
         }
 
         static async setCurrentTimestamps(directSave) {
-            this.#equipConfigs.ts = new Date().getTime();
+            const now = new Date().getTime();
+            this.#equipConfigs.ts = now;
+            const current = this.#equipConfigs.current;
+            if(current) this.#equipConfigs.loadouts[current].ts = now;
             this.#equipConfigs.next = _.WoD.getNaechsteDungeonZeit(true);
             if (directSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
         }
@@ -1556,7 +1594,8 @@
             equipConfig.name = profileName;
             const now = new Date().getTime();
             this.#equipConfigs.loadouts[profileName] = {
-                ts: now,
+                ts: now, // last used
+                tsSaved: now, // last saved
             }
             this.setCurrent(profileName, false);
             equipConfig.ts = now;

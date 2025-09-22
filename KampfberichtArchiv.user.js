@@ -1,13 +1,13 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.15.2
+// @version        0.15.3
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
 //
-// @match          http*://*.world-of-dungeons.de/
-// @match          http*://*.world-of-dungeons.de/wod/spiel/*
-// @match          http*://world-of-dungeons.de*
+// @match          *://*.world-of-dungeons.de/
+// @match          *://*.world-of-dungeons.de/wod/spiel/*
+// @match          *://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
 // @require        libs/jszip.min.js
@@ -3128,6 +3128,7 @@
 
             this.itemLoot = indexedDb.createObjectStorage("itemLoot", "id");
             this.item = indexedDb.createObjectStorage("item", "id");
+            this.location = indexedDb.createObjectStorage("location", "name");
 
             //this.skill = indexedDb.createObjectStorage("skill", "name");
             //this.skillSources = indexedDb.createObjectStorage("skillSources", "name");
