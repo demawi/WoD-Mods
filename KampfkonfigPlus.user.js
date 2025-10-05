@@ -131,7 +131,7 @@
                 return object;
             });
             const name = _WoD.getMyHeroName() + "_" + profileName + ".json";
-            _File.forDownload(name, resultStr);
+            _File.forDirectDownload(name, resultStr);
         }
 
         /**

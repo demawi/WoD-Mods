@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.15.3
+// @version        0.15.3.1
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -42,6 +42,8 @@
             demawiRepository.startMod("View: '" + view + "'");
             await MySettings.getFresh();
             this.isAdmin = _.WoD.isInAdminViewMode();
+
+            Maintenance.checkReportFavFix();
 
             switch (view) {
                 case _.WoD.VIEW.TOMBOLA:
@@ -482,7 +484,6 @@
                     memorySpace += report.srcs.space;
                     dungeonStat.space = (dungeonStat.space || 0) + report.srcs.space;
                 }
-                if (!report.fav.none) dungeonStat.fav = (dungeonStat.fav || 0) + 1;
                 const success = report.success;
                 if (!success) continue;
                 const members = success.members;
@@ -927,6 +928,34 @@
             else text = "Bitte nochmal die Heldenansicht aufrufen!";
 
             tableContent.push(["Aktuelle Weltsaison: " + text, worldSeasonNr ? anlegenNeueGruppenSaison : ""]);
+
+            let wartungLaueft = false;
+            const wartungWrapper = document.createElement("span");
+            const wartungLabel = document.createElement("span");
+            wartungLabel.style.paddingLeft = "10px";
+            const wartungButton = document.createElement("input");
+            wartungButton.type = "button";
+            wartungButton.value = "Wartung starten";
+            wartungButton.title = "Die Datenbank wird auf Fehler geprüft. Dies kann etwas dauern.";
+            wartungButton.onclick = async function () {
+                if (wartungLaueft) {
+                    window.alert("Wartung läuft noch!");
+                } else {
+                    wartungLaueft = true;
+                    wartungButton.disabled = true;
+                    wartungLabel.innerHTML = "Wartung läuft...";
+                    try {
+                        await Maintenance.allReportArchive();
+                    } catch (e) {
+                    }
+                    wartungButton.disabled = false;
+                    wartungLabel.innerHTML = "Wartung beendet!";
+                    wartungLaueft = false;
+                }
+            }
+            wartungWrapper.append(wartungButton);
+            wartungWrapper.append(wartungLabel);
+            tableContent.push(["Wartung: ", wartungWrapper]);
 
             const autoFavoritTable = _.UI.createTable(tableContent);
             settingTable.append(autoFavoritTable);
@@ -2242,6 +2271,46 @@
             }
         }
 
+        static async allReportArchive() {
+            const start = new Date().getTime();
+            const _this = this;
+            await MyStorage.reportArchive.getAll(false, async function (cur) {
+                _this.reportFavFix(cur);
+            });
+            console.log("Maintenance.all: " + (new Date().getTime() - start) / 1000);
+        }
+
+        static async checkReportFavFix() {
+            const start = new Date().getTime();
+            const allCount = await MyStorage.reportArchive.count();
+            const noneCount = await MyStorage.reportArchive.count({
+                index: ["fav.none"]
+            });
+            if (allCount !== noneCount) {
+                const _this = this;
+                await MyStorage.reportArchive.getAll(false, async function (cur) {
+                    _this.reportFavFix(cur);
+                });
+            }
+            //console.log("Maintenance.checkReportFavFix: " + (new Date().getTime() - start) / 1000);
+            //console.log("Maintenance.checkReportFavFix ", allCount, noneCount);
+        }
+
+        static async reportFavFix(cur) {
+            if (!cur.fav || typeof cur.fav !== "object") {
+                console.warn("Ein Report ohne .fav wurde gefunden", cur);
+                cur.fav = {
+                    none: 1,
+                }
+                await MyStorage.reportArchive.setValue(cur);
+            } else if (!cur.fav.none) {
+                if (cur.fav.none !== 0) {
+                    cur.fav.none = 0;
+                    await MyStorage.reportArchive.setValue(cur);
+                }
+            }
+        }
+
         static async recalculateSpace() {
             console.log("recalculateSpace... start");
             for (const report of await MyStorage.reportArchive.getAll()) {
@@ -2346,13 +2415,14 @@
         static addFavorit(report, tagName) {
             if (!report.fav) report.fav = {};
             report.fav[tagName] = 1;
-            delete report.fav.none;
+            report.fav.none = 0;
         }
 
         static deleteFavorit(report, tagName) {
             if (report.fav) {
                 delete report.fav[tagName];
-                if (Object.keys(report.fav).length === 0) {
+                const keyLength = Object.keys(report.fav).length;
+                if (keyLength === 0 || keyLength === 1 && "none" in report.fav) {
                     report.fav.none = 1;
                 }
             }
@@ -3263,7 +3333,7 @@
                 fileName = curElement.value.replace("ä", "ae");
             }
 
-            this.forDownload(fileName + ".html", this.getHtmlForExport(myDocument));
+            _.File.forDirectDownload(fileName + ".html", this.getHtmlForExport(myDocument));
         }
 
         /**
@@ -3331,16 +3401,6 @@
             return myDocument.outerHTML;
         }
 
-        static forDownload(filename, data) {
-            const blob = new Blob([data], {type: 'text/plain'});
-            const fileURL = URL.createObjectURL(blob);
-            const downloadLink = document.createElement('a');
-            downloadLink.href = fileURL;
-            downloadLink.download = filename;
-            downloadLink.click();
-            URL.revokeObjectURL(fileURL);
-        }
-
         static async htmlExportFullReportAsZip(reportId) {
             const zip = await _.File.getJSZip();
             const reportSources = await MyStorage.getSourceReport(reportId);
@@ -3364,7 +3424,7 @@
             console.log("Ready to zip: ", zip);
             zip.generateAsync({type: "blob"}).then(function (content) {
                 console.log("File '" + downloadFileName + "' is ready!");
-                _.File.forDownload(downloadFileName, content);
+                _.File.forDirectDownload(downloadFileName, content);
             }).catch(error => console.error("Zip-Erro: ", error));
         }
 
