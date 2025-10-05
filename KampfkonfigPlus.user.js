@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfkonfig Plus
-// @version        1.1.6
+// @version        1.1.7
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Kampfkonfigs. Aktuell nur JSON-Export/Import.
@@ -131,7 +131,7 @@
                 return object;
             });
             const name = _WoD.getMyHeroName() + "_" + profileName + ".json";
-            _File.forDownload(name, resultStr);
+            _File.forDirectDownload(name, resultStr);
         }
 
         /**

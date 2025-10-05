@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.11";
+    static version = "1.1.12";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -800,6 +800,9 @@ class demawiRepository {
                     const transaction = connection.transaction(this.storageId, "readonly");
                     const objectStore = transaction.objectStore(this.storageId);
                     const [target, keyRange] = await this.constructor.QueryOps.getTargetAndKeyRange(_this, objectStore, query);
+                    if(query && query.debug) {
+                        console.log("Query ", query, target, keyRange);
+                    }
                     const request = target.count(keyRange);
                     request.onsuccess = function (event) {
                         const result = event.target.result;
@@ -4314,7 +4317,8 @@ class demawiRepository {
             });
         }
 
-        static async evalViaXMLRequest(url) {
+        static async evalViaXMLRequest(url, win) {
+            win = win || unsafeWindow;
             if (this.#alreadyLoaded[url]) return false;
             const responseText = await _.util.loadViaXMLRequest(url);
             this.#alreadyLoaded[url] = true;
@@ -4554,14 +4558,15 @@ class demawiRepository {
     static File = class {
 
         static async getJSZip() {
-            await _.Libs.evalViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js")
-            return new JSZip();
+            await _.Libs.evalViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js", unsafeWindow);
+            return new unsafeWindow.JSZip();
         }
 
-        static forDownload(filename, data) {
+        static forDirectDownload(filename, data) {
+            const doc = _.WindowManager.getRootWindow().document
             const blob = new Blob([data], {type: 'text/plain'});
             const fileURL = URL.createObjectURL(blob);
-            const downloadLink = document.createElement('a');
+            const downloadLink = doc.createElement('a');
             downloadLink.href = fileURL;
             downloadLink.download = filename;
             downloadLink.click();
