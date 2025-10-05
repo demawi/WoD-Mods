@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.11.1";
+    static version = "1.1.11.2";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -4317,7 +4317,8 @@ class demawiRepository {
             });
         }
 
-        static async evalViaXMLRequest(url) {
+        static async evalViaXMLRequest(url, win) {
+            win = win || unsafeWindow;
             if (this.#alreadyLoaded[url]) return false;
             const responseText = await _.util.loadViaXMLRequest(url);
             this.#alreadyLoaded[url] = true;
@@ -4557,8 +4558,8 @@ class demawiRepository {
     static File = class {
 
         static async getJSZip() {
-            await _.Libs.evalViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js")
-            return new JSZip();
+            await _.Libs.evalViaXMLRequest("https://raw.githubusercontent.com/demawi/WoD-Mods/refs/heads/master/libs/jszip.min.js", unsafeWindow);
+            return new unsafeWindow.JSZip();
         }
 
         static forDirectDownload(filename, data) {
