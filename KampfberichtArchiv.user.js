@@ -2304,7 +2304,13 @@
                 }
                 await MyStorage.reportArchive.setValue(cur);
             } else if (!cur.fav.none) {
-                if (cur.fav.none !== 0) {
+                const keyLength = Object.keys(cur.fav).length;
+                if (keyLength === 0 || (keyLength === 1 && "none" in cur.fav)) {
+                    if(cur.fav.none !== 1) {
+                        cur.fav.none = 1;
+                        await MyStorage.reportArchive.setValue(cur);
+                    }
+                } else if(cur.fav.none !== 0) {
                     cur.fav.none = 0;
                     await MyStorage.reportArchive.setValue(cur);
                 }
@@ -2422,7 +2428,7 @@
             if (report.fav) {
                 delete report.fav[tagName];
                 const keyLength = Object.keys(report.fav).length;
-                if (keyLength === 0 || keyLength === 1 && "none" in report.fav) {
+                if (keyLength === 0 || (keyLength === 1 && "none" in report.fav)) {
                     report.fav.none = 1;
                 }
             }
