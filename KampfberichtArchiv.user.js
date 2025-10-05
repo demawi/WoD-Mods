@@ -2286,7 +2286,7 @@
             const noneCount = await MyStorage.reportArchive.count({
                 index: ["fav.none"]
             });
-            if (allCount !== noneCount) {
+            if (true || allCount !== noneCount) {
                 const _this = this;
                 await MyStorage.reportArchive.getAll(false, async function (cur) {
                     _this.reportFavFix(cur);
@@ -2306,12 +2306,14 @@
             } else if (!cur.fav.none) {
                 const keyLength = Object.keys(cur.fav).length;
                 if (keyLength === 0 || (keyLength === 1 && "none" in cur.fav)) {
-                    if(cur.fav.none !== 1) {
+                    if (cur.fav.none !== 1) {
                         cur.fav.none = 1;
+                        console.warn("Fix report.fav to 1", cur);
                         await MyStorage.reportArchive.setValue(cur);
                     }
-                } else if(cur.fav.none !== 0) {
+                } else if (cur.fav.none !== 0) {
                     cur.fav.none = 0;
+                    console.warn("Fix report.fav to 0", cur);
                     await MyStorage.reportArchive.setValue(cur);
                 }
             }
