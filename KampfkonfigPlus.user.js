@@ -130,8 +130,8 @@
                 }
                 return object;
             });
-            const name = _WoD.getMyHeroName() + "_" + profileName + ".json";
-            _File.forDirectDownload(name, resultStr);
+            const name = _.WoD.getMyHeroName() + "_" + profileName + ".json";
+            _.File.forDirectDownload(name, resultStr);
         }
 
         /**
