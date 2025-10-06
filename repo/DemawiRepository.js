@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.12";
+    static version = "1.1.13";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -3924,6 +3924,7 @@ class demawiRepository {
                 }
             }
             removeClassNodes(myDocument.documentElement, "nowod");
+            removeClassNodes(myDocument.documentElement, "gadget_fixed_container"); // z.B. im klassischen Skin
             removeClassNodes(myDocument.documentElement, "tutorial");
             removeClassNodes(myDocument.documentElement, "intro_open");
 

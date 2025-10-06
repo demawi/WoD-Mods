@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.15.4
+// @version        0.15.5
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -3401,6 +3401,14 @@
             for (var i = 1; i <= 12; i++) {
                 buttonReplace("level[" + i + "]", "Level " + i, "Level" + i + ".html");
             }
+
+            const removeClassNodes = function (node, className) {
+                for (const cur of node.querySelectorAll("." + className + ":not(." + className + " ." + className + ")")) {
+                    cur.remove();
+                }
+            }
+            // Wurde nachträglich gefixed, muss insofern auch aus der Zwischenspeicherung entfernt werden
+            removeClassNodes(myDocument.documentElement, "gadget_fixed_container"); // z.B. im klassischen Skin
 
             myDocument.documentElement.outerHTML
             if (myDocument.documentElement) {
