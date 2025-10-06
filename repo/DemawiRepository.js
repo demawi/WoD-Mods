@@ -3924,6 +3924,7 @@ class demawiRepository {
                 }
             }
             removeClassNodes(myDocument.documentElement, "nowod");
+            removeClassNodes(myDocument.documentElement, "gadget_fixed_container"); // z.B. im klassischen Skin
             removeClassNodes(myDocument.documentElement, "tutorial");
             removeClassNodes(myDocument.documentElement, "intro_open");
 

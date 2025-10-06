@@ -3402,6 +3402,14 @@
                 buttonReplace("level[" + i + "]", "Level " + i, "Level" + i + ".html");
             }
 
+            const removeClassNodes = function (node, className) {
+                for (const cur of node.querySelectorAll("." + className + ":not(." + className + " ." + className + ")")) {
+                    cur.remove();
+                }
+            }
+            // Wurde nachträglich gefixed, muss insofern auch aus der Zwischenspeicherung entfernt werden
+            removeClassNodes(myDocument.documentElement, "gadget_fixed_container"); // z.B. im klassischen Skin
+
             myDocument.documentElement.outerHTML
             if (myDocument.documentElement) {
                 myDocument = myDocument.documentElement;
