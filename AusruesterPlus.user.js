@@ -120,7 +120,7 @@
             settingTable.append(_.UI.createTable(tableContent));
             tableContent = [];
 
-            _.SettingsPage.addHeader(settingTable, "Pro Held", "");
+            _.SettingsPage.addHeader(settingTable, "Pro Held", "Die Konfiguration wird für jeden Helden separat gespeichert.");
             const equipCfg = await EquipConfig.get();
 
             const elements = document.createElement("div");
@@ -128,7 +128,7 @@
             const updateElements = function () {
                 elements.style.display = equipCfg.deactivatedSlots ? "" : "none";
             }
-            tableContent.push(["Slot Deaktivierung: ", _.UI.createCheckBox(() => !!equipCfg.deactivatedSlots,
+            tableContent.push(["Einzelslot Konfiguration: ", _.UI.createCheckBox(() => !!equipCfg.deactivatedSlots,
                 async function (value) {
                     if (value) equipCfg.deactivatedSlots = {};
                     else delete equipCfg.deactivatedSlots;
@@ -142,18 +142,17 @@
                 if (lastSlotName === slotName) continue;
                 lastSlotName = slotName;
                 const slotElem = document.createElement("span");
-                slotElem.innerHTML = slotName;
                 slotElem.style.cursor = "pointer";
                 if (elements.children.length > 0) elements.append(document.createElement("br"));
                 elements.append(slotElem);
                 let slotIsDeactivated = deactivatedSlots[slotName] || false;
                 let updateColor = function () {
                     if (slotIsDeactivated) {
-                        slotElem.innerHTML = slotName + " <img src='" + _.UI.WOD_SIGNS.NO + "' />";
-                        //slotElem.style.color = _.UI.COLORS.RED;
+                        slotElem.innerHTML = "<img src='" + _.UI.WOD_SIGNS.NO + "' /> " + slotName;
+                        slotElem.title = "Slot ist NICHT aktiv";
                     } else {
-                        slotElem.innerHTML = slotName + " <img src='" + _.UI.WOD_SIGNS.YES + "' />";
-                        //slotElem.style.color = _.UI.COLORS.GREEN;
+                        slotElem.innerHTML = "<img src='" + _.UI.WOD_SIGNS.YES + "' /> " + slotName;
+                        slotElem.title = "Slot ist aktiv";
                     }
                 }
                 slotElem.onclick = async function () {
@@ -172,6 +171,7 @@
         }
 
         static async init() {
+            console.log("AAA ", EquipConfig.withSlotDeactivation())
             if (EquipConfig.withSlotDeactivation()) {
                 const equipCfg = await EquipConfig.get();
 
@@ -191,7 +191,7 @@
 
                     let updateColor = function () {
                         if (slotIsDeactivated) {
-                            slotHandler.style.color = _.UI.COLORS.RED;
+                            slotHandler.style.color = "#777777";
                         } else {
                             slotHandler.style.color = "white";
                         }
@@ -375,29 +375,29 @@
                 let lastUsedTime = new Date();
                 lastUsedTime.setDate(lastUsedTime.getDate() - anzahlTageFuerLastUsed);
                 lastUsedTime = lastUsedTime.getTime();
-                const text = "In den letzten "+anzahlTageFuerLastUsed+" Tagen aktiv";
+                const text = "In den letzten " + anzahlTageFuerLastUsed + " Tagen aktiv";
                 const lastUsedProfiles = [];
                 const nonLastUsedProfiles = [];
 
                 for (const [curProfileName, data] of Object.entries(EquipConfig.getLoadouts())) {
-                    if(data.ts >= lastUsedTime) lastUsedProfiles.push(curProfileName);
+                    if (data.ts >= lastUsedTime) lastUsedProfiles.push(curProfileName);
                     else nonLastUsedProfiles.push(curProfileName);
                 }
 
-                const addEntry = function(curProfileName) {
+                const addEntry = function (curProfileName) {
                     const selected = profilName === curProfileName ? "selected" : "";
                     _this.loadOutSelect.innerHTML += "<option " + selected + ">" + curProfileName + "</option>";
                 }
 
-                if(nonLastUsedProfiles.length > 0) {
+                if (nonLastUsedProfiles.length > 0) {
                     _this.loadOutSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯ In den letzten " + anzahlTageFuerLastUsed + " Tagen genutzt ⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
                 }
-                for(const cur of lastUsedProfiles.sort(_.util.localeComparator)) {
+                for (const cur of lastUsedProfiles.sort(_.util.localeComparator)) {
                     addEntry(cur);
                 }
-                if(nonLastUsedProfiles.length > 0) {
+                if (nonLastUsedProfiles.length > 0) {
                     _this.loadOutSelect.innerHTML += "<option disabled>⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯</option>";
-                    for(const cur of nonLastUsedProfiles.sort(_.util.localeComparator)) {
+                    for (const cur of nonLastUsedProfiles.sort(_.util.localeComparator)) {
                         addEntry(cur);
                     }
                 }
@@ -447,7 +447,7 @@
                 const profileName = _this.loadOutSelect.value;
                 const loadout = await EquipConfig.getLoadout(profileName);
                 await EquipConfig.setCurrent(profileName, true);
-                FormHandler.applyEquip(loadout);
+                Loadouter.applyLoadout(loadout);
             }
 
             const renameCurrent = async function () {
@@ -545,7 +545,7 @@
 
             this.vgSyncButton = createButton("NachfüllenTest " + this.marker_Right, async function () {
                 //_this.vgSyncButton.innerHTML = _this.vgSyncButton.innerHTML.replace(_this.marker_Right, _.UI.createSpinner().outerHTML);
-                VGKonfig.getDynamicVGs((await EquipConfig.getSelectedLoadout()).vgs, true);
+                VGKonfig.getDynamicVGs((await EquipConfig.getSelectedLoadout()).vgs, {}, true);
             });
 
             this.deleteButton = createButton("❌", async function () {
@@ -808,7 +808,13 @@
                 const selectInput = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
                 this.addSlotImagesToSelect(selectInput);
                 this.rearrangeOptions(selectInput);
-                selectInput.onchange = async function () {
+
+                // select2 scheint das standard-change event zu verbrauchen, weshalb wir hierüber gehen müssen
+                selectInput.onchange = function (evt) {
+                    const event = new CustomEvent("change2", evt);
+                    selectInput.dispatchEvent(event);
+                }
+                selectInput.addEventListener("change2", async function () {
                     VGKonfig.onEquipSelectChange(slotName, slotIdx);
                     EquipConfig.onEquipSlotChanged(slotName, slotIdx, false);
                     await ControlBar.onDataChange();
@@ -820,7 +826,7 @@
                     }
                     const firstZustandImgElem = selectInput.parentElement.children[0];
                     firstZustandImgElem.src = "/wod/css//skins/skin-8/images/icons/zustand_leer.gif";
-                    const curItemId = FormHandler.getSelectedValue(selectInput);
+                    const curItemId = FormHandler.selectField_getSelectedValue(selectInput);
                     if (curItemId) {
                         const parent = selectInput.parentElement;
                         const lastElem = parent.querySelector("input[type='submit']");
@@ -837,15 +843,96 @@
                     setTimeout(function () {
                         selectInput.nextSibling.style.boxShadow = "";
                     }, 1000);
-                };
+                });
                 _.Libs.betterSelect2(selectInput, {templateResult: _this.addSlotImgs});
-                const deleteButton = _.UI.addDeleteButtonForSelect(selectInput, selectInput.options[0].value);
-
+                _.UI.addClearButtonForSelect(selectInput, selectInput.options[0].value);
+                this.addLockButtonForSelect(selectInput, slotName);
             }
+            await this.initialCheckLockedItems();
 
             ControlBar.revalidateAll();
             await ControlBar.onDataChange(); // Initial
             FormHandler.sortInOrder();
+        }
+
+        static async initialCheckLockedItems() {
+            // auto-release items-ids die nicht mehr equipped sind
+            const lockedItems = _.util.cloneObject(EquipConfig.getLockedItems());
+            const initialEquipped = FormHandler.getEquipServer_OnlyIds();
+            for (const value of Object.values(initialEquipped)) {
+                if (Array.isArray(value)) {
+                    for (const listValue of value) {
+                        delete lockedItems[listValue];
+                    }
+                } else {
+                    delete lockedItems[value];
+                }
+            }
+            // Release non-equipped items
+            for (const value of Object.keys(lockedItems)) {
+                await EquipConfig.setUnlocked(value);
+            }
+        }
+
+        static addLockButtonForSelect(selectInput, slotName) {
+            const container = selectInput.parentElement;
+
+            const getSelectedId = function () {
+                return FormHandler.selectField_getSelectedValue(selectInput);
+            }
+
+            const unlockButton = document.createElement("span");
+            unlockButton.innerHTML = "🔒";
+            unlockButton.style.cursor = "pointer";
+            const checkIsLocked = function () {
+                if (EquipConfig.isLocked(getSelectedId())) {
+                    container.insertBefore(unlockButton, selectInput);
+                } else if (container.contains(unlockButton)) {
+                    container.removeChild(unlockButton);
+                }
+            }
+            checkIsLocked();
+
+            let currentValue = getSelectedId();
+            selectInput.addEventListener("change2", async chgEvt => {
+                if (EquipConfig.isLocked(currentValue)) {
+                    await EquipConfig.setLocked(getSelectedId(), slotName);
+                }
+            });
+
+            unlockButton.onclick = async function () {
+                await EquipConfig.setUnlocked(getSelectedId());
+                checkIsLocked();
+            }
+
+            const lockButton = _.UI.createButton("<span style='font-size:1.4em'>🔒</span>", async function () {
+                console.log("Lock Button clicked! " + getSelectedId());
+                lockButton.style.display = "none";
+                await EquipConfig.setLocked(getSelectedId(), slotName);
+                checkIsLocked();
+            })
+
+            const anchor = document.createElement("span");
+            anchor.style.display = "inline-block";
+            anchor.style.position = "absolute";
+            anchor.style.height = "100%";
+            anchor.style.zIndex = 10;
+
+            lockButton.style.display = "none";
+            container.addEventListener("mouseenter", function () {
+                if (EquipConfig.isLocked(getSelectedId())) return; // bereits gelocked
+                if (selectInput.options[selectInput.selectedIndex].text !== "") lockButton.style.display = "";
+            });
+            container.addEventListener("mouseleave", function () {
+                lockButton.style.display = "none";
+            });
+            container.style.position = "relative";
+            selectInput.parentElement.insertBefore(anchor, selectInput);
+            anchor.append(lockButton);
+            lockButton.style.position = "absolute";
+            lockButton.style.left = "-16px";
+            lockButton.style.top = "-3px";
+            return lockButton;
         }
 
         static rearrangeOptions(selectField) {
@@ -921,7 +1008,7 @@
                 return;
             }
 
-            const curEquippedAmount = FormHandler.getCurrentEquippedVGAmount(vgBaseNameWithGems);
+            const curEquippedAmount = FormHandler.getEquipUI_All_VGAmount(vgBaseNameWithGems);
 
             if (curEquippedAmount < vgCfg.amount) {
                 ControlBar.reportProblem(vgBaseNameWithGems, GemHandler.getVGFullWithImgs(vgBaseNameWithGems) + " zu wenig ausgerüstet " + curEquippedAmount + " < " + vgCfg.amount);
@@ -1048,7 +1135,7 @@
         static findFirstVGItem(vgBaseNameWithGems, slotName) {
             for (const [curSlotName, slotIdx] of FormHandler.getAllExistingSlots()) {
                 if (curSlotName !== slotName) continue;
-                const [instanceId, instanceName] = FormHandler.getSlotSelectedItemInformation(curSlotName, slotIdx);
+                const [instanceId, instanceName] = FormHandler.getEquipUI_Slot(curSlotName, slotIdx);
                 if (!instanceName) continue;
                 const curBaseName = _.WoDItemDb.getItemVGBaseName(instanceName);
                 const gems = GemHandler.getGemsFor(instanceId);
@@ -1073,7 +1160,7 @@
             }
 
             // Prüfen ob der neue Eintrag einen neuen Wert triggert
-            const [instanceId, itemName] = FormHandler.getSlotSelectedItemInformation(slotName, slotIdx);
+            const [instanceId, itemName] = FormHandler.getEquipUI_Slot(slotName, slotIdx);
             if (!itemName || !_.WoDItemDb.isVGName(itemName)) return;
             const vgBaseName = _.WoDItemDb.getItemVGBaseName(itemName);
             const gems = GemHandler.getGemsFor(instanceId);
@@ -1086,7 +1173,7 @@
         static checkRemoval(slotName, slotIdx) {
             if (!FormHandler.isMultiSlot(slotName)) {
                 for (const [vgBaseNameWithGems, vgCfg] of Object.entries(this.vgSelects)) {
-                    if (FormHandler.getCurrentEquippedVGAmount(vgBaseNameWithGems) <= 0) {
+                    if (FormHandler.getEquipUI_All_VGAmount(vgBaseNameWithGems) <= 0) {
                         this.remove(vgBaseNameWithGems);
                     }
                 }
@@ -1102,15 +1189,16 @@
         /**
          * Primäres Ziel: möglichst kleine Stacks aufbrauchen
          */
-        static getDynamicVGs(vgsDef, debug) {
+        static getDynamicVGs(vgsDef, lockedSlots, debug) {
             if (!vgsDef) return [];
             const result = {};
             for (const [slotName, itemsDef] of Object.entries(vgsDef)) {
                 // 1. Auswählbare VG-Statistiken zusammenzählen
                 const stacksDef = FormHandler.getSelectableVGStatistics(slotName);
                 if (!stacksDef) return;
-                const slotResultIds = result[slotName] = [];
-                const freeSlots = itemsDef.slots; // Anzahl verfügbarer Slots
+                const slotResult = result[slotName] = [];
+                const freeSlots = itemsDef.slots - (lockedSlots[slotName] || 0); // Anzahl verfügbarer Slots
+                console.log("FREESLOTS " + slotName + ": " + freeSlots);
                 const vgsToFillCount = Object.keys(itemsDef.items).length; // Anzahl gewünschter unterschiedlicher VGs
                 const additionalSlots = freeSlots - vgsToFillCount;
                 if (additionalSlots < 0) console.error("Tasche kann nicht ausreichend gefüllt werden, da nicht genügend Slots für VGs frei sind!");
@@ -1168,10 +1256,13 @@
                         return map;
                     }, {});
                     const kResult = this.#getKnappsack(numberArray, slotUsage.slots, wantedAmount);
-                    if (debug) console.log("Knappsack: ", kResult);
+                    if (debug) console.log("Knappsack: ", kResult, slotUsage);
                     for (const [key, value] of Object.entries(kResult[1])) {
                         for (let i = 0; i < value; i++) {
-                            slotResultIds.push(slotUsage.info.stacks[key][i]);
+                            slotResult.push({
+                                id: slotUsage.info.stacks[key][i],
+                                name: slotUsage.name,
+                            });
                         }
                     }
                 }
@@ -1303,13 +1394,13 @@
                 await this.#save();
             } else {
                 // Migration-Skript only need once to check
-                for(const cur of Object.values(this.#equipConfigs.loadouts)) {
+                for (const cur of Object.values(this.#equipConfigs.loadouts)) {
                     cur.tsSaved = cur.tsSaved || cur.ts;
                 }
             }
             this.#equipConfigs.name = this.#heroName;
-            [this.#serverEquipOhneVGs, this.#serverEquipUniqueVgs] = FormHandler.getUIEquipOnlyIds(1);
-            this.#serverEquip = FormHandler.getServerEquipOnlyIds();
+            [this.#serverEquipOhneVGs, this.#serverEquipUniqueVgs] = FormHandler.getEquipUI_All_OnlyIds(1);
+            this.#serverEquip = FormHandler.getEquipServer_OnlyIds();
             console.log("Loaded Equip: ", this.#serverEquip);
         }
 
@@ -1326,14 +1417,50 @@
         }
 
         static withSlotDeactivation() {
-            return this.#equipConfigs._deactivatedSlots;
-        }
-
-        static getSlotDeactivations() {
-            if (!this.#equipConfigs._deactivatedSlots) return {};
             return this.#equipConfigs.deactivatedSlots;
         }
 
+        static getSlotDeactivations() {
+            if (!this.#equipConfigs.deactivatedSlots) return {};
+            return this.#equipConfigs.deactivatedSlots;
+        }
+
+        static useSlotWithinApplyEquip(slotName) {
+            return !this.isSlotDeactivated(slotName) && (FormHandler.isMultiSlot(slotName) || !this.hasResetEquip(slotName));
+        }
+
+        static getLockedItems() {
+            if (!this.#equipConfigs.lockedItems) return {};
+            return this.#equipConfigs.lockedItems;
+        }
+
+        static isLocked(itemId) {
+            // TODO: auto lock reset point items
+            itemId = Number(itemId);
+            return this.getLockedItems()[itemId] || false;
+        }
+
+        static async setLocked(itemId, slotName) {
+            itemId = Number(itemId);
+            const lockedItems = this.#equipConfigs.lockedItems || (this.#equipConfigs.lockedItems = {});
+            lockedItems[itemId] = slotName;
+            await this.#save();
+        }
+
+        static async setUnlocked(itemId) {
+            itemId = Number(itemId);
+            const lockedItems = this.#equipConfigs.lockedItems || (this.#equipConfigs.lockedItems = {});
+            delete lockedItems[itemId];
+            await this.#save();
+        }
+
+        static hasResetEquip(slotName) {
+            FormHandler.getEquipUI_All_WithFullInformation()
+        }
+
+        /**
+         * Wird für die Validierung benutzt
+         */
         static isSlotDeactivated(slotName) {
             const deactivations = this.getSlotDeactivations();
             if (!deactivations) return false;
@@ -1397,7 +1524,7 @@
             const loadout = await EquipConfig.getSelectedLoadout()
             if (!loadout) return;
 
-            let equippedIds = FormHandler.getUIEquipOnlyIds()[slotName];
+            let equippedIds = FormHandler.getEquipUI_All_OnlyIds()[slotName];
             if (!equippedIds || !Array.isArray(equippedIds)) equippedIds = [equippedIds];
 
             const checkExists = function (itemDef) {
@@ -1420,7 +1547,7 @@
 
         static async checkValidationOnEquipSlot(loadOutEquip, slotName, slotIdx, initial) {
             if (EquipConfig.isSlotDeactivated(slotName)) return;
-            const [instanceId, itemName] = FormHandler.getSlotSelectedItemInformation(slotName, slotIdx);
+            const [instanceId, itemName] = FormHandler.getEquipUI_Slot(slotName, slotIdx);
             const wantedId = loadOutEquip[slotName] && loadOutEquip[slotName].id;
             const wantedName = loadOutEquip[slotName] && loadOutEquip[slotName].name;
             if (wantedId !== instanceId) {
@@ -1444,7 +1571,7 @@
 
         static getLoadoutFromUI(ignoreVGs) {
             const equipConfig = {
-                equip: FormHandler.getCurrentEquipWithFullInformation(ignoreVGs),
+                equip: FormHandler.getEquipUI_All_WithFullInformation(ignoreVGs),
             }
             const vgDefs = VGKonfig.getCurrentUiVGKonfig(equipConfig.equip);
             if (vgDefs) equipConfig.vgs = vgDefs;
@@ -1452,7 +1579,7 @@
         }
 
         static differs_UI_Server() {
-            const currentUiEquip = FormHandler.getUIEquipOnlyIds();
+            const currentUiEquip = FormHandler.getEquipUI_All_OnlyIds();
             const previousEquip = this.#serverEquip;
             const result = !_.util.deepEqual(currentUiEquip, previousEquip);
             console.log("differs_UI_Server", result, previousEquip, currentUiEquip);
@@ -1470,7 +1597,7 @@
          * Überprüft die Instanz-Ids der nicht VGs, dazu noch die VG-Konfigs
          */
         static async differs_UI_Loadout(loadOutName) {
-            const [currentUiEquip, uniqueVGs] = FormHandler.getUIEquipOnlyIds(1);
+            const [currentUiEquip, uniqueVGs] = FormHandler.getEquipUI_All_OnlyIds(1);
             loadOutName = loadOutName || this.getCurrentLoadoutName();
             const [loadoutEquip, loadoutVgs] = await this.#getSnapshotFromLoadout(loadOutName);
             if (!loadoutEquip) return [false, false];
@@ -1538,7 +1665,7 @@
             const now = new Date().getTime();
             this.#equipConfigs.ts = now;
             const current = this.#equipConfigs.current;
-            if(current) this.#equipConfigs.loadouts[current].ts = now;
+            if (current) this.#equipConfigs.loadouts[current].ts = now;
             this.#equipConfigs.next = _.WoD.getNaechsteDungeonZeit(true);
             if (directSave) await MyStorage.equipHero.setValue(this.#equipConfigs);
         }
@@ -1696,24 +1823,16 @@
             return this.getTheForm()["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
         }
 
+        static isMultiSlot(slotName) {
+            return slotName === "ring" || slotName === "orden" || slotName === "tasche";
+        }
+
         static getLastSelectField(slotName) {
             let lastSlotIdx;
             for (const [curSlotName, curSlotIdx] of FormHandler.getAllExistingSlots()) {
                 if (curSlotName === slotName) lastSlotIdx = curSlotIdx;
             }
             return FormHandler.getSelectField(slotName, lastSlotIdx);
-        }
-
-        /**
-         * @return [itemId, itemName] (can be [] if no item is selected)
-         */
-        static getSlotSelectedItemInformation(slotName, slotIdx) {
-            const cur = this.getSelectField(slotName, slotIdx);
-            const option = cur.options[cur.selectedIndex];
-            if (!option.text) return [];
-            const unselectOption = cur.options[0];
-            const itemId = Number(cur.value) || (-Number(unselectOption.value));
-            return [itemId, option.text];
         }
 
         static getAvailableVGAmount(slotName, vgBaseNameWithGems) {
@@ -1724,10 +1843,10 @@
             return availableAmount.sum;
         }
 
-        static getCurrentEquippedVGAmount(vgBaseNameWithGems) {
+        static getEquipUI_All_VGAmount(vgBaseNameWithGems) {
             let result = 0;
             for (const [slotName, slotIdx] of this.getAllExistingSlots()) {
-                const [itemId, itemName] = this.getSlotSelectedItemInformation(slotName, slotIdx);
+                const [itemId, itemName] = this.getEquipUI_Slot(slotName, slotIdx);
                 if (!itemName) continue;
                 let [curVgBaseName, amount, max] = _.WoDItemDb.getItemVGInfos(itemName);
                 if (GemHandler.hasGems(vgBaseNameWithGems)) curVgBaseName = GemHandler.getBaseNameWithGems(curVgBaseName, GemHandler.getGemsFor(itemId));
@@ -1737,21 +1856,63 @@
             return result;
         }
 
-        static getCurrentEquipWithFullInformation(ignoreVGs) {
+        /**
+         * @return [itemId, itemName] (can be [] if no item is selected)
+         */
+        static getEquipUI_Slot(slotName, slotIdx) {
+            const cur = this.getSelectField(slotName, slotIdx);
+            const option = cur.options[cur.selectedIndex];
+            if (!option.text) return [];
+            const unselectOption = cur.options[0];
+            const itemId = Number(cur.value) || (-Number(unselectOption.value));
+            return [itemId, option.text];
+        }
+
+        static getEquipUI_All_WithFullInformation(ignoreVGs) {
+            return this.#getEquipWithFullInformation("Equip", ignoreVGs);
+        }
+
+        static getEquipUI_All_OnlyIds(vgMode) {
+            return this.#getEquipCfgIds("Equip", vgMode, cur => {
+                let result = Number(cur.value);
+                if (result) return result;
+                const unselectOption = cur.options[0];
+                return -Number(unselectOption.value) || 0;
+            });
+        }
+
+        /**
+         * Gibt die vorherig ausgewählten IDs zurück, also die, die auf dem Server gespeichert sind.
+         * {
+         *  [slotName]: itemId || [itemId], // direkt oder als array (bei multislot)
+         * }
+         */
+        static getEquipServer_OnlyIds() {
+            return this.#getEquipCfgIds("Default", false, cur => Number(cur.value));
+        }
+
+        static getEquipServer_All_WithFullInformation(ignoreVGs) {
+            return this.#getEquipWithFullInformation("Default", ignoreVGs);
+        }
+
+        /**
+         * Gibt die vorherig ausgewählten IDs zurück, also die, die auf dem Server gespeichert sind.
+         * {
+         *  [slotName]: {id: itemId, name: name} || [{id: itemId, name: name}] // ein array für multislots
+         * }
+         */
+        static #getEquipWithFullInformation(target, ignoreVGs) {
+            const type = target === "Default" ? "input" : "select";
             const theForm = this.getTheForm();
             const equip = {};
-            const allFields = theForm.querySelectorAll("select[name^='LocationEquip']");
+            const allFields = theForm.querySelectorAll(type + "[name^='Location" + target + "']");
             for (const cur of allFields) {
-                const option = cur.options[cur.selectedIndex];
-                const itemName = option.text;
+                const [slotName, itemName, itemId] = this.#getInformationFromField(cur);
                 if (!itemName || (ignoreVGs && _.WoDItemDb.isVGName(itemName))) continue;
-                const unselectOption = cur.options[0];
-                const slotMatch = cur.name.match(/^LocationEquip\[go_(\w*)\]\[(\d*)\].*/);
-                const slotName = slotMatch[1];
+
                 const isMultipleSlot = this.isMultiSlot(slotName);
-                // TODO: Veredelungen mit hinzufügen, falls nach einer Alternative gesucht werden muss
                 const item = {
-                    id: Number(cur.value) || -Number(unselectOption.value),
+                    id: itemId,
                     name: itemName,
                 }
                 if (isMultipleSlot) {
@@ -1761,36 +1922,50 @@
                     equip[slotName] = item;
                 }
             }
+            console.log("getCurrentEquipWithFullInformation ", ignoreVGs, target, equip, allFields.length);
             return equip;
         }
 
-        /**
-         * Gibt die vorherig ausgewählten IDs zurück, also die, die auf dem Server gespeichert sind.
-         */
-        static getServerEquipOnlyIds() {
-            return this.#getEquipCfgIds("input", "Default", false, cur => Number(cur.value));
+        static #getInformationFromField(field) {
+            let slotName;
+            let itemName;
+            let itemId;
+
+            const patternString = new RegExp("^Location\\w*\\[go_(\\w*)\]\\[(\\d*)\\].*");
+            let slotMatch = field.name.match(patternString);
+            slotName = slotMatch[1];
+
+            if (field.tagName.toLowerCase() === "select") { // current UI selection
+                const option = field.options[field.selectedIndex];
+                itemName = option.text;
+                itemId = Number(field.value) || -Number(field.options[0].value);
+            } else { // input (Saved on server)
+                itemId = Number(field.value);
+                if (itemId > 0) {
+                    const selectField = field.parentElement.querySelector("select");
+                    for (const option of selectField.options) {
+                        if (option.value === "0") {
+                            itemName = option.text;
+                            break;
+                        }
+                    }
+                }
+            }
+            return [slotName, itemName, itemId];
         }
 
-        static getUIEquipOnlyIds(vgMode) {
-            return this.#getEquipCfgIds("select", "Equip", vgMode, cur => {
-                let result = Number(cur.value);
-                if (result) return result;
-                const unselectOption = cur.options[0];
-                return -Number(unselectOption.value) || 0;
-            });
-        }
-
-        static #getEquipCfgIds(type, name, vgMode, idFn) {
+        static #getEquipCfgIds(target, vgMode, idFn) {
+            const type = target === "Default" ? "input" : "select";
             const theForm = document.getElementsByName("the_form")[0];
             const equip = {};
-            const allFields = theForm.querySelectorAll(type + "[name^='Location" + name + "']"); // Select or Input-Fields
+            const allFields = theForm.querySelectorAll(type + "[name^='Location" + target + "']"); // Select or Input-Fields
             const vgs = [];
             for (const cur of allFields) {
-                const patternString = new RegExp("^Location" + name + "\\[go_(\\w*)\\]\\[(\\d*)\\].*");
+                const patternString = new RegExp("^Location" + target + "\\[go_(\\w*)\\]\\[(\\d*)\\].*");
                 const slotMatch = cur.name.match(patternString);
                 const slotName = slotMatch[1];
                 if (vgMode) { // !!! geht nur bei den SelectFields, da nur dort die ItemNamen hinterlegt sind
-                    const itemName = this.getSelectedItemText(cur);
+                    const itemName = this.selectField_getSelectedItemText(cur);
                     if (_.WoDItemDb.isVGName(itemName)) {
                         vgs.push(itemName);
                         continue;
@@ -1819,24 +1994,20 @@
             return equip;
         }
 
-        static getSelectedItemText(selectField) {
+        static selectField_getSelectedItemText(selectField) {
             const option = selectField.options[selectField.selectedIndex];
             return option.text;
         }
 
-        static getSelectedValue(selectField) {
+        static selectField_getSelectedValue(selectField) {
             const value = Number(selectField.value);
             if (value === 0) return -Number(selectField.options[0].value);
             if (value < 0) return;
             return value;
         }
 
-        static getSlotIdx(selectField) {
+        static selectField_getSlotIdx(selectField) {
             return selectField.name.match(/^LocationEquip\[go_(\w*)\]\[(\d*)\].*/)[2];
-        }
-
-        static isMultiSlot(slotName) {
-            return slotName === "ring" || slotName === "orden" || slotName === "tasche";
         }
 
         static _allSlotNameCache;
@@ -1915,7 +2086,7 @@
             for (const tr of trWrapper.children) {
                 const selectField = tr.querySelector("select[name^='LocationEquip']");
                 if (!selectField) continue;
-                const slotIdx = Number(this.getSlotIdx(selectField));
+                const slotIdx = Number(this.selectField_getSlotIdx(selectField));
                 let selectedName = selectField.options[selectField.selectedIndex].text;
                 let sortGroup;
                 let colorCode;
@@ -1950,132 +2121,6 @@
                 _.UI.insertAtIndex(trWrapper, tr, i);
                 i++;
             }
-        }
-
-        /**
-         * Genau dies Equip anlegen und nichts anderes. Und an den Server senden.
-         * Um exakt zu funktionieren, muss die Seite aktuell sein, da man auch explizit Gegenstände ablegen muss.
-         */
-        static applyEquip(loadout) {
-            const equipChangesId = {};
-            const equip = loadout.equip;
-            const vgs = VGKonfig.getDynamicVGs(loadout.vgs);
-            console.log("APPLY_EQUIP", equip, vgs);
-
-            const slotDeactivations = EquipConfig.getSlotDeactivations();
-            console.log("Slot Deactivations", slotDeactivations);
-
-            for (const [slotName, itemIds] of Object.entries(equip)) {
-                if (slotDeactivations[slotName]) continue;
-                const slotList = equipChangesId[slotName] = [];
-                if (Array.isArray(itemIds)) {
-                    for (const itemId of itemIds) {
-                        slotList.push(itemId.id);
-                    }
-                } else {
-                    slotList.push(itemIds.id);
-                }
-            }
-            for (const [slotName, itemIds] of Object.entries(vgs)) {
-                if (slotDeactivations[slotName]) continue;
-                const slotList = equipChangesId[slotName] || (equipChangesId[slotName] = []);
-                if (Array.isArray(itemIds)) {
-                    for (const itemId of itemIds) {
-                        slotList.push(itemId);
-                    }
-                } else {
-                    slotList.push(itemIds);
-                }
-            }
-            const theForm = document.getElementsByName("the_form")[0];
-            const newForm = document.createElement("form");
-            newForm.style.display = "none";
-            newForm.method = theForm.method;
-            newForm.action = theForm.action;
-            newForm.acceptCharset = theForm.acceptCharset;
-            const defaultEquip = this.getServerEquipOnlyIds();
-
-            function addFormValue(key, value) {
-                const newValue = document.createElement("input");
-                newValue.type = "hidden";
-                newValue.name = key;
-                newValue.value = value;
-                newForm.append(newValue);
-            }
-
-            addFormValue("ok", "Änderungen durchführen"); // wird benötigt
-
-            for (const cur of theForm.querySelectorAll("input[type='hidden']")) {
-                if (cur.name.startsWith("Location")) continue;
-                const newHidden = document.createElement("input");
-                newHidden.type = "hidden";
-                newHidden.name = cur.name;
-                newHidden.value = cur.value;
-                newForm.append(newHidden);
-            }
-
-            const adds = [];
-            const removes = [];
-
-            function addEntry(slotName, idx, value) {
-                const entry = [slotName, idx, value];
-                if (value < 0) removes.push(entry);
-                else adds.push(entry);
-            }
-
-            function getId(itemDef) {
-                if (typeof itemDef === "number") return itemDef;
-                return itemDef.id;
-            }
-
-            const getDefaultEquipArray = function (defaultEquip) {
-                if (defaultEquip && !Array.isArray(defaultEquip)) defaultEquip = [defaultEquip];
-                return defaultEquip;
-            }
-
-            for (const slotName of this.getAllSlotNames()) {
-                if (slotDeactivations[slotName]) continue;
-                let idx = 0;
-                const wantedEquipIds = equipChangesId[slotName] || [];
-                for (const cur of wantedEquipIds) {
-                    const itemId = getId(cur);
-                    const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
-                    if (!defaultEquipSlot || !defaultEquipSlot.includes(itemId)) {
-                        addEntry(slotName, idx, itemId);
-                        idx++;
-                    }
-                }
-                // Überprüfen, was abgelegt werden soll
-                const defaultEquipSlot = getDefaultEquipArray(defaultEquip[slotName]);
-                if (defaultEquipSlot) { // tasche kann auch mal komplett nicht vorhanden sein
-                    for (const itemId of defaultEquipSlot) {
-                        if (!wantedEquipIds.includes(itemId)) {
-                            addEntry(slotName, idx, -itemId);
-                            idx++;
-                        }
-                    }
-                }
-            }
-
-            // Erst alles entfernen, dann alles hinzufügen. Verhindert die häufigste Meldung aufgrunde von Tragebeschränkungen.
-            const reindex = {};
-            const getNextIndex = function (slotName) {
-                let result = reindex[slotName];
-                if (result === undefined) {
-                    return reindex[slotName] = 0;
-                }
-                return reindex[slotName] = (reindex[slotName] + 1);
-            }
-            for (const cur of removes) {
-                addFormValue("LocationEquip[go_" + cur[0] + "][" + getNextIndex(cur[0]) + "]", cur[2]);
-            }
-            for (const cur of adds) {
-                addFormValue("LocationEquip[go_" + cur[0] + "][" + getNextIndex(cur[0]) + "]", cur[2]);
-            }
-
-            console.log("SUBMIT", removes, adds);
-            document.body.append(newForm);
-            newForm.submit();
         }
 
         static _allVGItemStats = {};
@@ -2131,11 +2176,216 @@
 
             // Die bereits ausgewählten Items sind nicht in der Option enthalten
             for (let idx = 1, l = this.getAllSlotCounts()[slotName]; idx < l; idx++) {
-                const [itemId, itemText] = this.getSlotSelectedItemInformation(slotName, idx);
+                const [itemId, itemText] = this.getEquipUI_Slot(slotName, idx);
                 if (itemText) addEntry(itemId, itemText);
             }
 
             return this._allVGItemStats[slotName];
+        }
+
+
+    }
+
+    /**
+     * Funktionen die sich auf das Loadout beziehen.
+     */
+    class Loadout {
+        static isItemInLoadout(loadout, slotName, itemId) {
+            itemId = Number(itemId);
+            if (FormHandler.isMultiSlot(slotName)) {
+                const slot = loadout.equip[slotName];
+                if (slot) {
+                    for (const curItem of slot) {
+                        if (curItem.id === itemId) return true;
+                    }
+                }
+            } else {
+                const item = loadout.equip[slotName];
+                return item && item.id === itemId;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Für das Anwenden eines Loadouts
+     */
+    class Loadouter {
+
+        /**
+         * Genau dies Equip anlegen und nichts anderes. Und an den Server senden.
+         * Um exakt zu funktionieren, muss die Seite aktuell sein, da man auch explizit Gegenstände ablegen muss.
+         */
+        static applyLoadout(loadout) {
+            const equipChangesId = {};
+            const equip = loadout.equip;
+            const lockedSlots = this.getLockedSlotsCount(loadout);
+            const vgs = VGKonfig.getDynamicVGs(loadout.vgs, lockedSlots, true);
+            const lockedItems = EquipConfig.getLockedItems();
+            console.log("APPLY_EQUIP", lockedSlots, loadout, equip, vgs, lockedItems);
+
+            for (const [slotName, items] of Object.entries(equip)) {
+                if (!EquipConfig.useSlotWithinApplyEquip(slotName)) continue;
+                const slotList = equipChangesId[slotName] = [];
+                if (Array.isArray(items)) {
+                    for (const item of items) {
+                        slotList.push(item);
+                    }
+                } else {
+                    slotList.push(items);
+                }
+            }
+            for (const [slotName, items] of Object.entries(vgs)) {
+                if (!EquipConfig.useSlotWithinApplyEquip(slotName)) continue;
+                const slotList = equipChangesId[slotName] || (equipChangesId[slotName] = []);
+                if (Array.isArray(items)) {
+                    for (const item of items) {
+                        slotList.push(item);
+                    }
+                } else {
+                    slotList.push(items);
+                }
+            }
+            const theForm = document.getElementsByName("the_form")[0];
+            const newForm = document.createElement("form");
+            newForm.style.display = "none";
+            newForm.method = theForm.method;
+            newForm.action = theForm.action;
+            newForm.acceptCharset = theForm.acceptCharset;
+            const serverEquip = FormHandler.getEquipServer_All_WithFullInformation(false);
+
+            function addFormValue(key, value) {
+                const newValue = document.createElement("input");
+                newValue.type = "hidden";
+                newValue.name = key;
+                newValue.value = value;
+                newForm.append(newValue);
+            }
+
+            addFormValue("ok", "Änderungen durchführen"); // wird benötigt
+
+            for (const cur of theForm.querySelectorAll("input[type='hidden']")) {
+                if (cur.name.startsWith("Location")) continue;
+                const newHidden = document.createElement("input");
+                newHidden.type = "hidden";
+                newHidden.name = cur.name;
+                newHidden.value = cur.value;
+                newForm.append(newHidden);
+            }
+
+            const adds = [];
+            const removes = [];
+
+            function addEntry(slotName, value, itemName) {
+                const entry = [slotName, value, itemName];
+                if (value < 0) {
+                    if (!EquipConfig.isLocked(-value)) {
+                        removes.push(entry);
+                    }
+                } else adds.push(entry);
+            }
+
+            function getId(itemDef) {
+                if (typeof itemDef === "number") return itemDef;
+                return itemDef.id;
+            }
+
+            const getDefaultEquipArray = function (defaultEquip) {
+                if (defaultEquip && !Array.isArray(defaultEquip)) defaultEquip = [defaultEquip];
+                return defaultEquip;
+            }
+
+            for (const slotName of FormHandler.getAllSlotNames()) {
+                if (!EquipConfig.useSlotWithinApplyEquip(slotName)) continue;
+                // Was soll angelegt werden?
+                const wantedEquipIds = equipChangesId[slotName] || [];
+                for (const cur of wantedEquipIds) {
+                    const itemId = getId(cur);
+                    console.log("WWWWWWanted", cur);
+                    const defaultEquipSlotArray = getDefaultEquipArray(serverEquip[slotName]);
+                    if (!defaultEquipSlotArray || !defaultEquipSlotArray.find(a => a.id === itemId)) {
+                        addEntry(slotName, itemId, cur.name);
+                    }
+                }
+                // Was soll abgelegt werden?
+                const defaultEquipSlotArray = getDefaultEquipArray(serverEquip[slotName]);
+                if (defaultEquipSlotArray) { // tasche kann auch mal komplett nicht vorhanden sein
+                    for (const item of defaultEquipSlotArray) {
+                        if (!wantedEquipIds.find(a => a.id === item.id)) {
+                            console.log("WWWWWRemove", item, serverEquip[slotName], wantedEquipIds);
+                            addEntry(slotName, -item.id, item.name);
+                        }
+                    }
+                }
+            }
+
+            // Indizierung: Erst alles entfernen, dann alles hinzufügen. Verhindert die häufigste Meldung aufgrunde von Tragebeschränkungen.
+            const reindex = {};
+            const getNextIndex = function (slotName) {
+                let result = reindex[slotName];
+                if (result === undefined) {
+                    return reindex[slotName] = 0;
+                }
+                return reindex[slotName] = (reindex[slotName] + 1);
+            }
+            for (const cur of removes) {
+                addFormValue("LocationEquip[go_" + cur[0] + "][" + getNextIndex(cur[0]) + "]", cur[1]);
+            }
+            for (const cur of adds) {
+                addFormValue("LocationEquip[go_" + cur[0] + "][" + getNextIndex(cur[0]) + "]", cur[1]);
+            }
+
+            console.log("SUBMIT", removes, adds);
+            document.body.append(newForm);
+            newForm.submit();
+        }
+
+        /**
+         * Gibt die reale Liste zurück, welche Items in Bezug aur den Serverstatus gelocked sind.
+         */
+        static getRealLockedItems() {
+            const lockedItems = EquipConfig.getLockedItems();
+            const initialEquipped = FormHandler.getEquipServer_OnlyIds();
+            const realLockedItems = {};
+
+            const addIfExists = function (itemId) {
+                const slotName = lockedItems[itemId];
+                if (slotName) {
+                    realLockedItems[itemId] = slotName;
+                }
+            }
+
+            for (const value of Object.values(initialEquipped)) {
+                if (Array.isArray(value)) {
+                    for (const listValue of value) {
+                        addIfExists(listValue);
+                    }
+                } else {
+                    addIfExists(value);
+                }
+            }
+            return realLockedItems;
+        }
+
+        /**
+         * Gibt auf das Loadout bezogen zurück wie viele Slots durch gelockte Items verbraucht werden.
+         */
+        static getLockedSlotsCount(loadout) {
+            const groupedLockedItems = {};
+            for (const [itemId, slotName] of Object.entries(this.getRealLockedItems())) {
+                (groupedLockedItems[slotName] || (groupedLockedItems[slotName] = [])).push(itemId);
+            }
+            const result = {};
+            for (const [slotName, itemIdList] of Object.entries(groupedLockedItems)) {
+                for (const itemId of itemIdList) {
+                    // locked but not in loadout
+                    if (!Loadout.isItemInLoadout(loadout, slotName, itemId)) {
+                        result[slotName] = (result[slotName] || (result[slotName] = 0)) + 1;
+                    }
+                }
+            }
+            console.log("getLockedSlotsCount", groupedLockedItems, result)
+            return result;
         }
     }
 

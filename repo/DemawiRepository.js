@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.13";
+    static version = "1.1.13.1";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -4398,7 +4398,7 @@ class demawiRepository {
             return spinner;
         }
 
-        static addDeleteButtonForSelect(selectInput, deleteValue) {
+        static addClearButtonForSelect(selectInput, deleteValue) {
             if (deleteValue === undefined) deleteValue = "";
             const container = selectInput.parentElement;
             const deleteButton = _.UI.createButton("<span style='font-size:0.8em'> ❌</span>", async function () {

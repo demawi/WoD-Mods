@@ -2009,7 +2009,7 @@
             const container = document.createElement("span");
             const input = document.createElement("select");
             container.append(input);
-            _.UI.addDeleteButtonForSelect(input);
+            _.UI.addClearButtonForSelect(input);
             input.onchange = onchangeFn;
             return [input, container];
         }
