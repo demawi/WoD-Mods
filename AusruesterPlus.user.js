@@ -2219,7 +2219,7 @@
                 }
             }
 
-            // Die bereits ausgewählten Items sind nicht in der Option enthalten
+            // Die bereits ausgewählten Items sind nicht in der Option enthalten (idx=0 auslassen, da wir dort bereits die Options ausgelesen haben)
             for (let idx = 1, l = this.getAllSlotCounts()[slotName]; idx < l; idx++) {
                 const [itemId, itemText] = this.getEquipUI_Slot(slotName, idx);
                 if (itemText) addEntry(itemId, itemText);
