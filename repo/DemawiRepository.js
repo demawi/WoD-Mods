@@ -1859,6 +1859,15 @@ class demawiRepository {
         static #everyPageRuns;
 
         static async startMod(win, doc) {
+            try {
+                this.startModMainFrame(win, doc);
+            } catch(e) {
+                console.error(e);
+                throw new Error(e);
+            }
+        }
+
+        static async startModMainFrame(win, doc) {
             for (const runnable of Object.values(this.#everyPageRuns)) {
                 // console.log("RUN", runnable);
                 eval(runnable);

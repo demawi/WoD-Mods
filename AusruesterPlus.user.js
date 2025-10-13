@@ -58,8 +58,9 @@
                     const currentCfg = myEquipCfg.current;
                     if (currentCfg) {
                         const combatConfigElem = nextDungeonSpan.parentElement.querySelector("div[id^='CombatDungeonConfigSelector']");
-                        const dungeonId = combatConfigElem.id.split("|")[1];
-                        combatConfigElem.insertBefore(doc.createTextNode("Verhalten: "), combatConfigElem.querySelector("a"));
+                        // const dungeonId = combatConfigElem.id.split("|")[1];
+                        const child = combatConfigElem.querySelector(":scope > :has(a)") || combatConfigElem.querySelector("a");
+                        combatConfigElem.insertBefore(doc.createTextNode("Verhalten: "), child);
                         const myElem = doc.createElement("div");
                         nextDungeonSpan.parentElement.append(myElem);
                         myElem.append(doc.createTextNode("Ausrüstung: "));
@@ -139,7 +140,6 @@
                     updateElements();
                 })]);
             updateElements();
-            const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
             let lastSlotName;
             const _this = this;
             for (const slotName of FormHelper.getAllPotentialSlotNames()) {
@@ -149,7 +149,7 @@
                 slotElem.style.cursor = "pointer";
                 if (elements.children.length > 0) elements.append(document.createElement("br"));
                 elements.append(slotElem);
-                let slotIsDeactivated = deactivatedSlots[slotName] || false;
+                let slotIsDeactivated = this.isSlotDeactive(equipCfg, slotName);
                 let updateColor = async function () {
                     if (slotIsDeactivated) {
                         slotElem.innerHTML = "<img src='" + _.UI.WOD_SIGNS.NO + "' /> " + FormHelper.getRealSlotName(slotName);
@@ -160,8 +160,8 @@
                     }
                 }
                 slotElem.onclick = async function () {
-                    slotIsDeactivated = !slotIsDeactivated;
                     const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+                    slotIsDeactivated = !slotIsDeactivated;
                     deactivatedSlots[slotName] = slotIsDeactivated;
                     await MyStorage.equipHero.setValue(equipCfg);
                     await updateColor();
@@ -180,17 +180,21 @@
             }
         }
 
+        static isSlotDeactive(equipCfg, slotName) {
+            return equipCfg.deactivatedSlots && (equipCfg.deactivatedSlots[slotName] || false);
+        }
+
         static async updateSlotActiveColor() {
             const equipCfg = await EquipConfig.get();
 
-            const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
+            const deactivatedSlots = equipCfg.deactivatedSlots;
             const theForm = FormHelper.getTheForm();
             const allSlots = FormHelper.getAllExistingSlots();
             let lastSlotName;
             for (const [slotName, slotIdx] of allSlots) {
                 //if (lastSlotName === slotName) continue;
                 lastSlotName = slotName;
-                let slotIsDeactivated = deactivatedSlots[slotName] || false;
+                let slotIsDeactivated = this.isSlotDeactive(equipCfg, slotName);
                 const selectInput = theForm["LocationEquip[go_" + slotName + "][" + slotIdx + "]"];
 
                 let slotHandler;
