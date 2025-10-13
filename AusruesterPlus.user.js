@@ -142,7 +142,7 @@
             const deactivatedSlots = equipCfg.deactivatedSlots || (equipCfg.deactivatedSlots = {});
             let lastSlotName;
             const _this = this;
-            for (const [slotName, idx] of FormHelper.getAllExistingSlots()) {
+            for (const slotName of FormHelper.getAllPotentialSlotNames()) {
                 if (lastSlotName === slotName) continue;
                 lastSlotName = slotName;
                 const slotElem = document.createElement("span");
@@ -1912,6 +1912,10 @@
             orden: "Orden",
             tasche: "Tasche",
             ring: "Ringe",
+        }
+
+        static getAllPotentialSlotNames() {
+            return Object.keys(this.#slotMapping);
         }
 
         static getRealSlotName(slotName) {
