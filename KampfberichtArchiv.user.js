@@ -1,12 +1,14 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.15.5
+// @version        0.15.6
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
 //
 // @match          *://*.world-of-dungeons.de/
 // @match          *://*.world-of-dungeons.de/wod/spiel/*
+// @match          *://*.world-of-dungeons.de/item/*
+// @match          *://*.world-of-dungeons.de/skill/*
 // @match          *://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
 //
@@ -43,7 +45,7 @@
             await MySettings.getFresh();
             this.isAdmin = _.WoD.isInAdminViewMode();
 
-            Maintenance.checkReportFavFix();
+            Maintenance.continousCheck();
 
             switch (view) {
                 case _.WoD.VIEW.TOMBOLA:
@@ -1158,8 +1160,15 @@
                 const searchFor = "&id=" + instanceId;
                 finding = document.querySelector(".content_table a[href*=\"" + searchFor + "\"]");
             } else {
-                const searchFor = "/item/" + _.util.fixedEncodeURIComponent(itemName).replaceAll("%20", "+");
+                let searchFor = "/item/" + _.util.encodeURIComponentFixed(itemName).replaceAll("%20", "+");
                 finding = document.querySelector(".content_table a[href*=\"" + searchFor + "\"]:not([href*=\"&id=\"])");
+                if (!finding) {
+                    searchFor = "item.php?name=" + _.util.encodeURIComponentFixed(itemName).replaceAll("%20", "+");
+                    finding = document.querySelector(".content_table a[href*=\"" + searchFor + "\"]:not([href*=\"&id=\"])");
+                }
+                if (!finding) {
+                    console.log("searched for: ", searchFor);
+                }
             }
             if (!finding) {
                 console.log("Cant find: ", itemName, instanceId, destroyed, debug);
@@ -2009,7 +2018,7 @@
             const container = document.createElement("span");
             const input = document.createElement("select");
             container.append(input);
-            _.UI.addDeleteButtonForSelect(input);
+            _.UI.addClearButtonForSelect(input);
             input.onchange = onchangeFn;
             return [input, container];
         }
@@ -2271,6 +2280,9 @@
             }
         }
 
+        /**
+         * Wartungs-Button: überprüft alle möglichen Probleme
+         */
         static async allReportArchive() {
             const start = new Date().getTime();
             const _this = this;
@@ -2280,22 +2292,25 @@
             console.log("Maintenance.all: " + (new Date().getTime() - start) / 1000);
         }
 
-        static async checkReportFavFix() {
-            const start = new Date().getTime();
+        /**
+         * Wird on-the-fly immer aufgerufen. Überprüfung für die Fixes sollte somit sehr leichtgewichtig sein.
+         */
+        static async continousCheck() {
             const allCount = await MyStorage.reportArchive.count();
             const noneCount = await MyStorage.reportArchive.count({
                 index: ["fav.none"]
             });
-            if (true || allCount !== noneCount) {
+            if (allCount !== noneCount) {
                 const _this = this;
                 await MyStorage.reportArchive.getAll(false, async function (cur) {
                     _this.reportFavFix(cur);
                 });
             }
-            //console.log("Maintenance.checkReportFavFix: " + (new Date().getTime() - start) / 1000);
-            //console.log("Maintenance.checkReportFavFix ", allCount, noneCount);
         }
 
+        /**
+         * Stellt sicher, dass report.fav immer auch ".none" enthält.
+         */
         static async reportFavFix(cur) {
             if (!cur.fav || typeof cur.fav !== "object") {
                 console.warn("Ein Report ohne .fav wurde gefunden", cur);
@@ -3433,7 +3448,7 @@
             if (reportSources.levels) {
                 for (let i = 0, l = reportSources.levels.length; i < l; i++) {
                     const level = reportSources.levels[i];
-                    addHTML("Level" + (i + 1) + ".html", level);
+                    if(level) addHTML("Level" + (i + 1) + ".html", level);
                 }
             }
             const downloadFileName = reportMeta.gruppe + "_" + reportMeta.loc.name + "_" + _.util.formatDateAndTime(new Date(reportMeta.ts)).replaceAll(".", "_") + ".zip";

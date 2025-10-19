@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.13";
+    static version = "1.1.14";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -800,7 +800,7 @@ class demawiRepository {
                     const transaction = connection.transaction(this.storageId, "readonly");
                     const objectStore = transaction.objectStore(this.storageId);
                     const [target, keyRange] = await this.constructor.QueryOps.getTargetAndKeyRange(_this, objectStore, query);
-                    if(query && query.debug) {
+                    if (query && query.debug) {
                         console.log("Query ", query, target, keyRange);
                     }
                     const request = target.count(keyRange);
@@ -1859,6 +1859,15 @@ class demawiRepository {
         static #everyPageRuns;
 
         static async startMod(win, doc) {
+            try {
+                this.startModMainFrame(win, doc);
+            } catch(e) {
+                console.error(e);
+                throw new Error(e);
+            }
+        }
+
+        static async startModMainFrame(win, doc) {
             for (const runnable of Object.values(this.#everyPageRuns)) {
                 // console.log("RUN", runnable);
                 eval(runnable);
@@ -1919,7 +1928,7 @@ class demawiRepository {
 
             if (warning) {
                 const elem = doc.getElementById("gadgetNextdungeonTime");
-                if (!elem.parentElement.getElementsByClassName("outdatedMarker").length) {
+                if (elem && !elem.parentElement.getElementsByClassName("outdatedMarker").length) {
                     const div = doc.createElement("div");
                     div.innerHTML = warning;
                     div.style.color = "red";
@@ -2909,7 +2918,7 @@ class demawiRepository {
         }
 
         static getSkillUrlAlsPopup(skillName) {
-            return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(skillName);
+            return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.encodeURIComponentFixed(skillName);
         }
 
         /**
@@ -3474,18 +3483,32 @@ class demawiRepository {
         }
 
         static getItemUrl(itemName) {
-            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _.util.fixedEncodeURIComponent(itemName);
+            return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _.util.encodeURIComponentFixed(itemName);
         }
 
         static createSkillLink(skillName, onclickPromise, fixId) {
             return this.createWoDPopupLink(skillName, "/wod/spiel/hero/skill.php", {name: skillName}, onclickPromise, fixId);
         }
 
+        static createItemLinkUrl(itemName, instanceId, searchParams) {
+            searchParams = searchParams || {};
+            searchParams.name = itemName;
+            searchParams.is_popup = 1;
+            if (instanceId) searchParams.id = instanceId;
+            const myUrl = new URL("/wod/spiel/hero/item.php", document.baseURI);
+            if (searchParams) {
+                for (const [key, value] of Object.entries(searchParams)) {
+                    myUrl.searchParams.append(key, value);
+                }
+            }
+            return myUrl.toString();
+        }
+
         static createItemLink(itemName, instanceId, onclickPromise) {
             const searchParams = {
                 name: itemName,
             };
-            if (instanceId) searchParams.instanceId = instanceId;
+            if (instanceId) searchParams.id = instanceId;
             return this.createWoDPopupLink(itemName, "/wod/spiel/hero/item.php", searchParams, onclickPromise);
         }
 
@@ -3502,12 +3525,7 @@ class demawiRepository {
             result.href = url;
             result.innerHTML = anzeigeName;
             result.target = "_blank";
-            const _this = this;
-            result.onclick = function () {
-                const win = _this.wodPopup(url, undefined, undefined, fixId);
-                if (win && windowCallback) windowCallback(win);
-                return false;
-            }
+            result.setAttribute("onclick", "return wo(this.href);");
             return result;
         }
 
@@ -3931,6 +3949,11 @@ class demawiRepository {
             const tooltip = myDocument.getElementsByClassName("tooltip")[0];
             if (tooltip) tooltip.remove();
 
+            // fix item Links
+            for (const curItemLink of myDocument.querySelectorAll("a[href*='/item/']")) {
+                this.fixItemLink(curItemLink);
+            }
+
             // Stellt sicher, dass auch immer der Pfad mit bei einer URL-Angabe mit dabei ist.
             // Wenn die Datei exportiert wird, wird die Pfadangabe ja ebenfalls "vergessen".
             this.ensureAllUrlsHavePathname(myDocument);
@@ -3941,6 +3964,14 @@ class demawiRepository {
                 }
             }
             return myDocument;
+        }
+
+        static fixItemLink(aElement) {
+            let href = aElement.href;
+            if (href.includes("&") && !href.includes("?")) {
+                href = href.replace("&", "?"); // Fehler von WoD, manchmal wird kein Fragezeichen Initial verwendet
+            }
+            aElement.href = _.WoD.createItemLinkUrl(aElement.textContent.trim(), new URL(href).searchParams.get("id"));
         }
 
         /**
@@ -4142,6 +4173,24 @@ class demawiRepository {
         }
     }
 
+    static Environment = class {
+
+        static isTest() {
+            return (typeof testEnvironment !== "undefined");
+        }
+    }
+
+    static DomObserver = class {
+
+        static observeElement(element, attributes, childList, subtree, callback) {
+            const observer = new MutationObserver(callback);
+            observer.observe(element, {
+                attributes: attributes, childList: childList, subtree: subtree
+            });
+            return observer;
+        }
+    }
+
     static Libs = class {
 
         static #alreadyLoaded = {};
@@ -4224,12 +4273,13 @@ class demawiRepository {
         /**
          * Übernimmt Breite der aktuellen Auswahl
          */
-        static betterSelect(selectField, cfg) {
+        static betterSelect(selectField, cfg, callback) {
             cfg = cfg || {};
             cfg.dropdownAutoWidth = true;
             cfg.width = "auto";
             setTimeout(function () {
                 $(selectField).select2(cfg);
+                if (callback) callback();
             }, 0);
         }
 
@@ -4352,7 +4402,7 @@ class demawiRepository {
             for (const buttonDef of buttonContentArray) {
                 const button = buttonDef.button;
                 const content = buttonDef.content;
-                button.onclick = async function () {
+                button.addEventListener("click", async function () {
                     contentAnchor.innerHTML = "";
                     currentButton.style.display = "";
                     button.style.display = "none";
@@ -4363,7 +4413,7 @@ class demawiRepository {
                         contentAnchor.append(wodOriginalContent);
                     }
                     if (buttonDef.title) wodTitle.childNodes[0].nodeValue = buttonDef.title;
-                }
+                });
                 buttonBar.append(button);
             }
 
@@ -4398,7 +4448,7 @@ class demawiRepository {
             return spinner;
         }
 
-        static addDeleteButtonForSelect(selectInput, deleteValue) {
+        static addClearButtonForSelect(selectInput, deleteValue) {
             if (deleteValue === undefined) deleteValue = "";
             const container = selectInput.parentElement;
             const deleteButton = _.UI.createButton("<span style='font-size:0.8em'> ❌</span>", async function () {
@@ -5078,11 +5128,12 @@ class demawiRepository {
             return error;
         }
 
-        static fixedEncodeURIComponent(str) {
+        static encodeURIComponentFixed(str) {
             return encodeURIComponent(str).replace(/[!'()*]/g, function (c) {
                 return '%' + c.charCodeAt(0).toString(16);
             });
         }
+
     }
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
