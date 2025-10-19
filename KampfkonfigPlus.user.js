@@ -36,10 +36,14 @@
             await _.Libs.useJQueryUI();
             await _.Libs.betterSelect2(document.querySelectorAll("#wod-orders select")[0]);
 
-            const elements = [];
-            elements.push(...document.querySelector(".orders_top_row").nextSibling.nextSibling.querySelectorAll("select"));
-            elements.push(...document.querySelector(".orders_top_row").nextSibling.nextSibling.nextSibling.nextSibling.nextSibling.querySelectorAll("select"));
-            for (const cur of elements) {
+            setTimeout(Mod.scan, 400);
+        }
+
+        static async scan() {
+            const ueberschriften = ["Fertigkeit", "Gegenstand"];
+            for (const cur of document.querySelectorAll("#wod-orders select")) {
+                const ueberschrift = cur.previousElementSibling?.textContent;
+                if (!ueberschriften.includes(ueberschrift)) continue;
                 let display = cur.style.display;
                 _.DomObserver.observeElement(cur, true, false, false, () => {
                     const newDisplay = cur.style.display;
@@ -47,7 +51,7 @@
                         display = newDisplay;
                         cur.nextSibling.style.display = newDisplay;
                     }
-                    if(cur.nextSibling) {
+                    if (cur.nextSibling) {
                         const renderedElement = cur.nextSibling.querySelector(".select2-selection__rendered");
                         if (renderedElement) renderedElement.innerHTML = cur.options[cur.selectedIndex].text;
                     }

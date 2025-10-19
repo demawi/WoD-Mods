@@ -318,6 +318,8 @@
         static marker_Left = "⮝"; // ⮜Commit changes to indexedDb
         static marker_Rollback = "🔙"; //
         static marker_Warn = "⚠️";
+        static marker_brokenLink = "⛓️‍💥";
+        static marker_link = "🔗";
 
         static updateProfileName() {
             const currentLoadoutName = EquipConfig.getCurrentLoadoutName();
@@ -2196,6 +2198,7 @@
             if (!slotName) {
                 this.sortInOrder2(this.#getTrWrapper("tasche"));
                 this.sortInOrder2(this.#getTrWrapper("ring"));
+                this.sortInOrder2(this.#getTrWrapper("orden"));
             } else if (this.isMultiSlot(slotName)) {
                 this.sortInOrder2(this.#getTrWrapper(slotName));
             }
