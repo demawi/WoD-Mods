@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.10.0
+// @version        0.10.1
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
@@ -2426,7 +2426,7 @@
 
             for (const [itemId, itemDef] of Object.entries(this.getRealLockedItems())) {
                 const itemName = itemDef[1];
-                // if (!EquipConfig.isResetItem(itemName)) addEntry(itemDef[0], Number(itemId), itemName);
+                if (!EquipConfig.isResetItem(itemName)) addEntry(itemDef[0], Number(itemId), itemName);
             }
 
             return this.#createApplyForm(adds, removes);
@@ -2534,7 +2534,7 @@
                 wirklichWichtig.sort((a, b) => {
                     return getPrio(a) - getPrio(b);
                 })
-                //adds.push(...wirklichWichtig);
+                adds.push(...wirklichWichtig);
                 // Tasche als letztes
                 const slotSort = function (a) {
                     return a[0] === "tasche" ? 1 : 0;
