@@ -1861,7 +1861,7 @@ class demawiRepository {
         static async startMod(win, doc) {
             try {
                 this.startModMainFrame(win, doc);
-            } catch(e) {
+            } catch (e) {
                 console.error(e);
                 throw new Error(e);
             }
@@ -3849,6 +3849,7 @@ class demawiRepository {
             let maxSuccessLevel = 0;
             let maxLevel;
 
+            let completeResult;
             const getSucceededNumbers = function (roomsSucceeded, roomsCount, levelsSucceeded, levelCount) {
                 if (locName === "Offene Rechnung" || locName === "Bühne frei!") {
                     if (roomsSucceeded > 0) {
@@ -3856,10 +3857,11 @@ class demawiRepository {
                         levelsSucceeded++;
                     }
                 } else if (locName === "Das Schloss in den Wolken") {
-                    // wenn Altes Goldstück in neues Goldstück eingetauscht wird: Level 9 als Belohnungslevel wird nicht gezählt
+                    // im 8ten Level bei der Illusionistin kann man nicht sterben. Das Level wird als Fehlschlag gewertet aber man kommt in ein extra Level 9.
                     if (levelsSucceeded === 8 && levelCount === 9 && roomsSucceeded === 9 && roomsCount === 10) {
                         roomsSucceeded++;
                         levelsSucceeded++;
+                        completeResult = 0;
                     }
                 } else if (locName === "Schiff ahoi!") {
                     // Level 7: "Baasras Truhe": Der Erfolg in diesem Level ist nicht erforderlich, um den Dungeon erfolgreich abzuschließen.
@@ -3895,6 +3897,9 @@ class demawiRepository {
                 rooms: [finishedRooms, fullRooms],
                 members: [fullSuccessMembers, groupSize],
             };
+            if (completeResult !== undefined) {
+                result.complete = completeResult;
+            }
             if (Object.keys(kos).length > 0) result.ko = kos;
             if (xps) result.xp = xps;
             return result;

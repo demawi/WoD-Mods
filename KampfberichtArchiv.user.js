@@ -2460,6 +2460,7 @@
          */
         static getSuccessLevel(reportMeta) {
             if (reportMeta && reportMeta.success && reportMeta.success.levels) {
+                if (typeof reportMeta.success.complete === "number") return reportMeta.success.complete;
                 const members = reportMeta.success.members;
                 const levels = reportMeta.success.levels;
                 if (members) {
@@ -3448,7 +3449,7 @@
             if (reportSources.levels) {
                 for (let i = 0, l = reportSources.levels.length; i < l; i++) {
                     const level = reportSources.levels[i];
-                    if(level) addHTML("Level" + (i + 1) + ".html", level);
+                    if (level) addHTML("Level" + (i + 1) + ".html", level);
                 }
             }
             const downloadFileName = reportMeta.gruppe + "_" + reportMeta.loc.name + "_" + _.util.formatDateAndTime(new Date(reportMeta.ts)).replaceAll(".", "_") + ".zip";
