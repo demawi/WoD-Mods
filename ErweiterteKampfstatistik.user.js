@@ -639,12 +639,20 @@
 
     class SearchEngine {
 
-        static DEBUG_INDIRECT = true;
-        static DEBUG_OWNER = true;
+        static DEBUG_INDIRECT = false;
+        static DEBUG_INDIRECT_VERBOSE = false;
+        static DEBUG_INDIRECT_TRACE = false;
+        static DEBUG_OWNER = false;
 
         static debugIndirect(...args) {
             if (this.DEBUG_INDIRECT) {
                 console.log("[EKS][indirekt]", ...args);
+            }
+        }
+
+        static debugIndirectVerbose(...args) {
+            if (this.DEBUG_INDIRECT && this.DEBUG_INDIRECT_VERBOSE) {
+                console.log("[EKS][indirekt][verbose]", ...args);
             }
         }
 
@@ -961,7 +969,7 @@
 
         static getUnitKey(unit) {
             if (!unit || !unit.id) return "?";
-            return (unit.id.name || "?") + "|" + (!!unit.id.isHero ? "h" : "m");
+            return (unit.id.name || "?") + "|" + (unit.id.idx || 1) + "|" + (!!unit.id.isHero ? "h" : "m");
         }
 
         static getTargetUnitKey(unit) {
@@ -1119,39 +1127,139 @@
         }
 
         static getRoundStatusUnit(round, targetUnit) {
-            const units = [];
-            (round.helden || []).forEach(unit => units.push(unit));
-            (round.monster || []).forEach(unit => units.push(unit));
-            const targetIdx = targetUnit && targetUnit.id && targetUnit.id.idx;
-            if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
-                const exact = util.arraySearch(units, unit => {
-                    return unit && unit.id && unit.id.name === targetUnit.id.name && ("" + unit.id.idx) === ("" + targetIdx);
-                });
-                if (exact) return exact;
-            }
-            return util.arraySearch(units, unit => _.ReportParser.isUnitEqual(unit, targetUnit));
+             const units = [];
+             (round.helden || []).forEach(unit => units.push(unit));
+             (round.monster || []).forEach(unit => units.push(unit));
+             const targetIdx = targetUnit && targetUnit.id && targetUnit.id.idx;
+             const targetName = targetUnit && targetUnit.id && targetUnit.id.name;
+             const targetOwnerName = this.getUnitOwnerName(targetUnit);
+             const targetSide = targetUnit && targetUnit.id && targetUnit.id.isHero;
+             const matchesOwner = unit => {
+                 if (!targetOwnerName) return false;
+                 if (!unit || !unit.id) return false;
+                 const unitOwnerName = this.getUnitOwnerName(unit);
+                 if (unitOwnerName && unitOwnerName === targetOwnerName) return true;
+                 if (unit.id.ownerId && unit.id.ownerId.name && unit.id.ownerId.name === targetOwnerName) return true;
+                 return false;
+             };
+             if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
+                 const exact = util.arraySearch(units, unit => {
+                     return unit && unit.id && unit.id.name === targetName && ("" + unit.id.idx) === ("" + targetIdx);
+                 });
+                 if (exact) return exact;
+             }
+             if (targetOwnerName) {
+                 const ownerExact = util.arraySearch(units, unit => {
+                     if (!unit || !unit.id || unit.id.name !== targetName) return false;
+                     if (targetSide !== undefined && !!unit.id.isHero !== !!targetSide) return false;
+                     if (!matchesOwner(unit)) return false;
+                     if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
+                         return ("" + unit.id.idx) === ("" + targetIdx);
+                     }
+                     return true;
+                 });
+                 if (ownerExact) return ownerExact;
+             }
+             const unitEqual = util.arraySearch(units, unit => _.ReportParser.isUnitEqual(unit, targetUnit));
+             if (unitEqual) return unitEqual;
+
+             // Fallback: auch nach einer toten/abwesenden Unit mit gleichen Namen suchen (für persistente Effekte)
+             // Dies ist wichtig, wenn eine Unit gestorben ist, aber ihre Effekte noch wirken
+             if (targetName && !targetUnit.id.ownerId) {
+                 const deadUnit = util.arraySearch(units, unit => {
+                     if (!unit || !unit.id) return false;
+                     if (unit.id.name !== targetName) return false;
+                     if (targetSide !== undefined && !!unit.id.isHero !== !!targetSide) return false;
+                     return true;
+                 });
+                 if (deadUnit) return deadUnit;
+             }
+             return null;
+         }
+
+        static isWhiteStatusActive(unit) {
+            if (!unit) return false;
+            const zustandClass = ("" + (unit.zustandClass || "")).toLowerCase();
+            if (zustandClass.includes("rep_wounds_none")) return true;
+            if (zustandClass.includes("rep_status_msg")) return false;
+
+            const zustand = ("" + (unit.zustand || "")).trim().toLowerCase();
+            if (!zustand) return false;
+            if (/bewusstlos|zerst\u00f6rt|tot|versteckt|au\u00dfer\s+gefecht|kampfunf\u00e4hig/.test(zustand)) return false;
+            return /bereit\s+zum\s+kampf|angriffslustig|kerngesund/.test(zustand);
+        }
+
+        static isUnitStillInFight(unit) {
+            if (!unit) return false;
+            const zustandClass = ("" + (unit.zustandClass || "")).toLowerCase();
+            if (zustandClass.includes("rep_status_msg")) return false;
+            const zustand = ("" + (unit.zustand || "")).trim().toLowerCase();
+            if (!zustand) return false;
+            return !/bewusstlos|zerst\u00f6rt|tot|versteckt|au\u00dfer\s+gefecht|kampfunf\u00e4hig/.test(zustand);
         }
 
         static resolveHpLossContributors(round, targetUnit, effectSourceHistory) {
-            const statusUnit = this.getRoundStatusUnit(round, targetUnit);
-            if (!statusUnit || !statusUnit.fx) {
-                return {
-                    contributors: [],
-                    knownWeight: 0,
-                    totalWeight: 0,
-                    debugSources: [],
-                };
-            }
-            const weights = {};
+             const statusUnit = this.getRoundStatusUnit(round, targetUnit);
+             let sourceList = [];
+
+             if (statusUnit && statusUnit.fx && statusUnit.fx.length > 0) {
+                 // Normal case: Unit hat aktive Effekte in der aktuellen Runde
+                 sourceList = statusUnit.fx;
+             } else if (effectSourceHistory && Object.keys(effectSourceHistory).length > 0) {
+                 // Fallback: Unit ist tot oder nicht in der Runde,aber hat noch Effekte von vorherigen Runden
+                 const targetKey = this.getTargetUnitKey(targetUnit);
+                 for (const sourceKey of Object.keys(effectSourceHistory)) {
+                     const byTarget = effectSourceHistory[sourceKey];
+                     if (byTarget && byTarget[targetKey] && Object.keys(byTarget[targetKey]).length > 0) {
+                         // Es gibt bereits registrierte Contributors für diese Quelle und dieses Ziel
+                         // Das bedeutet, dieser Effekt war in vorherigen Runden aktiv und sollte weiterwirken
+                         sourceList.push({
+                             quelle: sourceKey,
+                             fx: [{name: "Persistent", wirkung: "-1"}],
+                         });
+                     }
+                 }
+             }
+
+             if (!sourceList || sourceList.length === 0) {
+                 return {
+                     contributors: [],
+                     knownWeight: 0,
+                     totalWeight: 0,
+                     debugSources: [],
+                     sourceRejectSummary: {},
+                     contributorRejectSummary: {},
+                 };
+             }
+             const allUnits = [];
+             (round.helden || []).forEach(unit => allUnits.push(unit));
+             (round.monster || []).forEach(unit => allUnits.push(unit));
+             const allUnitKeys = {};
+             allUnits.forEach(unit => {
+                 allUnitKeys[this.getUnitKey(unit)] = unit;
+             });
+             const weights = {};
             let totalWeight = 0;
             const debugSources = [];
-            for (const sourceEntry of statusUnit.fx) {
-                if (!sourceEntry || !sourceEntry.quelle || !sourceEntry.fx) continue;
+            const sourceRejectSummary = {};
+            const contributorRejectSummary = {};
+             const addReason = (summary, reason) => {
+                 if (!reason) return;
+                 summary[reason] = (summary[reason] || 0) + 1;
+             };
+             for (const sourceEntry of sourceList) {
+                if (!sourceEntry || !sourceEntry.quelle || !sourceEntry.fx) {
+                    addReason(sourceRejectSummary, "SOURCE_ENTRY_INVALID");
+                    continue;
+                }
                 let hpLossValue = 0;
                 sourceEntry.fx.forEach(effect => {
                     hpLossValue += this.parseHpLossFromWirkung(effect);
                 });
-                if (!(hpLossValue > 0)) continue;
+                if (!(hpLossValue > 0)) {
+                    addReason(sourceRejectSummary, "HPLOSS_NON_POSITIVE");
+                    continue;
+                }
                 totalWeight += hpLossValue;
 
                 const sourceKey = this.normalizeEffectSourceName(sourceEntry.quelle);
@@ -1159,29 +1267,86 @@
                 const byTarget = effectSourceHistory[sourceKey];
                 let contributors = (byTarget && byTarget[targetKey]) ? Object.values(byTarget[targetKey]) : [];
                 let usedFallback = false;
-                if (contributors.length === 0 && byTarget) {
-                    const collected = {};
-                    Object.values(byTarget).forEach(byUnitKey => {
-                        Object.entries(byUnitKey || {}).forEach(([unitKey, unit]) => {
-                            collected[unitKey] = unit;
-                        });
+                if (contributors.length === 0 && byTarget && targetUnit && targetUnit.id) {
+                    // Fallback: gleiche Ziel-Einheit ohne idx-Zwang (Name+Seite), falls idx in Event/Action abweicht.
+                    const targetName = (targetUnit.id.name || "").toLowerCase();
+                    const targetSide = !!targetUnit.id.isHero ? "h" : "m";
+                    const matchingKeys = Object.keys(byTarget).filter(curKey => {
+                        const parts = ("" + curKey).split("|");
+                        if (parts.length < 3) return;
+                        const keyName = (parts[0] || "").toLowerCase();
+                        const keySide = parts[2];
+                        return keyName === targetName && keySide === targetSide;
                     });
-                    contributors = Object.values(collected);
-                    usedFallback = contributors.length > 0;
+                    if (matchingKeys.length === 1) {
+                        contributors = Object.values(byTarget[matchingKeys[0]] || {});
+                        usedFallback = contributors.length > 0;
+                    }
                 }
-                debugSources.push({
+                const sourceDebug = {
                     source: sourceEntry.quelle,
                     normalizedSource: sourceKey,
                     hpLossValue: hpLossValue,
+                    effects: (sourceEntry.fx || []).map(effect => ({
+                        name: effect && effect.name,
+                        wirkung: effect && effect.wirkung,
+                        parsedHpLoss: this.parseHpLossFromWirkung(effect),
+                    })),
                     targetKey: targetKey,
                     usedFallback: usedFallback,
+                    candidateCount: contributors.length,
+                    acceptedCount: 0,
+                    rejectedCount: 0,
+                    contributorDecisions: [],
                     matchedContributors: contributors.map(unit => unit.id && unit.id.name),
-                });
-                if (contributors.length === 0) continue;
+                };
+                debugSources.push(sourceDebug);
+                if (contributors.length === 0) {
+                    addReason(sourceRejectSummary, "NO_HISTORY_FOR_SOURCE_TARGET");
+                    sourceDebug.reason = "NO_HISTORY_FOR_SOURCE_TARGET";
+                    continue;
+                }
 
-                const contributionPerSource = hpLossValue / contributors.length;
+                const acceptedContributors = [];
                 contributors.forEach(unit => {
-                    if (_.ReportParser.isUnitEqual(unit, targetUnit)) return; // Selbstschaden nicht zurechnen
+                    if (_.ReportParser.isUnitEqual(unit, targetUnit)) {
+                        sourceDebug.rejectedCount++;
+                        sourceDebug.contributorDecisions.push({
+                            unit: unit && unit.id && unit.id.name,
+                            unitKey: this.getUnitKey(unit),
+                            accepted: false,
+                            reason: "REJECT_SELF_DAMAGE",
+                        });
+                        addReason(contributorRejectSummary, "REJECT_SELF_DAMAGE");
+                        return; // Selbstschaden nicht zurechnen
+                    }
+                     const unitKey = this.getUnitKey(unit);
+                     if (!allUnitKeys[unitKey]) {
+                         sourceDebug.rejectedCount++;
+                         sourceDebug.contributorDecisions.push({
+                             unit: unit && unit.id && unit.id.name,
+                             unitKey: unitKey,
+                             accepted: false,
+                             reason: "REJECT_NOT_IN_ROUND",
+                         });
+                         addReason(contributorRejectSummary, "REJECT_NOT_IN_ROUND");
+                         return; // Nur Einheiten aus dieser Runde (auch tote)
+                     }
+                    acceptedContributors.push(unit);
+                    sourceDebug.acceptedCount++;
+                    sourceDebug.contributorDecisions.push({
+                        unit: unit && unit.id && unit.id.name,
+                        unitKey: unitKey,
+                        accepted: true,
+                        reason: "ACCEPT",
+                    });
+                });
+                if (acceptedContributors.length === 0) {
+                    addReason(sourceRejectSummary, "NO_ELIGIBLE_CONTRIBUTORS");
+                    continue;
+                }
+                const contributionPerSource = hpLossValue / acceptedContributors.length;
+                acceptedContributors.forEach(unit => {
                     const unitKey = this.getUnitKey(unit);
                     const current = weights[unitKey] || {unit: unit, weight: 0};
                     current.weight += contributionPerSource;
@@ -1196,6 +1361,8 @@
                 knownWeight: knownWeight,
                 totalWeight: totalWeight,
                 debugSources: debugSources,
+                sourceRejectSummary: sourceRejectSummary,
+                contributorRejectSummary: contributorRejectSummary,
             };
         }
 
@@ -1206,8 +1373,7 @@
             const totalWeight = contributionContext.totalWeight || 0;
             if (!(knownWeight > 0) || !(totalWeight > 0)) return [];
 
-            // Nur der bekannte Anteil wird Charakteren zugerechnet.
-            const assignableDamage = damageValue * Math.min(1, knownWeight / totalWeight);
+            const assignableDamage = Math.min(damageValue, knownWeight);
             if (!(assignableDamage > 0)) return [];
 
             if (contributors.length === 1) {
@@ -1274,7 +1440,11 @@
                 }
             }
             this.debugIndirect("Split", {
+                requestedDamage: damageValue,
                 assignableDamage: assignableDamage,
+                cappedToKnownWeight: assignableDamage < damageValue,
+                knownWeight: knownWeight,
+                totalWeight: totalWeight,
                 contributors: contributors.map((cur, idx) => ({
                     unit: cur.unit && cur.unit.id && cur.unit.id.name,
                     weight: capacities[idx],
@@ -1367,8 +1537,9 @@
             }
 
             var stats = this.createStat();
-            const effectSourceHistory = {};
             const companionOwnerByUnitKey = {};
+            const indirectAttributionByContributor = {};
+            const indirectAttributionTrace = [];
 
 
             var filter = statQuery.filter; // position, attackType, fertigkeit, units
@@ -1384,6 +1555,7 @@
                     const area = areas[areaNr - 1];
                     area.nr = areaNr;
                     const finalAreaNr = areaNr;
+                    const effectSourceHistory = {};
 
                     const rounds = area.rounds;
                     for (var roundNr = 0, l = rounds.length; roundNr < l; roundNr++) {
@@ -1487,67 +1659,200 @@
                         });
 
                         if (!wantAll && (statQuery.type === "attack" || statQuery.type === "defense")) {
-                            (round.actions.regen || []).forEach(action => {
-                                const isHpLossEvent = !!((action.event && action.event.kind === "hploss") || (action.skill && action.skill.event && action.skill.name === "hploss"));
-                                if (!isHpLossEvent) return;
-                                action.type = "regen";
-                                action.level = level;
-                                action.area = area;
-                                action.round = round;
-                                action.targets.forEach(target => {
-                                    var damages = target.damage;
-                                    if (!damages || damages.length === 0) return;
-                                    for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
-                                        const damage = damages[damageIndex];
-                                        const contributionContext = SearchEngine.resolveHpLossContributors(round, target.unit, effectSourceHistory);
-                                        const attributions = SearchEngine.splitHpLossDamageByContributors(damage.value, contributionContext);
-                                        SearchEngine.debugIndirect("Event", {
+                            const expectedTargetIsHero = statQuery.type === "attack" ? !wantHeroes : wantHeroes;
+                            const hpLossEvents = (round.actions.regen || []).filter(action => action && action.event && action.event.kind === "hploss");
+                            hpLossEvents.forEach(lossAction => {
+                                const targetUnit = (lossAction.targets && lossAction.targets[0] && lossAction.targets[0].unit) || lossAction.unit;
+                                const targetName = targetUnit && targetUnit.id && targetUnit.id.name;
+                                const targetIdx = targetUnit && targetUnit.id && targetUnit.id.idx;
+                                const targetKey = SearchEngine.getTargetUnitKey(targetUnit);
+                                if (!targetUnit || !targetUnit.id) {
+                                    SearchEngine.debugIndirectVerbose("TargetDecision", {
+                                        level: level.nr,
+                                        area: area.nr,
+                                        round: round.nr,
+                                        target: targetName,
+                                        targetIdx: targetIdx,
+                                        targetKey: targetKey,
+                                        decision: "SKIP",
+                                        reason: "TARGET_INVALID",
+                                    });
+                                    return;
+                                }
+                                if (!!targetUnit.id.isHero !== expectedTargetIsHero) {
+                                    SearchEngine.debugIndirectVerbose("TargetDecision", {
+                                        level: level.nr,
+                                        area: area.nr,
+                                        round: round.nr,
+                                        target: targetName,
+                                        targetIdx: targetIdx,
+                                        targetKey: targetKey,
+                                        targetIsHero: !!targetUnit.id.isHero,
+                                        expectedTargetIsHero: expectedTargetIsHero,
+                                        decision: "SKIP",
+                                        reason: "WRONG_TARGET_SIDE",
+                                    });
+                                    return;
+                                }
+
+                                const hpLossValue = Number(lossAction.event.value || lossAction.event.loss || 0);
+                                if (!(hpLossValue > 0)) {
+                                    SearchEngine.debugIndirectVerbose("TargetDecision", {
+                                        level: level.nr,
+                                        area: area.nr,
+                                        round: round.nr,
+                                        target: targetName,
+                                        targetIdx: targetIdx,
+                                        targetKey: targetKey,
+                                        decision: "SKIP",
+                                        reason: "HPLOSS_NOT_POSITIVE",
+                                    });
+                                    return;
+                                }
+
+                                const contributionContext = SearchEngine.resolveHpLossContributors(round, targetUnit, effectSourceHistory);
+                                if (!contributionContext) {
+                                    SearchEngine.debugIndirectVerbose("TargetDecision", {
+                                        level: level.nr,
+                                        area: area.nr,
+                                        round: round.nr,
+                                        target: targetName,
+                                        targetIdx: targetIdx,
+                                        targetKey: targetKey,
+                                        decision: "SKIP",
+                                        reason: "NO_CONTRIBUTION_CONTEXT",
+                                    });
+                                    return;
+                                }
+                                const attributions = SearchEngine.splitHpLossDamageByContributors(hpLossValue, contributionContext);
+                                SearchEngine.debugIndirect("Event", {
+                                    level: level.nr,
+                                    area: area.nr,
+                                    round: round.nr,
+                                    target: targetName,
+                                    hpLoss: hpLossValue,
+                                    assignableDamage: Math.min(hpLossValue, contributionContext.knownWeight || 0),
+                                    totalWeight: contributionContext.totalWeight,
+                                    knownWeight: contributionContext.knownWeight,
+                                    knownRatio: contributionContext.totalWeight > 0 ? (contributionContext.knownWeight / contributionContext.totalWeight) : 0,
+                                    sources: contributionContext.debugSources,
+                                    sourceRejectSummary: contributionContext.sourceRejectSummary,
+                                    contributorRejectSummary: contributionContext.contributorRejectSummary,
+                                    attributions: attributions.map(cur => ({
+                                        unit: cur.unit && cur.unit.id && cur.unit.id.name,
+                                        value: cur.value,
+                                    })),
+                                });
+                                if (SearchEngine.DEBUG_INDIRECT_TRACE) {
+                                    const sourceList = (contributionContext.debugSources || [])
+                                        .filter(src => src && src.hpLossValue > 0)
+                                        .map(src => (src.source || src.normalizedSource || "?") + "=" + src.hpLossValue)
+                                        .join(" | ");
+                                    if (attributions.length === 0) {
+                                        SearchEngine.debugIndirect("Attribution", {
                                             level: level.nr,
                                             area: area.nr,
                                             round: round.nr,
-                                            target: target.unit && target.unit.id && target.unit.id.name,
-                                            loss: damage.value,
-                                            totalWeight: contributionContext.totalWeight,
-                                            knownWeight: contributionContext.knownWeight,
-                                            sources: contributionContext.debugSources,
-                                            attributions: attributions.map(cur => ({
-                                                unit: cur.unit && cur.unit.id && cur.unit.id.name,
-                                                value: cur.value,
-                                            })),
+                                            target: targetName,
+                                            targetIdx: targetIdx,
+                                            hpLoss: hpLossValue,
+                                            contributor: null,
+                                            value: 0,
+                                            sources: sourceList,
+                                            reason: "NO_ATTRIBUTIONS",
                                         });
-                                        if (attributions.length > 0) {
-                                            attributions.forEach((attribution, attributionIdx) => {
-                                                const virtualAction = Object.assign({}, action, {unit: attribution.unit});
-                                                const isHero = virtualAction.unit.id.isHero;
-                                                if (!(wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero))) {
-                                                    return;
-                                                }
-                                                SearchEngine.addUnitId(virtualAction, virtualAction.unit);
-                                                SearchEngine.addUnitId(virtualAction, target.unit);
-                                                stats.actionClassification = function (curAction) {
-                                                    return {
-                                                        fromMe: wantHeroes === !!curAction.unit.id.isHero,
-                                                        atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
-                                                        fromGroup: wantHeroes === !!curAction.unit.id.isHero,
-                                                        atGroup: wantHeroes === !!util.arraySearch(virtualAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
-                                                        cmp: "nxt",
-                                                    }
-                                                }
-                                                const attributedDamage = {
-                                                    value: attribution.value,
-                                                    ruestung: damage.ruestung || 0,
-                                                    resistenz: damage.resistenz || 0,
-                                                    type: damage.type,
-                                                };
-                                                doAnalysis(stats, filter, virtualAction, target, attributedDamage, attributionIdx);
-                                                const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, virtualAction, round);
-                                                const companionDamageValue = this.getCompanionDamageValue(attributedDamage);
-                                                if (companionOwnerUnit && companionDamageValue > 0) {
-                                                    const ownerAction = Object.assign({}, virtualAction, {unit: companionOwnerUnit});
-                                                    doAnalysis(stats, filter, ownerAction, target, true, attributionIdx, companionDamageValue);
-                                                }
-                                            });
+                                    }
+                                }
+                                if (attributions.length === 0) return;
+
+                                const syntheticTarget = {
+                                    unit: targetUnit,
+                                    damage: [{
+                                        value: hpLossValue,
+                                        ruestung: 0,
+                                        resistenz: 0,
+                                        type: "indirekt",
+                                    }],
+                                };
+
+                                attributions.forEach((attribution, attributionIdx) => {
+                                    if (SearchEngine.DEBUG_INDIRECT_TRACE) {
+                                        const contributorName = attribution.unit && attribution.unit.id && attribution.unit.id.name;
+                                        const contributorKey = SearchEngine.getUnitKey(attribution.unit);
+                                        const contributorSourceHits = (contributionContext.debugSources || [])
+                                            .filter(src => {
+                                                const decisions = src && src.contributorDecisions ? src.contributorDecisions : [];
+                                                return !!util.arraySearch(decisions, decision => decision && decision.accepted && decision.unitKey === contributorKey);
+                                            })
+                                            .map(src => ({
+                                                source: src.source || src.normalizedSource || "?",
+                                                hpLossValue: src.hpLossValue || 0,
+                                            }));
+                                        indirectAttributionByContributor[contributorKey] = indirectAttributionByContributor[contributorKey] || {
+                                            contributor: contributorName,
+                                            value: 0,
+                                        };
+                                        indirectAttributionByContributor[contributorKey].value += Number(attribution.value || 0);
+                                        const sourceList = (contributionContext.debugSources || [])
+                                            .filter(src => src && src.hpLossValue > 0)
+                                            .map(src => (src.source || src.normalizedSource || "?") + "=" + src.hpLossValue)
+                                            .join(" | ");
+                                        const traceRow = {
+                                            level: level.nr,
+                                            area: area.nr,
+                                            round: round.nr,
+                                            target: targetName,
+                                            targetIdx: targetIdx,
+                                            hpLoss: hpLossValue,
+                                            assignableDamage: Math.min(hpLossValue, contributionContext.knownWeight || 0),
+                                            contributor: contributorName,
+                                            contributorKey: contributorKey,
+                                            value: Number(attribution.value || 0),
+                                            sources: sourceList,
+                                            sourceHits: contributorSourceHits,
+                                            splitContributors: (contributionContext.contributors || []).map(cur => ({
+                                                unit: cur.unit && cur.unit.id && cur.unit.id.name,
+                                                weight: cur.weight,
+                                            })),
+                                        };
+                                        indirectAttributionTrace.push(traceRow);
+                                        SearchEngine.debugIndirect("Attribution", traceRow);
+                                    }
+                                    const virtualAction = {
+                                        unit: attribution.unit,
+                                        targets: [syntheticTarget],
+                                        level: level,
+                                        area: area,
+                                        round: round,
+                                        type: "regen",
+                                    };
+                                    const isHero = virtualAction.unit.id.isHero;
+                                    if (!(wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero))) {
+                                        return;
+                                    }
+                                    SearchEngine.addUnitId(virtualAction, virtualAction.unit);
+                                    SearchEngine.addUnitId(virtualAction, targetUnit);
+                                    stats.actionClassification = function (curAction) {
+                                        return {
+                                            fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                            atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                            fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                            atGroup: wantHeroes === !!util.arraySearch(virtualAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            cmp: "nxt",
                                         }
+                                    }
+                                    const attributedDamage = {
+                                        value: attribution.value,
+                                        ruestung: 0,
+                                        resistenz: 0,
+                                        type: "indirekt",
+                                    };
+                                    doAnalysis(stats, filter, virtualAction, syntheticTarget, attributedDamage, attributionIdx);
+                                    const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, virtualAction, round);
+                                    const companionDamageValue = this.getCompanionDamageValue(attributedDamage);
+                                    if (companionOwnerUnit && companionDamageValue > 0) {
+                                        const ownerAction = Object.assign({}, virtualAction, {unit: companionOwnerUnit});
+                                        doAnalysis(stats, filter, ownerAction, syntheticTarget, true, attributionIdx, companionDamageValue);
                                     }
                                 });
                             });
@@ -1555,6 +1860,44 @@
 
                         SearchEngine.registerRoundEffectSources(effectSourceHistory, round);
                     }
+                }
+            }
+            if (SearchEngine.DEBUG_INDIRECT_TRACE) {
+                const totals = Object.values(indirectAttributionByContributor)
+                    .sort((a, b) => (b.value || 0) - (a.value || 0));
+                SearchEngine.debugIndirect("AttributionSummary", totals);
+                SearchEngine.debugIndirect("AttributionTraceCount", {
+                    rows: indirectAttributionTrace.length,
+                });
+                const atrixRows = indirectAttributionTrace.filter(row => {
+                    const contributor = (row && row.contributor ? row.contributor : "").toLowerCase();
+                    return contributor.indexOf("atrix") !== -1;
+                });
+                if (atrixRows.length > 0) {
+                    const atrixByRound = {};
+                    atrixRows.forEach(row => {
+                        const key = (row.level || "?") + "." + (row.area || "?") + ".R" + (row.round || "?");
+                        atrixByRound[key] = (atrixByRound[key] || 0) + Number(row.value || 0);
+                    });
+                    SearchEngine.debugIndirect("AttributionAtrix", {
+                        total: atrixRows.reduce((sum, row) => sum + Number(row.value || 0), 0),
+                        byRound: atrixByRound,
+                        rows: atrixRows,
+                    });
+                    atrixRows.forEach(row => {
+                        const sourceHits = (row.sourceHits || [])
+                            .map(src => (src.source || "?") + "=" + (src.hpLossValue || 0))
+                            .join(", ");
+                        SearchEngine.debugIndirect("AttributionAtrixLine", "L" + (row.level || "?")
+                            + " A" + (row.area || "?")
+                            + " R" + (row.round || "?")
+                            + " target=" + (row.target || "?")
+                            + "#" + (row.targetIdx || "?")
+                            + " value=" + (row.value || 0)
+                            + " basis=" + (row.assignableDamage || 0) + "/" + (row.hpLoss || 0)
+                            + " sources=[" + sourceHits + "]"
+                            + " split=[" + (row.splitContributors || []).map(cur => (cur.unit || "?") + ":" + (cur.weight || 0)).join(", ") + "]");
+                    });
                 }
             }
             return stats;
@@ -1634,8 +1977,17 @@
         }
 
         static TableViewType = class TableViewType {
-            center(text) {
-                return "<td style='text-align:center;vertical-align:middle;'>" + text + "</td>";
+            center(text, tooltip) {
+                let titleAttribute = "";
+                if (tooltip) {
+                    const escaped = ("" + tooltip)
+                        .replace(/&/g, "&amp;")
+                        .replace(/'/g, "&#39;")
+                        .replace(/</g, "&lt;")
+                        .replace(/>/g, "&gt;");
+                    titleAttribute = " title='" + escaped + "'";
+                }
+                return "<td style='text-align:center;vertical-align:middle;'" + titleAttribute + ">" + text + "</td>";
             }
         }
 
@@ -1779,13 +2131,13 @@
                 resistColumn.headerGroup = "Direkter Schaden";
                 this.columns.push(resistColumn);
 
-                this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden"), dmgStat => {
+                this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden", "Schaden aus HP-Regenerations-Debuffs (z.B. durch Vergiftungen/Verbrennungen)"), dmgStat => {
                     return center(dmgStat.indirectValue);
                 }));
                 this.columns.push(new Column("Gefährtenschaden", center("Gefährten-<br>schaden"), dmgStat => {
                     return center(dmgStat.companionValue || 0);
                 }));
-                this.columns.push(new Column("Gesamtschaden", center("Gesamtschaden<br>(direkt + indirekt + Gefährte)"), dmgStat => {
+                this.columns.push(new Column("Gesamtschaden", center("Gesamtschaden", "Summe aus direktem Schaden, indirektem Schaden und Gefährtenschaden."), dmgStat => {
                     return center(dmgStat.directValue + dmgStat.indirectValue + (dmgStat.companionValue || 0));
                 }));
 
@@ -1926,6 +2278,7 @@
                                 groupHeader.style.textAlign = "center";
                                 groupHeader.style.verticalAlign = "middle";
                                 groupHeader.innerHTML = groupName;
+                                groupHeader.title = "Direkter Schaden aus normalen Treffern; aufgeteilt in Effektiv, Ruestung und Resistenz.";
                                 topHeader.append(groupHeader);
                                 groupHeaderAdded = true;
                             }
@@ -2051,7 +2404,6 @@
                 }
 
                 function connect(a, b) {
-                    if (a === "") return b;
                     return a + " -> " + b;
                 }
 
@@ -2803,3 +3155,4 @@
     Mod.startMod();
 
 })();
+
