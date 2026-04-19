@@ -5219,6 +5219,22 @@ class demawiRepository {
             if (!match) return null;
             return match[1].trim();
         }
+
+        const parseOwnerNameFromTooltip = function (tooltipText) {
+            const text = "" + (tooltipText || "");
+            let match = text.match(/geh[oö]rt\s*(?:<b>|&lt;b&gt;)\s*([^<>&'"\.]+?)\s*(?:<\/b>|&lt;\/b&gt;)/i);
+            if (match) return match[1].trim();
+            match = text.match(/geh[oö]rt\s+([^\n\r\(\)\[\],:;]+)/i);
+            if (match) return match[1].trim();
+            return null;
+        }
+
+        const parseOwnerNameFromElement = function (element) {
+            if (!element || !element.closest) return null;
+            const ownerContainer = element.closest("span[onmouseover]");
+            if (!ownerContainer) return null;
+            return parseOwnerNameFromTooltip(ownerContainer.getAttribute("onmouseover"));
+        }
         const requestSkillInfoFromUser = function (skillOrIdentifier, fertigkeit, actionTR) {
             const skillRequest = {
                 line: actionTR.innerHTML,
@@ -6296,7 +6312,7 @@ class demawiRepository {
                 }
                 const parsedUnitId = new UnitId(element.innerText, unitIndex, isHero);
                 const ownerContextText = (element.parentElement && element.parentElement.textContent) || element.textContent;
-                const ownerName = parseOwnerNameFromText(ownerContextText);
+                const ownerName = parseOwnerNameFromText(ownerContextText) || parseOwnerNameFromElement(element);
                 if (ownerName && ownerName !== parsedUnitId.name) {
                     parsedUnitId.ownerName = ownerName;
                     parsedUnitId.ownerId = {
