@@ -1579,11 +1579,11 @@
                 this.columns.push(new Column("Erfolge", center("normal / gut / krit"), dmgStat => this.center(dmgStat.result[1] + " / " + dmgStat.result[2] + " / " + dmgStat.result[3])));
                 let dmgTitle;
                 if (isDefense) {
-                    dmgTitle = "Eingehender<br>Direktschaden";
+                    dmgTitle = "Eingehend";
                 } else {
-                    dmgTitle = "Ausgehender<br>Direktschaden";
+                    dmgTitle = "Ausgehend";
                 }
-                this.columns.push(new Column(isDefense ? "Eingehender Direktschaden" : "Ausgehender Direktschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
+                const outDamageColumn = new Column(isDefense ? "Eingehender Direktschaden" : "Ausgehender Direktschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
                         let targetDmg = 0;
@@ -1603,8 +1603,11 @@
                         result += "<br>" + "(" + min + " - " + max + ")";
                     }
                     return center(result);
-                }));
-                this.columns.push(new Column("Direkter Schaden", center("Direkter<br>Schaden<br>(Ø)<br>(min-max)"), dmgStat => {
+                });
+                outDamageColumn.headerGroup = "Direkter Schaden";
+                this.columns.push(outDamageColumn);
+
+                const directDamageColumn = new Column("Effektiv", center("Effektiv<br>(Ø)<br>(min-max)"), dmgStat => {
                     const [min, max] = this.minMaxDamageByType(dmgStat, false);
                     let maxView = max;
                     const gesamtErfolge = this.gesamtErfolge(dmgStat);
@@ -1622,9 +1625,18 @@
                         result += "<br>" + "(" + min + " - " + maxView + ")";
                     }
                     return center(result);
-                }));
-                this.columns.push(new Column("Rüstung", center("Rüstung"), dmgStat => center(mitVorzeichen(-dmgStat.ruestung))));
-                this.columns.push(new Column("Resistenz", center("Resistenz"), dmgStat => center(mitVorzeichen(-dmgStat.resistenz))));
+                });
+                directDamageColumn.headerGroup = "Direkter Schaden";
+                this.columns.push(directDamageColumn);
+
+                const armorColumn = new Column("Rüstung", center("Rüstung"), dmgStat => center(mitVorzeichen(-dmgStat.ruestung)));
+                armorColumn.headerGroup = "Direkter Schaden";
+                this.columns.push(armorColumn);
+
+                const resistColumn = new Column("Resistenz", center("Resistenz"), dmgStat => center(mitVorzeichen(-dmgStat.resistenz)));
+                resistColumn.headerGroup = "Direkter Schaden";
+                this.columns.push(resistColumn);
+
                 this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden"), dmgStat => {
                     return center(dmgStat.indirectValue);
                 }));
@@ -1722,20 +1734,80 @@
 
             static renderColumnTable(table, statView) {
                 const tableView = new this.views[statView.query.type](statView);
+                const tbody = table.tagName === "TBODY" ? table : (table.getElementsByTagName("tbody")[0] || table);
+                const tableElement = tbody.parentElement || table;
+                const thead = tableElement.tHead || tableElement.getElementsByTagName("thead")[0];
+                if (!thead) {
+                    throw _.util.error("Kein thead für die Statistiktabelle gefunden!", tableElement);
+                }
 
                 var switcher = true;
-                const header = document.createElement("tr");
-                header.className = "row0";
+                const hasHeaderGroups = util.arraySearch(tableView.columns, column => !!column.headerGroup);
 
-                header.innerHTML = "<td colspan=" + this.maxColspan + "></td>"
-                for (const column of tableView.columns) {
-                    const curHeader = column.header;
-                    if (!curHeader || !curHeader.startsWith("<td")) {
-                        throw _.util.error("Header-Zelle muss immer mit <td anfangen!", column.id, curHeader);
+                if (hasHeaderGroups) {
+                    const groupName = "Direkter Schaden";
+                    const groupColumns = util.arrayFilter(tableView.columns, column => column.headerGroup === groupName);
+
+                    const createHeaderCell = (headerHtml) => {
+                        const tmp = document.createElement("tr");
+                        tmp.innerHTML = headerHtml;
+                        const cell = tmp.firstElementChild;
+                        if (!cell || cell.tagName !== "TD") {
+                            throw _.util.error("Header-Zelle muss immer mit <td anfangen!", headerHtml);
+                        }
+                        return cell;
+                    };
+
+                    const topHeader = document.createElement("tr");
+                    topHeader.className = "row0";
+                    const bottomHeader = document.createElement("tr");
+                    bottomHeader.className = "row0";
+
+                    const leading = createHeaderCell("<td colspan=" + this.maxColspan + "></td>");
+                    leading.rowSpan = 2;
+                    topHeader.append(leading);
+
+                    let groupHeaderAdded = false;
+                    for (const column of tableView.columns) {
+                        const curHeader = column.header;
+                        if (!curHeader || !curHeader.startsWith("<td")) {
+                            throw _.util.error("Header-Zelle muss immer mit <td anfangen!", column.id, curHeader);
+                        }
+
+                        if (column.headerGroup === groupName) {
+                            if (!groupHeaderAdded) {
+                                const groupHeader = document.createElement("td");
+                                groupHeader.colSpan = groupColumns.length;
+                                groupHeader.style.textAlign = "center";
+                                groupHeader.style.verticalAlign = "middle";
+                                groupHeader.innerHTML = groupName;
+                                topHeader.append(groupHeader);
+                                groupHeaderAdded = true;
+                            }
+                            bottomHeader.append(createHeaderCell(curHeader));
+                        } else {
+                            const headerCell = createHeaderCell(curHeader);
+                            headerCell.rowSpan = 2;
+                            topHeader.append(headerCell);
+                        }
                     }
-                    header.innerHTML += curHeader;
+
+                    thead.append(topHeader);
+                    thead.append(bottomHeader);
+                } else {
+                    const header = document.createElement("tr");
+                    header.className = "row0";
+
+                    header.innerHTML = "<td colspan=" + this.maxColspan + "></td>"
+                    for (const column of tableView.columns) {
+                        const curHeader = column.header;
+                        if (!curHeader || !curHeader.startsWith("<td")) {
+                            throw _.util.error("Header-Zelle muss immer mit <td anfangen!", column.id, curHeader);
+                        }
+                        header.innerHTML += curHeader;
+                    }
+                    thead.append(header);
                 }
-                table.append(header);
 
                 function addLine(statView, prefix, statResult) {
                     const line = document.createElement("tr");

@@ -4123,16 +4123,26 @@ class demawiRepository {
                     return ["[table" + (node.border ? " border=" + node.border : "") + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/table]"];
                 case "TR":
                     return ["[tr]", this.toBBCodeArray(node.childNodes, defaultSize), "[/tr]"];
-                case "TD":
+                case "TD": {
+                    let attributes = "";
                     if (node.colSpan > 1) {
-                        return ["[td colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
+                        attributes += " colspan=" + node.colSpan;
                     }
-                    return ["[td]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
-                case "TH":
+                    if (node.rowSpan > 1) {
+                        attributes += " rowspan=" + node.rowSpan;
+                    }
+                    return ["[td" + attributes + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
+                }
+                case "TH": {
+                    let attributes = "";
                     if (node.colSpan > 1) {
-                        return ["[th colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                        attributes += " colspan=" + node.colSpan;
                     }
-                    return ["[th]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                    if (node.rowSpan > 1) {
+                        attributes += " rowspan=" + node.rowSpan;
+                    }
+                    return ["[th" + attributes + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                }
                 case "DIV":
                 case "SPAN":
                     return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
@@ -5143,7 +5153,7 @@ class demawiRepository {
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    static ReportParserDataVersion = 8;
+    static ReportParserDataVersion = 9;
     static ReportParser = function () {
 
         let warnings;
