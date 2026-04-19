@@ -648,6 +648,8 @@
                     3: 0,
                 },
                 value: 0,
+                directValue: 0,
+                indirectValue: 0,
                 ruestung: 0,
                 resistenz: 0,
                 actions: Array(),
@@ -714,6 +716,11 @@
 
         static addDmgStats = function (from, toStat) {
             toStat.value += from.value;
+            if (from.type === "indirekt") {
+                toStat.indirectValue += from.value;
+            } else {
+                toStat.directValue += from.value;
+            }
             toStat.ruestung += from.ruestung;
             toStat.resistenz += from.resistenz;
         };
@@ -738,7 +745,9 @@
         static addTargetDmgStats = function (toStat, action, target, damage, hadDmgType, damageIndexFinal) {
             if (hadDmgType || damageIndexFinal === 0) {
                 if (!toStat.targets.includes(target)) {
-                    toStat.result[target.result]++;
+                    if (target.typ === "Parade") {
+                        toStat.result[target.result]++;
+                    }
                     toStat.targets.push(target);
                 }
             }
@@ -906,6 +915,130 @@
 
         }
 
+        static normalizeEffectSourceName(name) {
+            return ("" + (name || "")).trim().toLowerCase();
+        }
+
+        static getUnitKey(unit) {
+            if (!unit || !unit.id) return "?";
+            return (unit.id.name || "?") + "|" + (!!unit.id.isHero ? "h" : "m");
+        }
+
+        static parseHpLossFromWirkungText(wirkungText) {
+            if (!wirkungText) return 0;
+            const match = ("" + wirkungText).match(/Heilung\s+Hitpoints\s*([-+]?\d+(?:[\.,]\d+)?)/i);
+            if (!match) return 0;
+            const parsed = Number(match[1].replace(",", "."));
+            if (!Number.isFinite(parsed) || parsed >= 0) return 0;
+            return -parsed;
+        }
+
+        static registerActionEffectSources(effectSourceHistory, action) {
+            const isEventAction = !!(action && (action.event || (action.skill && action.skill.event)));
+            if (!action || !action.unit || isEventAction) return;
+            const sourceNames = [];
+            if (action.skill && action.skill.name) sourceNames.push(action.skill.name);
+            ((action.skill && action.skill.items) || []).forEach(item => {
+                if (item && item.name) sourceNames.push(item.name);
+            });
+            const unitKey = this.getUnitKey(action.unit);
+            sourceNames.forEach(sourceName => {
+                const key = this.normalizeEffectSourceName(sourceName);
+                if (!key) return;
+                const map = effectSourceHistory[key] || (effectSourceHistory[key] = {});
+                map[unitKey] = action.unit;
+            });
+        }
+
+        static registerRoundEffectSources(effectSourceHistory, round) {
+            const allActions = [];
+            ["vorrunde", "runde", "initiative"].forEach(actionType => {
+                (round.actions[actionType] || []).forEach(action => allActions.push(action));
+            });
+            allActions.forEach(action => this.registerActionEffectSources(effectSourceHistory, action));
+        }
+
+        static getRoundStatusUnit(round, targetUnit) {
+            const units = [];
+            (round.helden || []).forEach(unit => units.push(unit));
+            (round.monster || []).forEach(unit => units.push(unit));
+            return util.arraySearch(units, unit => _.ReportParser.isUnitEqual(unit, targetUnit));
+        }
+
+        static resolveHpLossContributors(round, targetUnit, effectSourceHistory) {
+            const statusUnit = this.getRoundStatusUnit(round, targetUnit);
+            if (!statusUnit || !statusUnit.fx) {
+                return {
+                    contributors: [],
+                    knownWeight: 0,
+                    totalWeight: 0,
+                };
+            }
+            const weights = {};
+            let totalWeight = 0;
+            for (const sourceEntry of statusUnit.fx) {
+                if (!sourceEntry || !sourceEntry.quelle || !sourceEntry.fx) continue;
+                let hpLossValue = 0;
+                sourceEntry.fx.forEach(effect => {
+                    hpLossValue += this.parseHpLossFromWirkungText(effect && effect.wirkung);
+                });
+                if (!(hpLossValue > 0)) continue;
+                totalWeight += hpLossValue;
+
+                const sourceKey = this.normalizeEffectSourceName(sourceEntry.quelle);
+                const contributors = effectSourceHistory[sourceKey] ? Object.values(effectSourceHistory[sourceKey]) : [];
+                if (contributors.length === 0) continue;
+
+                const contributionPerSource = hpLossValue / contributors.length;
+                contributors.forEach(unit => {
+                    const unitKey = this.getUnitKey(unit);
+                    const current = weights[unitKey] || {unit: unit, weight: 0};
+                    current.weight += contributionPerSource;
+                    weights[unitKey] = current;
+                });
+            }
+            const contributors = Object.values(weights);
+            let knownWeight = 0;
+            contributors.forEach(cur => knownWeight += cur.weight || 0);
+            return {
+                contributors: contributors,
+                knownWeight: knownWeight,
+                totalWeight: totalWeight,
+            };
+        }
+
+        static splitHpLossDamageByContributors(damageValue, contributionContext) {
+            if (!(damageValue > 0) || !contributionContext || !contributionContext.contributors || contributionContext.contributors.length === 0) return [];
+            const contributors = contributionContext.contributors;
+            const knownWeight = contributionContext.knownWeight || 0;
+            const totalWeight = contributionContext.totalWeight || 0;
+            if (!(knownWeight > 0) || !(totalWeight > 0)) return [];
+
+            // Nur der bekannte Anteil wird Charakteren zugerechnet.
+            const assignableDamage = damageValue * Math.min(1, knownWeight / totalWeight);
+            if (!(assignableDamage > 0)) return [];
+
+            const result = [];
+            let assigned = 0;
+            for (let i = 0, l = contributors.length; i < l; i++) {
+                const contributor = contributors[i];
+                let value;
+                if (i === l - 1) {
+                    value = assignableDamage - assigned;
+                } else {
+                    value = assignableDamage * ((contributor.weight || 0) / knownWeight);
+                    assigned += value;
+                }
+                if (value > 0) {
+                    result.push({
+                        unit: contributor.unit,
+                        value: value,
+                    });
+                }
+            }
+            return result;
+        }
+
         static doQuery(statQuery, levelDataArray) {
             const wantHeroes = statQuery.side === "heroes";
             const wantDefense = statQuery.type === "defense";
@@ -980,6 +1113,7 @@
             }
 
             var stats = this.createStat();
+            const effectSourceHistory = {};
 
 
             var filter = statQuery.filter; // position, attackType, fertigkeit, units
@@ -1064,7 +1198,8 @@
                                 SearchEngine.addUnitId(action, action.unit);
                                 action.targets.forEach(target => {
                                     if (statQuery.type === "attack" || statQuery.type === "defense") {
-                                        if (target.typ !== "Parade") { // Es wurde eine Verteidigungs-Probe gewürfelt
+                                        const isHpLossEvent = !!((action.event && action.event.kind === "hploss") || (action.skill && action.skill.event && action.skill.name === "hploss"));
+                                        if (target.typ !== "Parade" && !isHpLossEvent) { // Es wurde eine Verteidigungs-Probe gewürfelt
                                             return;
                                         }
                                     }
@@ -1088,6 +1223,64 @@
                                 });
                             }
                         });
+
+                        if (!wantAll && (statQuery.type === "attack" || statQuery.type === "defense")) {
+                            (round.actions.regen || []).forEach(action => {
+                                const isHpLossEvent = !!((action.event && action.event.kind === "hploss") || (action.skill && action.skill.event && action.skill.name === "hploss"));
+                                if (!isHpLossEvent) return;
+                                action.type = "regen";
+                                action.level = level;
+                                action.area = area;
+                                action.round = round;
+                                action.targets.forEach(target => {
+                                    var damages = target.damage;
+                                    if (!damages || damages.length === 0) return;
+                                    for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
+                                        const damage = damages[damageIndex];
+                                        const contributionContext = SearchEngine.resolveHpLossContributors(round, target.unit, effectSourceHistory);
+                                        const attributions = SearchEngine.splitHpLossDamageByContributors(damage.value, contributionContext);
+                                        if (attributions.length === 0) {
+                                            SearchEngine.addUnitId(action, action.unit);
+                                            SearchEngine.addUnitId(action, target.unit);
+                                            stats.actionClassification = function (curAction) {
+                                                return {
+                                                    fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                                    atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                                    fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                                    atGroup: wantHeroes === !!util.arraySearch(action.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                                    cmp: "nxt",
+                                                }
+                                            }
+                                            doAnalysis(stats, filter, action, target, damage, damageIndex);
+                                        } else {
+                                            attributions.forEach((attribution, attributionIdx) => {
+                                                const virtualAction = Object.assign({}, action, {unit: attribution.unit});
+                                                SearchEngine.addUnitId(virtualAction, virtualAction.unit);
+                                                SearchEngine.addUnitId(virtualAction, target.unit);
+                                                stats.actionClassification = function (curAction) {
+                                                    return {
+                                                        fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                                        atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                                        fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                                        atGroup: wantHeroes === !!util.arraySearch(virtualAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                                        cmp: "nxt",
+                                                    }
+                                                }
+                                                const attributedDamage = {
+                                                    value: attribution.value,
+                                                    ruestung: damage.ruestung || 0,
+                                                    resistenz: damage.resistenz || 0,
+                                                    type: damage.type,
+                                                };
+                                                doAnalysis(stats, filter, virtualAction, target, attributedDamage, attributionIdx);
+                                            });
+                                        }
+                                    }
+                                });
+                            });
+                        }
+
+                        SearchEngine.registerRoundEffectSources(effectSourceHistory, round);
                     }
                 }
             }
@@ -1281,29 +1474,32 @@
                     return center(result);
                 }));
                 this.columns.push(new Column("Direkter Schaden", center("Direkter<br>Schaden<br>(Ø)<br>(min-max)"), dmgStat => {
-                    const dmgs = Array();
-                    dmgStat.targets.forEach(target => {
-                        let targetDmg = 0;
-                        (target.damage || []).forEach(damage => {
-                            targetDmg += damage.value;
-                        });
-                        dmgs.push(targetDmg);
-                    })
-                    const min = util.arrayMin(dmgs);
-                    let max = util.arrayMax(dmgs);
+                    const [min, max] = this.minMaxDamageByType(dmgStat, false);
+                    let maxView = max;
                     const gesamtErfolge = this.gesamtErfolge(dmgStat);
-                    var result = dmgStat.value;
-                    if (gesamtErfolge > 0 && dmgStat.value > 0) {
-                        let avgDamage = dmgStat.value / gesamtErfolge;
+                    var result = dmgStat.directValue;
+                    if (gesamtErfolge > 0 && dmgStat.directValue > 0) {
+                        let avgDamage = dmgStat.directValue / gesamtErfolge;
                         avgDamage = util.round(avgDamage, 2);
                         if (statView.query.type === "defense") { // in Abhängigkeit der MaxHealth der Einheit setzen
                             if (avgDamage > 20) avgDamage = "<span style='color:red'>" + avgDamage + "</span>";
                             else if (avgDamage > 10) avgDamage = "<span style='color:orange'>" + avgDamage + "</span>";
-                            if (max > 20) max = "<span style='color:red'>" + max + "</span>";
-                            else if (max > 10) max = "<span style='color:orange'>" + max + "</span>";
+                            if (maxView > 20) maxView = "<span style='color:red'>" + maxView + "</span>";
+                            else if (maxView > 10) maxView = "<span style='color:orange'>" + maxView + "</span>";
                         }
                         result += "<br>" + "(" + avgDamage + ")";
-                        result += "<br>" + "(" + min + " - " + max + ")";
+                        result += "<br>" + "(" + min + " - " + maxView + ")";
+                    }
+                    return center(result);
+                }));
+                this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden<br>(Ø)<br>(min-max)"), dmgStat => {
+                    const [min, max] = this.minMaxDamageByType(dmgStat, true);
+                    const gesamtErfolge = this.gesamtErfolge(dmgStat);
+                    var result = dmgStat.indirectValue;
+                    if (gesamtErfolge > 0 && dmgStat.indirectValue > 0) {
+                        const avgDamage = util.round(dmgStat.indirectValue / gesamtErfolge, 2);
+                        result += "<br>(" + avgDamage + ")";
+                        result += "<br>(" + min + " - " + max + ")";
                     }
                     return center(result);
                 }));
@@ -1313,18 +1509,24 @@
                 const awColumn = new Column("Angriffswürfe", center("AW Ø<br>(min-max)"), dmgStat => {
                     var aw = Array(); // Angriffswerte
                     dmgStat.actions.forEach(action => {
-                        if (!action.skill || !action.skill.wuerfe) {
-                            console.error("Fertigkeit oder Wurf nicht gefunden: ", action);
+                        if (!action.skill || !Array.isArray(action.skill.wuerfe)) {
+                            return;
                         }
                         action.skill.wuerfe.forEach(wurf => aw.push(Number(wurf.value)));
                     });
+                    aw = util.arrayFilter(aw, cur => Number.isFinite(cur));
+                    if (aw.length === 0) return center("-");
                     return center(util.arrayAvg(aw, null, 2) + "<br>(" + util.arrayMin(aw) + " - " + util.arrayMax(aw) + ")");
                 });
                 const pwColumn = new Column("Paradewürfe", center("PW Ø<br>(min-max)"), dmgStat => {
                     var pw = Array(); // Paradewerte
                     dmgStat.targets.forEach(target => {
-                        pw.push(Number(target.skill.wurf));
+                        if (target.skill && target.skill.wurf !== undefined) {
+                            pw.push(Number(target.skill.wurf));
+                        }
                     });
+                    pw = util.arrayFilter(pw, cur => Number.isFinite(cur));
+                    if (pw.length === 0) return center("-");
                     return center(util.arrayAvg(pw, null, 2) + "<br>(" + util.arrayMin(pw) + " - " + util.arrayMax(pw) + ")");
                 });
                 if (isDefense) {
@@ -1354,6 +1556,22 @@
 
             gesamtErfolge(dmgStat) {
                 return dmgStat.result[1] + dmgStat.result[2] + dmgStat.result[3];
+            }
+
+            minMaxDamageByType(dmgStat, wantIndirect) {
+                const dmgs = Array();
+                dmgStat.targets.forEach(target => {
+                    let targetDmg = 0;
+                    (target.damage || []).forEach(damage => {
+                        const isIndirect = damage.type === "indirekt";
+                        if (wantIndirect === isIndirect) {
+                            targetDmg += damage.value;
+                        }
+                    });
+                    if (targetDmg > 0) dmgs.push(targetDmg);
+                });
+                if (dmgs.length === 0) return [0, 0];
+                return [util.arrayMin(dmgs), util.arrayMax(dmgs)];
             }
 
             getDmgTypeTable(specificArray) {

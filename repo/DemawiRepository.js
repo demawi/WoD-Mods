@@ -5237,7 +5237,8 @@ class demawiRepository {
                         if (genutzterSkill) { // Initiative
 
                         } else { // Regen
-
+                            const parsedLossEvent = ActionParser.parseRoundLossEvent(this, currentActionTR, actionTD);
+                            if (parsedLossEvent) regen.push(parsedLossEvent);
                         }
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         const actionTD = currentActionTR.children[1];
@@ -5596,6 +5597,50 @@ class demawiRepository {
          * Eine Aktion in der Runde
          */
         class ActionParser {
+
+            /**
+             * Liest Runden-Statuszeilen wie "erleidet X HP Schaden" oder "verliert X MP".
+             * rep_loss ist nur ein Darstellungsmarker, die Ressource wird aus dem Text ermittelt.
+             */
+            static parseRoundLossEvent(curRound, actionTR, actionTD) {
+                const text = actionTD.textContent.replace(/\s+/g, " ").trim();
+                const isHpLoss = /erleidet\s+\d+\s+HP\s+Schaden\.?/i.test(text);
+                const isMpLoss = /verliert\s+\d+\s+MP\.?/i.test(text);
+                if (!isHpLoss && !isMpLoss) return null;
+
+                const lossNode = actionTD.querySelector(".rep_loss");
+                const loss = Number((lossNode && lossNode.textContent) || 0);
+                if (!(loss > 0)) return null;
+
+                const unitAnchors = actionTD.querySelectorAll("a[href*=\"/hero/\"], a[href*=\"/npc/\"]");
+                if (!unitAnchors || unitAnchors.length === 0) return null;
+
+                // Bei Begleitern kann die Zeile so aussehen: "<Begleiter> : <Besitzer> verliert X MP".
+                // Dann ist der letzte Unit-Link der betroffene Charakter.
+                const affectedAnchor = unitAnchors[unitAnchors.length - 1];
+                const affectedUnitId = ReportParser.getUnitIdFromElement(affectedAnchor);
+                if (!affectedUnitId) return null;
+                const affectedUnit = curRound.unitLookup(affectedUnitId);
+
+                const target = {
+                    unit: affectedUnit,
+                    damage: isHpLoss ? [{
+                        value: loss,
+                        ruestung: 0,
+                        resistenz: 0,
+                        type: "indirekt",
+                    }] : [],
+                };
+
+                const eventAction = new Action(affectedUnit);
+                eventAction.targets = [target];
+                eventAction.event = {
+                    kind: isHpLoss ? "hploss" : "mploss",
+                    resource: isHpLoss ? "HP" : "MP",
+                    value: loss,
+                };
+                return eventAction;
+            }
 
             /**
              * Gibt eine Liste von Actions zurück.
