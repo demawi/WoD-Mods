@@ -768,7 +768,8 @@
         }
 
         static addTargetDmgStats = function (toStat, action, target, damage, hadDmgType, damageIndexFinal, companionDamageValue) {
-            if (hadDmgType || damageIndexFinal === 0) {
+            const isSyntheticCompanionOwnerAction = !!(action && action.syntheticCompanionOwnerAction);
+            if (!isSyntheticCompanionOwnerAction && (hadDmgType || damageIndexFinal === 0)) {
                 if (!toStat.targets.includes(target)) {
                     if (target.typ === "Parade") {
                         toStat.result[target.result]++;
@@ -777,7 +778,7 @@
                 }
             }
             // actions: me on me, me on groupy, groupy on me, me on enemy, enemy on me
-            if (!action.syntheticCompanionOwnerAction) {
+            if (!isSyntheticCompanionOwnerAction) {
                 if (!toStat.actions.includes(action)) {
                     toStat.actions.push(action);
                 }
