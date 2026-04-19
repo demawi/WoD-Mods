@@ -5620,6 +5620,26 @@ class demawiRepository {
                 const affectedAnchor = unitAnchors[unitAnchors.length - 1];
                 const affectedUnitId = ReportParser.getUnitIdFromElement(affectedAnchor);
                 if (!affectedUnitId) return null;
+
+                // In Regen-Zeilen kann die Gegner-Nummer als nachfolgendes <span> stehen (z.B. Goblin #5).
+                // Diese Information brauchen wir für die zielgenaue Attribution über mehrere Runden.
+                let affectedIdx;
+                for (let curNode = affectedAnchor.nextSibling; curNode; curNode = curNode.nextSibling) {
+                    if (curNode.nodeType === Node.ELEMENT_NODE) {
+                        if (curNode.tagName === "SPAN") {
+                            const match = (curNode.textContent || "").match(/^\s*(\d+)\s*$/);
+                            if (match) {
+                                affectedIdx = Number(match[1]);
+                            }
+                            break;
+                        }
+                        if (curNode.tagName === "A") {
+                            break;
+                        }
+                    }
+                }
+                if (affectedIdx) affectedUnitId.idx = affectedIdx;
+
                 const affectedUnit = curRound.unitLookup(affectedUnitId);
 
                 const target = {

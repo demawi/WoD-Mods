@@ -639,6 +639,14 @@
 
     class SearchEngine {
 
+        static DEBUG_INDIRECT = true;
+
+        static debugIndirect(...args) {
+            if (this.DEBUG_INDIRECT) {
+                console.log("[EKS][indirekt]", ...args);
+            }
+        }
+
         static createStat() {
             return {
                 result: {
@@ -916,7 +924,13 @@
         }
 
         static normalizeEffectSourceName(name) {
-            return ("" + (name || "")).trim().toLowerCase();
+            let result = ("" + (name || "")).trim().toLowerCase();
+            result = result.replace(/ß/g, "ss");
+            if (result.normalize) {
+                result = result.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+            }
+            result = result.replace(/[^a-z0-9]+/g, " ").trim();
+            return result;
         }
 
         static getUnitKey(unit) {
@@ -924,9 +938,16 @@
             return (unit.id.name || "?") + "|" + (!!unit.id.isHero ? "h" : "m");
         }
 
-        static parseHpLossFromWirkungText(wirkungText) {
-            if (!wirkungText) return 0;
-            const match = ("" + wirkungText).match(/Heilung\s+Hitpoints\s*([-+]?\d+(?:[\.,]\d+)?)/i);
+        static getTargetUnitKey(unit) {
+            if (!unit || !unit.id) return "?";
+            const id = unit.id;
+            return (id.name || "?") + "|" + (id.idx || 1) + "|" + (!!id.isHero ? "h" : "m");
+        }
+
+        static parseHpLossFromWirkung(effect) {
+            if (!effect || !effect.name) return 0;
+            if (!/Heilung\s+Hitpoints/i.test("" + effect.name)) return 0;
+            const match = ("" + (effect.wirkung || "")).match(/([-+]?\d+(?:[\.,]\d+)?)/);
             if (!match) return 0;
             const parsed = Number(match[1].replace(",", "."));
             if (!Number.isFinite(parsed) || parsed >= 0) return 0;
@@ -942,11 +963,22 @@
                 if (item && item.name) sourceNames.push(item.name);
             });
             const unitKey = this.getUnitKey(action.unit);
+            const targetKeys = [];
+            (action.targets || []).forEach(target => {
+                if (target && target.unit) {
+                    const targetKey = this.getTargetUnitKey(target.unit);
+                    if (!targetKeys.includes(targetKey)) targetKeys.push(targetKey);
+                }
+            });
+            if (targetKeys.length === 0) return;
             sourceNames.forEach(sourceName => {
                 const key = this.normalizeEffectSourceName(sourceName);
                 if (!key) return;
-                const map = effectSourceHistory[key] || (effectSourceHistory[key] = {});
-                map[unitKey] = action.unit;
+                const byTarget = effectSourceHistory[key] || (effectSourceHistory[key] = {});
+                targetKeys.forEach(targetKey => {
+                    const map = byTarget[targetKey] || (byTarget[targetKey] = {});
+                    map[unitKey] = action.unit;
+                });
             });
         }
 
@@ -962,6 +994,13 @@
             const units = [];
             (round.helden || []).forEach(unit => units.push(unit));
             (round.monster || []).forEach(unit => units.push(unit));
+            const targetIdx = targetUnit && targetUnit.id && targetUnit.id.idx;
+            if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
+                const exact = util.arraySearch(units, unit => {
+                    return unit && unit.id && unit.id.name === targetUnit.id.name && ("" + unit.id.idx) === ("" + targetIdx);
+                });
+                if (exact) return exact;
+            }
             return util.arraySearch(units, unit => _.ReportParser.isUnitEqual(unit, targetUnit));
         }
 
@@ -972,25 +1011,49 @@
                     contributors: [],
                     knownWeight: 0,
                     totalWeight: 0,
+                    debugSources: [],
                 };
             }
             const weights = {};
             let totalWeight = 0;
+            const debugSources = [];
             for (const sourceEntry of statusUnit.fx) {
                 if (!sourceEntry || !sourceEntry.quelle || !sourceEntry.fx) continue;
                 let hpLossValue = 0;
                 sourceEntry.fx.forEach(effect => {
-                    hpLossValue += this.parseHpLossFromWirkungText(effect && effect.wirkung);
+                    hpLossValue += this.parseHpLossFromWirkung(effect);
                 });
                 if (!(hpLossValue > 0)) continue;
                 totalWeight += hpLossValue;
 
                 const sourceKey = this.normalizeEffectSourceName(sourceEntry.quelle);
-                const contributors = effectSourceHistory[sourceKey] ? Object.values(effectSourceHistory[sourceKey]) : [];
+                const targetKey = this.getTargetUnitKey(targetUnit);
+                const byTarget = effectSourceHistory[sourceKey];
+                let contributors = (byTarget && byTarget[targetKey]) ? Object.values(byTarget[targetKey]) : [];
+                let usedFallback = false;
+                if (contributors.length === 0 && byTarget) {
+                    const collected = {};
+                    Object.values(byTarget).forEach(byUnitKey => {
+                        Object.entries(byUnitKey || {}).forEach(([unitKey, unit]) => {
+                            collected[unitKey] = unit;
+                        });
+                    });
+                    contributors = Object.values(collected);
+                    usedFallback = contributors.length > 0;
+                }
+                debugSources.push({
+                    source: sourceEntry.quelle,
+                    normalizedSource: sourceKey,
+                    hpLossValue: hpLossValue,
+                    targetKey: targetKey,
+                    usedFallback: usedFallback,
+                    matchedContributors: contributors.map(unit => unit.id && unit.id.name),
+                });
                 if (contributors.length === 0) continue;
 
                 const contributionPerSource = hpLossValue / contributors.length;
                 contributors.forEach(unit => {
+                    if (_.ReportParser.isUnitEqual(unit, targetUnit)) return; // Selbstschaden nicht zurechnen
                     const unitKey = this.getUnitKey(unit);
                     const current = weights[unitKey] || {unit: unit, weight: 0};
                     current.weight += contributionPerSource;
@@ -1004,6 +1067,7 @@
                 contributors: contributors,
                 knownWeight: knownWeight,
                 totalWeight: totalWeight,
+                debugSources: debugSources,
             };
         }
 
@@ -1018,25 +1082,87 @@
             const assignableDamage = damageValue * Math.min(1, knownWeight / totalWeight);
             if (!(assignableDamage > 0)) return [];
 
-            const result = [];
-            let assigned = 0;
-            for (let i = 0, l = contributors.length; i < l; i++) {
-                const contributor = contributors[i];
-                let value;
-                if (i === l - 1) {
-                    value = assignableDamage - assigned;
-                } else {
-                    value = assignableDamage * ((contributor.weight || 0) / knownWeight);
-                    assigned += value;
+            if (contributors.length === 1) {
+                return [{
+                    unit: contributors[0].unit,
+                    value: assignableDamage,
+                }];
+            }
+
+            // Faire Verteilung: erwarteter Marginalbeitrag über alle Reihenfolgen.
+            // Das ist die Shapley-Verteilung für v(S)=min(assignableDamage, sum(capacity)).
+            const n = contributors.length;
+            if (n > 16) { // Sicherheitsfallback bei sehr vielen Quellen
+                const resultFallback = [];
+                let assignedFallback = 0;
+                for (let i = 0; i < n; i++) {
+                    const contributor = contributors[i];
+                    let value;
+                    if (i === n - 1) {
+                        value = assignableDamage - assignedFallback;
+                    } else {
+                        value = assignableDamage * ((contributor.weight || 0) / knownWeight);
+                        assignedFallback += value;
+                    }
+                    if (value > 0) {
+                        resultFallback.push({unit: contributor.unit, value: value});
+                    }
                 }
+                return resultFallback;
+            }
+
+            const factorial = [1];
+            for (let i = 1; i <= n; i++) factorial[i] = factorial[i - 1] * i;
+            const nFact = factorial[n];
+            const capacities = contributors.map(cur => Math.max(0, Number(cur.weight) || 0));
+            const subsetCount = 1 << n;
+            const subsetSum = new Array(subsetCount).fill(0);
+            for (let mask = 1; mask < subsetCount; mask++) {
+                const lsb = mask & -mask;
+                const idx = Math.log2(lsb) | 0;
+                subsetSum[mask] = subsetSum[mask ^ lsb] + capacities[idx];
+            }
+
+            const values = new Array(n).fill(0);
+            for (let i = 0; i < n; i++) {
+                for (let mask = 0; mask < subsetCount; mask++) {
+                    if (mask & (1 << i)) continue;
+                    const s = this.popCount(mask);
+                    const coeff = (factorial[s] * factorial[n - s - 1]) / nFact;
+                    const vWithout = Math.min(assignableDamage, subsetSum[mask]);
+                    const vWith = Math.min(assignableDamage, subsetSum[mask] + capacities[i]);
+                    values[i] += coeff * (vWith - vWithout);
+                }
+            }
+
+            const result = [];
+            for (let i = 0; i < n; i++) {
+                const value = values[i];
                 if (value > 0) {
                     result.push({
-                        unit: contributor.unit,
+                        unit: contributors[i].unit,
                         value: value,
                     });
                 }
             }
+            this.debugIndirect("Split", {
+                assignableDamage: assignableDamage,
+                contributors: contributors.map((cur, idx) => ({
+                    unit: cur.unit && cur.unit.id && cur.unit.id.name,
+                    weight: capacities[idx],
+                    share: values[idx],
+                })),
+            });
             return result;
+        }
+
+        static popCount(num) {
+            let count = 0;
+            while (num) {
+                num &= (num - 1);
+                count++;
+            }
+            return count;
         }
 
         static doQuery(statQuery, levelDataArray) {
@@ -1239,22 +1365,27 @@
                                         const damage = damages[damageIndex];
                                         const contributionContext = SearchEngine.resolveHpLossContributors(round, target.unit, effectSourceHistory);
                                         const attributions = SearchEngine.splitHpLossDamageByContributors(damage.value, contributionContext);
-                                        if (attributions.length === 0) {
-                                            SearchEngine.addUnitId(action, action.unit);
-                                            SearchEngine.addUnitId(action, target.unit);
-                                            stats.actionClassification = function (curAction) {
-                                                return {
-                                                    fromMe: wantHeroes === !!curAction.unit.id.isHero,
-                                                    atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
-                                                    fromGroup: wantHeroes === !!curAction.unit.id.isHero,
-                                                    atGroup: wantHeroes === !!util.arraySearch(action.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
-                                                    cmp: "nxt",
-                                                }
-                                            }
-                                            doAnalysis(stats, filter, action, target, damage, damageIndex);
-                                        } else {
+                                        SearchEngine.debugIndirect("Event", {
+                                            level: level.nr,
+                                            area: area.nr,
+                                            round: round.nr,
+                                            target: target.unit && target.unit.id && target.unit.id.name,
+                                            loss: damage.value,
+                                            totalWeight: contributionContext.totalWeight,
+                                            knownWeight: contributionContext.knownWeight,
+                                            sources: contributionContext.debugSources,
+                                            attributions: attributions.map(cur => ({
+                                                unit: cur.unit && cur.unit.id && cur.unit.id.name,
+                                                value: cur.value,
+                                            })),
+                                        });
+                                        if (attributions.length > 0) {
                                             attributions.forEach((attribution, attributionIdx) => {
                                                 const virtualAction = Object.assign({}, action, {unit: attribution.unit});
+                                                const isHero = virtualAction.unit.id.isHero;
+                                                if (!(wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero))) {
+                                                    return;
+                                                }
                                                 SearchEngine.addUnitId(virtualAction, virtualAction.unit);
                                                 SearchEngine.addUnitId(virtualAction, target.unit);
                                                 stats.actionClassification = function (curAction) {
@@ -1448,11 +1579,11 @@
                 this.columns.push(new Column("Erfolge", center("normal / gut / krit"), dmgStat => this.center(dmgStat.result[1] + " / " + dmgStat.result[2] + " / " + dmgStat.result[3])));
                 let dmgTitle;
                 if (isDefense) {
-                    dmgTitle = "Eingehender<br>Schaden";
+                    dmgTitle = "Eingehender<br>Direktschaden";
                 } else {
-                    dmgTitle = "Ausgehender<br>Schaden";
+                    dmgTitle = "Ausgehender<br>Direktschaden";
                 }
-                this.columns.push(new Column("Gesamtschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
+                this.columns.push(new Column(isDefense ? "Eingehender Direktschaden" : "Ausgehender Direktschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
                         let targetDmg = 0;
@@ -1492,19 +1623,14 @@
                     }
                     return center(result);
                 }));
-                this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden<br>(Ø)<br>(min-max)"), dmgStat => {
-                    const [min, max] = this.minMaxDamageByType(dmgStat, true);
-                    const gesamtErfolge = this.gesamtErfolge(dmgStat);
-                    var result = dmgStat.indirectValue;
-                    if (gesamtErfolge > 0 && dmgStat.indirectValue > 0) {
-                        const avgDamage = util.round(dmgStat.indirectValue / gesamtErfolge, 2);
-                        result += "<br>(" + avgDamage + ")";
-                        result += "<br>(" + min + " - " + max + ")";
-                    }
-                    return center(result);
-                }));
                 this.columns.push(new Column("Rüstung", center("Rüstung"), dmgStat => center(mitVorzeichen(-dmgStat.ruestung))));
                 this.columns.push(new Column("Resistenz", center("Resistenz"), dmgStat => center(mitVorzeichen(-dmgStat.resistenz))));
+                this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden"), dmgStat => {
+                    return center(dmgStat.indirectValue);
+                }));
+                this.columns.push(new Column("Gesamtschaden", center("Gesamtschaden<br>(direkt + indirekt)"), dmgStat => {
+                    return center(dmgStat.directValue + dmgStat.indirectValue);
+                }));
 
                 const awColumn = new Column("Angriffswürfe", center("AW Ø<br>(min-max)"), dmgStat => {
                     var aw = Array(); // Angriffswerte
