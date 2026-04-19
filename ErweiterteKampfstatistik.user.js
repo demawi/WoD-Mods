@@ -640,6 +640,7 @@
     class SearchEngine {
 
         static DEBUG_INDIRECT = true;
+        static DEBUG_OWNER = true;
 
         static debugIndirect(...args) {
             if (this.DEBUG_INDIRECT) {
@@ -658,6 +659,7 @@
                 value: 0,
                 directValue: 0,
                 indirectValue: 0,
+                companionValue: 0,
                 ruestung: 0,
                 resistenz: 0,
                 actions: Array(),
@@ -733,6 +735,13 @@
             toStat.resistenz += from.resistenz;
         };
 
+        static getCompanionDamageValue(damage) {
+            if (!damage || damage === true) return 0;
+            const value = Number(damage.value);
+            if (!Number.isFinite(value)) return 0;
+            return value;
+        }
+
         static addUnitStats(stats, unit) {
             var unitStats = stats.units;
             if (!unitStats) {
@@ -750,7 +759,7 @@
             }
         }
 
-        static addTargetDmgStats = function (toStat, action, target, damage, hadDmgType, damageIndexFinal) {
+        static addTargetDmgStats = function (toStat, action, target, damage, hadDmgType, damageIndexFinal, companionDamageValue) {
             if (hadDmgType || damageIndexFinal === 0) {
                 if (!toStat.targets.includes(target)) {
                     if (target.typ === "Parade") {
@@ -775,6 +784,9 @@
             if (damage !== true && !!damage) {
                 SearchEngine.addDmgStats(damage, toStat); // gesamtschaden
                 SearchEngine.addDmgStats(damage, SearchEngine.getStat(toStat, null, damage.type, "byDmgType"));
+            }
+            if (companionDamageValue > 0 && toStat.actionUnit && _.ReportParser.isUnitEqual(toStat.actionUnit, action.unit)) {
+                toStat.companionValue += companionDamageValue;
             }
         }
 
@@ -811,11 +823,18 @@
             "unit": {
                 name: "Einheit",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.unit.id.name, "sub", statTarget.unit.id.isHero ? "herounit" : null);
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, SearchEngine.getDisplayUnitName(statTarget.unit), "sub", statTarget.unit.id.isHero ? "herounit" : null);
                     if (!subStats) return false;
                     const unit = statTarget.unit;
-                    subStats.unit = unit;
-                    subStats.title = unit.typeRef;
+                    if (!subStats.unit || (!subStats.unit.typeRef && unit.typeRef)) {
+                        subStats.unit = unit;
+                    }
+                    const title = SearchEngine.getDisplayUnitTitle(unit);
+                    const hasLink = ("" + title).indexOf("<a") !== -1;
+                    const hadLink = subStats.title && ("" + subStats.title).indexOf("<a") !== -1;
+                    if (!subStats.title || hasLink || !hadLink) {
+                        subStats.title = title;
+                    }
 
                     if (!unit.id.isHero) {
                         var unitCount = subStats.unitCount;
@@ -834,11 +853,18 @@
             "enemy_unit": {
                 name: "Gegner-Einheit",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, statTarget.unit.id.name, "sub", statTarget.unit.id.isHero ? "herounit" : null);
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, SearchEngine.getDisplayUnitName(statTarget.unit), "sub", statTarget.unit.id.isHero ? "herounit" : null);
                     if (!subStats) return false;
                     const unit = statTarget.unit;
-                    subStats.unit = unit;
-                    subStats.title = unit.typeRef;
+                    if (!subStats.unit || (!subStats.unit.typeRef && unit.typeRef)) {
+                        subStats.unit = unit;
+                    }
+                    const title = SearchEngine.getDisplayUnitTitle(unit);
+                    const hasLink = ("" + title).indexOf("<a") !== -1;
+                    const hadLink = subStats.title && ("" + subStats.title).indexOf("<a") !== -1;
+                    if (!subStats.title || hasLink || !hadLink) {
+                        subStats.title = title;
+                    }
 
                     if (!unit.id.isHero) {
                         var unitCount = subStats.unitCount;
@@ -942,6 +968,108 @@
             if (!unit || !unit.id) return "?";
             const id = unit.id;
             return (id.name || "?") + "|" + (id.idx || 1) + "|" + (!!id.isHero ? "h" : "m");
+        }
+
+        static getUnitOwnerName(unit) {
+            if (!unit) return null;
+            if (unit.id && unit.id.ownerName) return unit.id.ownerName;
+            if (unit.id && unit.id.ownerId && unit.id.ownerId.name) return unit.id.ownerId.name;
+            if (unit.ownerName) return unit.ownerName;
+            if (unit.ownerId && unit.ownerId.name) return unit.ownerId.name;
+            return null;
+        }
+
+        static getDisplayUnitName(unit) {
+            const baseName = unit && unit.id && unit.id.name ? unit.id.name : "?";
+            const ownerName = this.getUnitOwnerName(unit);
+            if (!ownerName || ownerName === baseName) return baseName;
+            return baseName + " (gehört " + ownerName + ")";
+        }
+
+        static getDisplayUnitTitle(unit) {
+            const ownerName = this.getUnitOwnerName(unit);
+            const baseName = unit && unit.id && unit.id.name ? unit.id.name : "?";
+            const ownerSuffix = ownerName && ownerName !== baseName ? " (gehört " + ownerName + ")" : "";
+            if (unit && unit.typeRef) return unit.typeRef + ownerSuffix;
+            return this.getDisplayUnitName(unit);
+        }
+
+        static getScopedUnitKey(level, area, unit) {
+            return (level && level.nr ? level.nr : "?") + "|" + (area && area.nr ? area.nr : "?") + "|" + this.getTargetUnitKey(unit);
+        }
+
+        static getCompanionUnitKey(unit) {
+            return this.getTargetUnitKey(unit);
+        }
+
+        static isSummonAction(action) {
+            if (!action || !action.skill) return false;
+            const skillType = ("" + (action.skill.typ || "")).toLowerCase();
+            const skillName = ("" + (action.skill.name || "")).toLowerCase();
+            return skillType === "ruft helfer" || skillName === "ruft helfer";
+        }
+
+        static registerCompanionOwners(companionOwnerByUnitKey, action) {
+            if (!this.isSummonAction(action) || !action || !action.unit) return;
+            (action.targets || []).forEach(target => {
+                if (!target || !target.unit) return;
+                if (_.ReportParser.isUnitEqual(target.unit, action.unit)) return;
+                const scopedKey = this.getScopedUnitKey(action.level, action.area, target.unit);
+                const companionKey = this.getCompanionUnitKey(target.unit);
+                companionOwnerByUnitKey[scopedKey] = action.unit;
+                companionOwnerByUnitKey[companionKey] = action.unit;
+                target.unit.ownerId = {
+                    name: action.unit.id && action.unit.id.name,
+                    idx: action.unit.id && action.unit.id.idx,
+                    isHero: action.unit.id && action.unit.id.isHero,
+                };
+                target.unit.ownerName = action.unit.id && action.unit.id.name;
+                if (this.DEBUG_OWNER && target.unit && target.unit.id && /d\u00fcsterwolf/i.test(target.unit.id.name || "")) {
+                    console.log("[EKS][owner] register", {
+                        unit: target.unit.id && target.unit.id.name,
+                        scopedKey: scopedKey,
+                        companionKey: companionKey,
+                        owner: target.unit.ownerName,
+                        level: action.level && action.level.nr,
+                        area: action.area && action.area.nr,
+                    });
+                }
+            });
+        }
+
+        static resolveCompanionOwner(companionOwnerByUnitKey, action, round) {
+            if (!action || !action.unit) return null;
+            const ownerId = (action.unit.ownerId && action.unit.ownerId.name) ? action.unit.ownerId : (action.unit.id && action.unit.id.ownerId && action.unit.id.ownerId.name ? action.unit.id.ownerId : null);
+            if (ownerId) {
+                if (round && round.unitLookup) {
+                    const resolved = round.unitLookup(ownerId, true) || {id: ownerId};
+                    if (this.DEBUG_OWNER && action.unit && action.unit.id && /d\u00fcsterwolf/i.test(action.unit.id.name || "")) {
+                        console.log("[EKS][owner] resolve-direct", {
+                            unit: action.unit.id && action.unit.id.name,
+                            owner: ownerId.name,
+                            resolved: resolved && resolved.id && resolved.id.name,
+                            level: action.level && action.level.nr,
+                            area: action.area && action.area.nr,
+                        });
+                    }
+                    return resolved;
+                }
+                return {id: ownerId};
+            }
+            const scopedKey = this.getScopedUnitKey(action.level, action.area, action.unit);
+            const companionKey = this.getCompanionUnitKey(action.unit);
+            const resolved = companionOwnerByUnitKey[scopedKey] || companionOwnerByUnitKey[companionKey] || null;
+            if (this.DEBUG_OWNER && action.unit && action.unit.id && /d\u00fcsterwolf/i.test(action.unit.id.name || "")) {
+                console.log("[EKS][owner] resolve-map", {
+                    unit: action.unit.id && action.unit.id.name,
+                    scopedKey: scopedKey,
+                    companionKey: companionKey,
+                    owner: resolved && resolved.id && resolved.id.name,
+                    level: action.level && action.level.nr,
+                    area: action.area && action.area.nr,
+                });
+            }
+            return resolved;
         }
 
         static parseHpLossFromWirkung(effect) {
@@ -1170,7 +1298,7 @@
             const wantDefense = statQuery.type === "defense";
             const wantAll = statQuery.type === "all";
 
-            function doAnalysis(stats, filter, action, target, damage, damageIndexFinal) {
+            function doAnalysis(stats, filter, action, target, damage, damageIndexFinal, companionDamageValue) {
                 const statRoot = {
                     hadDmgType: false,
                     levelDataArray: levelDataArray,
@@ -1195,7 +1323,7 @@
 
                 const execFilter = function (curStats, filters) {
                     if (!filters || filters.length === 0) {
-                        SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal);
+                        SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, companionDamageValue);
                         return true;
                     }
 
@@ -1223,14 +1351,14 @@
                     if (statTarget) {
                         let subStats = applyFilter(curStats, queryFilter, action, target, statTarget);
                         if (subStats) {
-                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, true);
+                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, companionDamageValue);
                             execFilter(subStats, tail);
                         }
                     }
                     if (secondStatTarget) {
                         let subStats = applyFilter(curStats, queryFilter, action, target, secondStatTarget);
                         if (subStats) {
-                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, true);
+                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, companionDamageValue);
                             execFilter(subStats, tail);
                         }
                     }
@@ -1240,6 +1368,7 @@
 
             var stats = this.createStat();
             const effectSourceHistory = {};
+            const companionOwnerByUnitKey = {};
 
 
             var filter = statQuery.filter; // position, attackType, fertigkeit, units
@@ -1274,7 +1403,7 @@
                             if (wantHeroes) {
                                 round.helden.forEach(unit => {
                                     var action = {
-                                        name: unit.id.name,
+                                        name: this.getDisplayUnitName(unit),
                                         unit: unit,
                                         fertigkeit: null,
                                         targets: [],
@@ -1282,7 +1411,7 @@
                                         area: area,
                                         round: round,
                                         type: "init",
-                                        src: "<tr><td></td><td>" + unit.id.name + " tritt in die Runde mit " + unit.hp + " HP und " + unit.mp + " MP ein</td></tr>",
+                                        src: "<tr><td></td><td>" + this.getDisplayUnitName(unit) + " tritt in die Runde mit " + unit.hp + " HP und " + unit.mp + " MP ein</td></tr>",
                                     };
 
                                     doAnalysis(stats, filter, action);
@@ -1319,6 +1448,8 @@
                             action.level = level;
                             action.area = area;
                             action.round = round;
+                            this.registerCompanionOwners(companionOwnerByUnitKey, action);
+                            const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, action, round);
 
                             if (wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero)) {
                                 SearchEngine.addUnitId(action, action.unit);
@@ -1345,6 +1476,11 @@
                                     for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
                                         const damage = damages[damageIndex];
                                         doAnalysis(stats, filter, action, target, damage, damageIndex);
+                                        const companionDamageValue = this.getCompanionDamageValue(damage);
+                                        if (companionOwnerUnit && companionDamageValue > 0) {
+                                            const ownerAction = Object.assign({}, action, {unit: companionOwnerUnit});
+                                            doAnalysis(stats, filter, ownerAction, target, true, damageIndex, companionDamageValue);
+                                        }
                                     }
                                 });
                             }
@@ -1404,6 +1540,12 @@
                                                     type: damage.type,
                                                 };
                                                 doAnalysis(stats, filter, virtualAction, target, attributedDamage, attributionIdx);
+                                                const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, virtualAction, round);
+                                                const companionDamageValue = this.getCompanionDamageValue(attributedDamage);
+                                                if (companionOwnerUnit && companionDamageValue > 0) {
+                                                    const ownerAction = Object.assign({}, virtualAction, {unit: companionOwnerUnit});
+                                                    doAnalysis(stats, filter, ownerAction, target, true, attributionIdx, companionDamageValue);
+                                                }
                                             });
                                         }
                                     }
@@ -1640,8 +1782,11 @@
                 this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden"), dmgStat => {
                     return center(dmgStat.indirectValue);
                 }));
-                this.columns.push(new Column("Gesamtschaden", center("Gesamtschaden<br>(direkt + indirekt)"), dmgStat => {
-                    return center(dmgStat.directValue + dmgStat.indirectValue);
+                this.columns.push(new Column("Gefährtenschaden", center("Gefährten-<br>schaden"), dmgStat => {
+                    return center(dmgStat.companionValue || 0);
+                }));
+                this.columns.push(new Column("Gesamtschaden", center("Gesamtschaden<br>(direkt + indirekt + Gefährte)"), dmgStat => {
+                    return center(dmgStat.directValue + dmgStat.indirectValue + (dmgStat.companionValue || 0));
                 }));
 
                 const awColumn = new Column("Angriffswürfe", center("AW Ø<br>(min-max)"), dmgStat => {

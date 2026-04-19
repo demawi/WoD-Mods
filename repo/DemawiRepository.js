@@ -5153,7 +5153,7 @@ class demawiRepository {
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    static ReportParserDataVersion = 9;
+    static ReportParserDataVersion = 11;
     static ReportParser = function () {
 
         let warnings;
@@ -5164,6 +5164,49 @@ class demawiRepository {
         let withSources = true;
         let _container;
         let missingSkillInfos = {};
+        let companionOwnersByUnitKey = {};
+
+        const getUnitOwnerKey = function (unitOrId) {
+            const id = unitOrId && unitOrId.id ? unitOrId.id : unitOrId;
+            if (!id) return "?";
+            return (id.name || "?") + "|" + (id.idx || 1);
+        }
+
+        const cloneUnitId = function (unitOrId) {
+            const id = unitOrId && unitOrId.id ? unitOrId.id : unitOrId;
+            if (!id) return;
+            return {
+                name: id.name,
+                idx: id.idx,
+                isHero: id.isHero,
+            };
+        }
+
+        const applyCompanionOwner = function (unit) {
+            if (!unit || !unit.id) return;
+            if (unit.ownerId && unit.ownerName) return;
+            if (unit.id.ownerId && unit.id.ownerName) {
+                unit.ownerId = cloneUnitId(unit.id.ownerId);
+                unit.ownerName = unit.id.ownerName;
+                return;
+            }
+            const ownerId = companionOwnersByUnitKey[getUnitOwnerKey(unit)];
+            if (!ownerId) return;
+            unit.ownerId = cloneUnitId(ownerId);
+            unit.ownerName = ownerId.name;
+        }
+
+        const registerCompanionOwner = function (unitOrId, ownerUnitOrId) {
+            const ownerId = cloneUnitId(ownerUnitOrId);
+            if (!ownerId || !ownerId.name) return;
+            companionOwnersByUnitKey[getUnitOwnerKey(unitOrId)] = ownerId;
+        }
+
+        const parseOwnerNameFromText = function (text) {
+            const match = ("" + (text || "")).match(/geh[oö]rt\s+([^\n\r\(\)\[\],:;]+)/i);
+            if (!match) return null;
+            return match[1].trim();
+        }
         const requestSkillInfoFromUser = function (skillOrIdentifier, fertigkeit, actionTR) {
             const skillRequest = {
                 line: actionTR.innerHTML,
@@ -5278,6 +5321,12 @@ class demawiRepository {
                     spawnArray = this.monsterSpawns = this.monsterSpawns || (this.monsterSpawns = []);
                 }
                 const unit = this.unknownUnit(newUnitId);
+                const ownerId = cloneUnitId(execUnit);
+                if (ownerId) {
+                    unit.ownerId = ownerId;
+                    unit.ownerName = ownerId.name;
+                    registerCompanionOwner(unit, ownerId);
+                }
                 if (withSources) {
                     unit.srcRef = node.innerHTML;
                     unit.typeRef = node.outerHTML;
@@ -5317,8 +5366,25 @@ class demawiRepository {
                     if (returnNullIfUnknown) return null;
                     // gespawnt ohne vorher angekündigt worden zu sein
                     // addWarning("Unit konnte nicht in der aktuellen Runde gefunden werden!", unitId);
-                    return this.unknownUnit(unitId);
+                    const unknown = this.unknownUnit(unitId);
+                    if (unitId.ownerName) {
+                        unknown.ownerName = unitId.ownerName;
+                        unknown.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                        unknown.id.ownerName = unitId.ownerName;
+                        unknown.id.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                        registerCompanionOwner(unknown, unknown.ownerId);
+                    }
+                    applyCompanionOwner(unknown);
+                    return unknown;
                 }
+                if (unitId.ownerName && !lookupUnit.ownerName) {
+                    lookupUnit.ownerName = unitId.ownerName;
+                    lookupUnit.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                    lookupUnit.id.ownerName = unitId.ownerName;
+                    lookupUnit.id.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                    registerCompanionOwner(lookupUnit, lookupUnit.ownerId);
+                }
+                applyCompanionOwner(lookupUnit);
                 return lookupUnit;
             }
         }
@@ -5567,6 +5633,18 @@ class demawiRepository {
                         mp: tds[5].innerText.trim(),
                         zustand: tds[6].innerText.trim(),
                     }
+                    applyCompanionOwner(unit);
+                    if (!unit.ownerName) {
+                        const ownerName = parseOwnerNameFromText(tds[1].textContent);
+                        if (ownerName) {
+                            unit.ownerName = ownerName;
+                            unit.ownerId = {
+                                name: ownerName,
+                                isHero: heldenJaNein ? 1 : 0,
+                            };
+                            registerCompanionOwner(unit, unit.ownerId);
+                        }
+                    }
                     if (withSources) {
                         unit.srcRef = srcRef;
                         unit.typeRef = typeRef;
@@ -5651,6 +5729,49 @@ class demawiRepository {
                 if (affectedIdx) affectedUnitId.idx = affectedIdx;
 
                 const affectedUnit = curRound.unitLookup(affectedUnitId);
+
+                const assignCompanionOwner = function (companionUnit) {
+                    if (!companionUnit || !companionUnit.id) return;
+                    const isSameUnit = companionUnit.id.name === affectedUnitId.name && ("" + (companionUnit.id.idx || "")) === ("" + (affectedUnitId.idx || ""));
+                    if (isSameUnit) return;
+                    const ownerId = cloneUnitId(affectedUnitId);
+                    companionUnit.ownerId = ownerId;
+                    companionUnit.ownerName = affectedUnitId.name;
+                    companionUnit.id.ownerId = ownerId;
+                    companionUnit.id.ownerName = affectedUnitId.name;
+                    registerCompanionOwner(companionUnit, ownerId);
+                };
+
+                // MP-Verlustzeilen koennen den Besitzer eines Begleiters transportieren:
+                // "<Begleiter> : <Besitzer> verliert X MP".
+                if (isMpLoss && unitAnchors.length >= 2) {
+                    const companionUnitId = ReportParser.getUnitIdFromElement(unitAnchors[0]);
+                    if (companionUnitId) {
+                        const companionUnit = curRound.unitLookup(companionUnitId, true) || curRound.unknownUnit(companionUnitId);
+                        assignCompanionOwner(companionUnit);
+                    }
+                }
+
+                // Fallback: in manchen Reports ist nur der Besitzer verlinkt,
+                // der Begleiter steht als reiner Text vor dem Doppelpunkt.
+                if (isMpLoss && unitAnchors.length === 1) {
+                    const prefixMatch = text.match(/^\s*([^:]+?)\s*:\s*/);
+                    if (prefixMatch) {
+                        const companionName = prefixMatch[1].replace(/\s+/g, " ").trim();
+                        const allUnits = [];
+                        (curRound.helden || []).forEach(unit => allUnits.push(unit));
+                        (curRound.monster || []).forEach(unit => allUnits.push(unit));
+                        (curRound.heldenSpawns || []).forEach(unit => allUnits.push(unit));
+                        (curRound.monsterSpawns || []).forEach(unit => allUnits.push(unit));
+                        for (const candidate of allUnits) {
+                            if (!candidate || !candidate.id) continue;
+                            if (candidate.id.name === companionName) {
+                                assignCompanionOwner(candidate);
+                                break;
+                            }
+                        }
+                    }
+                }
 
                 const target = {
                     unit: affectedUnit,
@@ -6055,6 +6176,7 @@ class demawiRepository {
                 withSources = activateSources;
                 _container = container;
                 missingSkillInfos = {};
+                companionOwnersByUnitKey = {};
 
                 const roundContentTable = this.#getContentTable(container);
                 const areas = Array();
@@ -6160,7 +6282,17 @@ class demawiRepository {
                 if (sibling && sibling.tagName === "SPAN") {
                     unitIndex = sibling.innerText;
                 }
-                return new UnitId(element.innerText, unitIndex, isHero);
+                const parsedUnitId = new UnitId(element.innerText, unitIndex, isHero);
+                const ownerContextText = (element.parentElement && element.parentElement.textContent) || element.textContent;
+                const ownerName = parseOwnerNameFromText(ownerContextText);
+                if (ownerName && ownerName !== parsedUnitId.name) {
+                    parsedUnitId.ownerName = ownerName;
+                    parsedUnitId.ownerId = {
+                        name: ownerName,
+                        isHero: isHero,
+                    };
+                }
+                return parsedUnitId;
             }
         }
 
