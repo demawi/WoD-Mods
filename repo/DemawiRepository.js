@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.14";
+    static version = "1.1.15";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -4110,11 +4110,23 @@ class demawiRepository {
                     result[2] = "[/size]" + result[2];
                 }
                 if (node.style && node.style.color && !this.hatClassName(node, "bbignoreColor")) {
-                    result[0] = result[0] + "[color=" + node.style.color + "]";
+                    result[0] = result[0] + "[color=" + this.getHexColorFromNode(node) + "]";
                     result[2] = "[/color]" + result[2];
                 }
             }
             return result.join("");
+        }
+
+        static getHexColorFromNode(node) {
+            const color = window.getComputedStyle(node).color;
+
+            // Extrahiert die Zahlen aus "rgb(r, g, b)" oder "rgba(r, g, b, a)"
+            const rgba = color.match(/\d+/g).map(Number);
+
+            // Rechnet R, G und B in Hex um (Alpha wird hier ignoriert)
+            return "#" + rgba.slice(0, 3).map(x =>
+                x.toString(16).padStart(2, '0')
+            ).join('');
         }
 
         static toBBCodeRaw(node, defaultSize) {
@@ -5153,7 +5165,7 @@ class demawiRepository {
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    static ReportParserDataVersion = 11;
+    static ReportParserDataVersion = 12;
     static ReportParser = function () {
 
         let warnings;

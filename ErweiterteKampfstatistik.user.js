@@ -989,7 +989,7 @@
         static getDisplayUnitTitle(unit) {
             const ownerName = this.getUnitOwnerName(unit);
             const baseName = unit && unit.id && unit.id.name ? unit.id.name : "?";
-            const ownerSuffix = ownerName && ownerName !== baseName ? " (gehört " + ownerName + ")" : "";
+            const ownerSuffix = ownerName && ownerName !== baseName ? " <span style='font-size:10px;color:#b8b8b8;'>(gehört " + ownerName + ")</span>" : "";
             if (unit && unit.typeRef) return unit.typeRef + ownerSuffix;
             return this.getDisplayUnitName(unit);
         }
