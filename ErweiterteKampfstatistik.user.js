@@ -777,16 +777,18 @@
                 }
             }
             // actions: me on me, me on groupy, groupy on me, me on enemy, enemy on me
-            if (!toStat.actions.includes(action)) {
-                toStat.actions.push(action);
-            }
-            if (action.unit.id.isHero) {
-                if (!toStat.actionsHelden.includes(action)) {
-                    toStat.actionsHelden.push(action);
+            if (!action.syntheticCompanionOwnerAction) {
+                if (!toStat.actions.includes(action)) {
+                    toStat.actions.push(action);
                 }
-            } else {
-                if (!toStat.actionsMonster.includes(action)) {
-                    toStat.actionsMonster.push(action);
+                if (action.unit.id.isHero) {
+                    if (!toStat.actionsHelden.includes(action)) {
+                        toStat.actionsHelden.push(action);
+                    }
+                } else {
+                    if (!toStat.actionsMonster.includes(action)) {
+                        toStat.actionsMonster.push(action);
+                    }
                 }
             }
             if (damage !== true && !!damage) {
@@ -1651,6 +1653,7 @@
                                         const companionDamageValue = this.getCompanionDamageValue(damage);
                                         if (companionOwnerUnit && companionDamageValue > 0) {
                                             const ownerAction = Object.assign({}, action, {unit: companionOwnerUnit});
+                                            ownerAction.syntheticCompanionOwnerAction = true;
                                             doAnalysis(stats, filter, ownerAction, target, true, damageIndex, companionDamageValue);
                                         }
                                     }
@@ -1825,6 +1828,8 @@
                                         area: area,
                                         round: round,
                                         type: "regen",
+                                        syntheticCompanionOwnerAction: true,
+                                        src: "<tr><td></td><td>" + SearchEngine.getDisplayUnitName(attribution.unit) + " - Persistenter Effekt verursacht " + Math.round(attribution.value) + " indirekten Schaden</td></tr>",
                                     };
                                     const isHero = virtualAction.unit.id.isHero;
                                     if (!(wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero))) {
@@ -1852,6 +1857,7 @@
                                     const companionDamageValue = this.getCompanionDamageValue(attributedDamage);
                                     if (companionOwnerUnit && companionDamageValue > 0) {
                                         const ownerAction = Object.assign({}, virtualAction, {unit: companionOwnerUnit});
+                                        ownerAction.syntheticCompanionOwnerAction = true;
                                         doAnalysis(stats, filter, ownerAction, syntheticTarget, true, attributionIdx, companionDamageValue);
                                     }
                                 });
@@ -2359,7 +2365,7 @@
                                         border = "12px solid transparent";
                                     }
                                     actionTR = document.createElement("tr");
-                                    actionTR.innerHTML = action.src;
+                                    actionTR.innerHTML = action.src || "<td></td><td>[Action ohne Details]</td>";
                                     const roundTd = document.createElement("td");
                                     roundTd.style.width = "1px";
                                     if (curRoundNr !== action.round.nr) {
