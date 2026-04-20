@@ -997,12 +997,24 @@
             return baseName + " (gehört " + ownerName + ")";
         }
 
+        static isLikelyMyHero(unit) {
+            if (!unit || !unit.id || !unit.id.isHero) return false;
+            const myHeroNode = document.querySelector("a.rep_myhero");
+            if (!myHeroNode) return false;
+            const myHeroName = (myHeroNode.textContent || "").trim();
+            const unitName = (unit.id.name || "").trim();
+            return !!myHeroName && unitName === myHeroName;
+        }
+
         static getDisplayUnitTitle(unit) {
             const ownerName = this.getUnitOwnerName(unit);
             const baseName = unit && unit.id && unit.id.name ? unit.id.name : "?";
             const ownerSuffix = ownerName && ownerName !== baseName ? " <span style='font-size:10px;color:#b8b8b8;'>(gehört " + ownerName + ")</span>" : "";
             if (unit && unit.typeRef) return unit.typeRef + ownerSuffix;
-            return this.getDisplayUnitName(unit);
+            const cssClass = unit && unit.id && unit.id.className
+                ? unit.id.className
+                : (unit && unit.id && unit.id.isHero ? (this.isLikelyMyHero(unit) ? "rep_myhero" : "rep_hero") : "rep_monster");
+            return "<span class='" + cssClass + "'>" + this.getDisplayUnitName(unit) + "</span>" + ownerSuffix;
         }
 
         static getScopedUnitKey(level, area, unit) {
@@ -2405,7 +2417,10 @@
 
                 function addLine2(statView, id, statResult) {
                     if (id === "") id = "Gesamt";
-                    if (statResult.actions.length > 0) {
+                    if (!statResult.title && statResult.unit) {
+                        statResult.title = SearchEngine.getDisplayUnitTitle(statResult.unit);
+                    }
+                    if (statResult.actions.length > 0 || (Number(statResult.companionValue || 0) > 0)) {
                         addLine(statView, id === "" ? "" : (id + ""), statResult, statResult.byDmgType);
                     }
                 }

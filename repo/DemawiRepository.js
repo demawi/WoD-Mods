@@ -6311,6 +6311,7 @@ class demawiRepository {
                     unitIndex = sibling.innerText;
                 }
                 const parsedUnitId = new UnitId(element.innerText, unitIndex, isHero);
+                parsedUnitId.className = className;
                 const ownerContextText = (element.parentElement && element.parentElement.textContent) || element.textContent;
                 const ownerName = parseOwnerNameFromText(ownerContextText) || parseOwnerNameFromElement(element);
                 if (ownerName && ownerName !== parsedUnitId.name) {
