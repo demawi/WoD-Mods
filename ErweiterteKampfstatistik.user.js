@@ -894,7 +894,9 @@
             "skillType": {
                 name: "AngriffsTyp",
                 apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
-                    return SearchEngine.getStat(curStats, queryFilter, statTarget.skill.angriffstyp, "sub", "skillType");
+                    if (!statTarget || !statTarget.skill) return;
+                    const angriffstyp = statTarget.skill.angriffstyp || "Unbekannt";
+                    return SearchEngine.getStat(curStats, queryFilter, angriffstyp, "sub", "skillType");
                 }
             },
             "skillName": {
@@ -1025,9 +1027,13 @@
             return this.getTargetUnitKey(unit);
         }
 
+        static actionSkillType(action) {
+            return ("" + (action && action.skill && action.skill.typ ? action.skill.typ : ""));
+        }
+
         static isSummonAction(action) {
             if (!action || !action.skill) return false;
-            const skillType = ("" + (action.skill.typ || "")).toLowerCase();
+            const skillType = this.actionSkillType(action).toLowerCase();
             const skillName = ("" + (action.skill.name || "")).toLowerCase();
             return skillType === "ruft helfer" || skillName === "ruft helfer";
         }
@@ -1122,15 +1128,55 @@
                 }
             });
             if (targetKeys.length === 0) return;
+            const actionSkillType = (action.skill && action.skill.angriffstyp) ? action.skill.angriffstyp : "Unbekannt";
             sourceNames.forEach(sourceName => {
                 const key = this.normalizeEffectSourceName(sourceName);
                 if (!key) return;
                 const byTarget = effectSourceHistory[key] || (effectSourceHistory[key] = {});
                 targetKeys.forEach(targetKey => {
                     const map = byTarget[targetKey] || (byTarget[targetKey] = {});
-                    map[unitKey] = action.unit;
+                    let entry = map[unitKey];
+                    if (!entry || !entry.unit) {
+                        entry = {
+                            unit: action.unit,
+                            skillTypeWeights: {},
+                        };
+                        map[unitKey] = entry;
+                    } else if (!entry.skillTypeWeights) {
+                        entry.skillTypeWeights = {};
+                    }
+                    entry.unit = action.unit;
+                    entry.skillTypeWeights[actionSkillType] = (entry.skillTypeWeights[actionSkillType] || 0) + 1;
                 });
             });
+        }
+
+        static pickDominantSkillType(skillTypeWeights) {
+            if (!skillTypeWeights) return "Unbekannt";
+            let winner = "Unbekannt";
+            let winnerWeight = -1;
+            Object.entries(skillTypeWeights).forEach(([name, weight]) => {
+                const curWeight = Number(weight || 0);
+                if (curWeight > winnerWeight) {
+                    winnerWeight = curWeight;
+                    winner = name || "Unbekannt";
+                }
+            });
+            return winner || "Unbekannt";
+        }
+
+        static pickDominantSourceName(sourceNameWeights) {
+            if (!sourceNameWeights) return "Persistenter Effekt";
+            let winner = "Persistenter Effekt";
+            let winnerWeight = -1;
+            Object.entries(sourceNameWeights).forEach(([name, weight]) => {
+                const curWeight = Number(weight || 0);
+                if (curWeight > winnerWeight) {
+                    winnerWeight = curWeight;
+                    winner = name || "Persistenter Effekt";
+                }
+            });
+            return winner || "Persistenter Effekt";
         }
 
         static registerRoundEffectSources(effectSourceHistory, round) {
@@ -1280,7 +1326,20 @@
                 const sourceKey = this.normalizeEffectSourceName(sourceEntry.quelle);
                 const targetKey = this.getTargetUnitKey(targetUnit);
                 const byTarget = effectSourceHistory[sourceKey];
-                let contributors = (byTarget && byTarget[targetKey]) ? Object.values(byTarget[targetKey]) : [];
+                const toContributorMeta = contributorEntry => {
+                    if (!contributorEntry) return null;
+                    if (contributorEntry.unit) {
+                        return {
+                            unit: contributorEntry.unit,
+                            skillTypeWeights: contributorEntry.skillTypeWeights || {},
+                        };
+                    }
+                    return {
+                        unit: contributorEntry,
+                        skillTypeWeights: {},
+                    };
+                };
+                let contributors = (byTarget && byTarget[targetKey]) ? Object.values(byTarget[targetKey]).map(toContributorMeta).filter(cur => cur && cur.unit) : [];
                 let usedFallback = false;
                 if (contributors.length === 0 && byTarget && targetUnit && targetUnit.id) {
                     // Fallback: gleiche Ziel-Einheit ohne idx-Zwang (Name+Seite), falls idx in Event/Action abweicht.
@@ -1294,7 +1353,7 @@
                         return keyName === targetName && keySide === targetSide;
                     });
                     if (matchingKeys.length === 1) {
-                        contributors = Object.values(byTarget[matchingKeys[0]] || {});
+                        contributors = Object.values(byTarget[matchingKeys[0]] || {}).map(toContributorMeta).filter(cur => cur && cur.unit);
                         usedFallback = contributors.length > 0;
                     }
                 }
@@ -1313,7 +1372,7 @@
                     acceptedCount: 0,
                     rejectedCount: 0,
                     contributorDecisions: [],
-                    matchedContributors: contributors.map(unit => unit.id && unit.id.name),
+                    matchedContributors: contributors.map(meta => meta.unit && meta.unit.id && meta.unit.id.name),
                 };
                 debugSources.push(sourceDebug);
                 if (contributors.length === 0) {
@@ -1322,8 +1381,10 @@
                     continue;
                 }
 
+                const sourceDisplayName = sourceEntry.quelle || sourceKey || "Persistenter Effekt";
                 const acceptedContributors = [];
-                contributors.forEach(unit => {
+                contributors.forEach(meta => {
+                    const unit = meta.unit;
                     if (_.ReportParser.isUnitEqual(unit, targetUnit)) {
                         sourceDebug.rejectedCount++;
                         sourceDebug.contributorDecisions.push({
@@ -1347,7 +1408,11 @@
                          addReason(contributorRejectSummary, "REJECT_NOT_IN_ROUND");
                          return; // Nur Einheiten aus dieser Runde (auch tote)
                      }
-                    acceptedContributors.push(unit);
+                    acceptedContributors.push({
+                        unit: unit,
+                        skillType: this.pickDominantSkillType(meta.skillTypeWeights),
+                        sourceName: sourceDisplayName,
+                    });
                     sourceDebug.acceptedCount++;
                     sourceDebug.contributorDecisions.push({
                         unit: unit && unit.id && unit.id.name,
@@ -1361,16 +1426,30 @@
                     continue;
                 }
                 const contributionPerSource = hpLossValue / acceptedContributors.length;
-                acceptedContributors.forEach(unit => {
+                acceptedContributors.forEach(contributorMeta => {
+                    const unit = contributorMeta.unit;
                     const unitKey = this.getUnitKey(unit);
-                    const current = weights[unitKey] || {unit: unit, weight: 0};
+                    const skillType = contributorMeta.skillType || "Unbekannt";
+                    const sourceName = contributorMeta.sourceName || "Persistenter Effekt";
+                    const sourceNameKey = this.normalizeEffectSourceName(sourceName) || sourceName;
+                    const attributionKey = unitKey + "||" + sourceNameKey + "||" + skillType;
+                    const current = weights[attributionKey] || {
+                        unit: unit,
+                        weight: 0,
+                        skillType: skillType,
+                        sourceName: sourceName,
+                    };
                     current.weight += contributionPerSource;
-                    weights[unitKey] = current;
+                    weights[attributionKey] = current;
                 });
             }
             const contributors = Object.values(weights);
             let knownWeight = 0;
-            contributors.forEach(cur => knownWeight += cur.weight || 0);
+            contributors.forEach(cur => {
+                knownWeight += cur.weight || 0;
+                if (!cur.skillType) cur.skillType = "Unbekannt";
+                if (!cur.sourceName) cur.sourceName = "Persistenter Effekt";
+            });
             return {
                 contributors: contributors,
                 knownWeight: knownWeight,
@@ -1395,6 +1474,8 @@
                 return [{
                     unit: contributors[0].unit,
                     value: assignableDamage,
+                    skillType: contributors[0].skillType || "Unbekannt",
+                    sourceName: contributors[0].sourceName || "Persistenter Effekt",
                 }];
             }
 
@@ -1414,7 +1495,12 @@
                         assignedFallback += value;
                     }
                     if (value > 0) {
-                        resultFallback.push({unit: contributor.unit, value: value});
+                        resultFallback.push({
+                            unit: contributor.unit,
+                            value: value,
+                            skillType: contributor.skillType || "Unbekannt",
+                            sourceName: contributor.sourceName || "Persistenter Effekt",
+                        });
                     }
                 }
                 return resultFallback;
@@ -1451,6 +1537,8 @@
                     result.push({
                         unit: contributors[i].unit,
                         value: value,
+                        skillType: contributors[i].skillType || "Unbekannt",
+                        sourceName: contributors[i].sourceName || "Persistenter Effekt",
                     });
                 }
             }
@@ -1836,6 +1924,11 @@
                                     }
                                     const virtualAction = {
                                         unit: attribution.unit,
+                                        skill: {
+                                            name: attribution.sourceName || "Persistenter Effekt",
+                                            typ: "Verschlechterung",
+                                            angriffstyp: attribution.skillType || "Unbekannt",
+                                        },
                                         targets: [syntheticTarget],
                                         level: level,
                                         area: area,
@@ -2057,16 +2150,22 @@
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).fromMe);
 
-                    let heal = util.arrayFilter(actions, action => action.skill.typ === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer").length;
+                    let heal = util.arrayFilter(actions, action => SearchEngine.actionSkillType(action) === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => {
+                        const typ = SearchEngine.actionSkillType(action);
+                        return typ === "Verbesserung" || typ === "Ruft Helfer";
+                    }).length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
                 this.columns.push(new Column("Aktionsarten", center("Passiva<br>(Parade / Geheilt / Gebufft)"), stat => {
                     let actions = stat.actions;
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).atMe);
-                    let heal = util.arrayFilter(actions, action => action.skill.typ === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer").length;
+                    let heal = util.arrayFilter(actions, action => SearchEngine.actionSkillType(action) === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => {
+                        const typ = SearchEngine.actionSkillType(action);
+                        return typ === "Verbesserung" || typ === "Ruft Helfer";
+                    }).length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
             }
@@ -2081,6 +2180,7 @@
                 const center = this.center;
                 const mitVorzeichen = this.mitVorzeichen;
                 const Column = Viewer.Column;
+                const formatDamageValue = value => this.formatDamageValue(value);
                 const isDefense = statView.query.type === "defense";
                 if (isDefense) {
                     this.columns.push(new Column("Verteidigungs Aktionen", center("Verteidigungs<br>Aktionen"), dmgStat => center(dmgStat.actions.length)));
@@ -2096,7 +2196,7 @@
                 } else {
                     dmgTitle = "Ausgehend";
                 }
-                const outDamageColumn = new Column(isDefense ? "Eingehender Direktschaden" : "Ausgehender Direktschaden", center(dmgTitle + "<br>(Ø)"), dmgStat => {
+                const outDamageColumn = new Column(isDefense ? "Eingehender Direktschaden" : "Ausgehender Direktschaden", center(dmgTitle + "<br>(Ø)<br>(min-max)"), dmgStat => {
                     const dmgs = Array();
                     dmgStat.targets.forEach(target => {
                         let targetDmg = 0;
@@ -2109,11 +2209,11 @@
                     const max = util.arrayMax(dmgs);
                     const gesamtDamage = this.gesamtDamage(dmgStat);
                     const gesamtErfolge = this.gesamtErfolge(dmgStat);
-                    var result = gesamtDamage;
+                    var result = formatDamageValue(gesamtDamage);
                     if (gesamtErfolge > 0 && gesamtDamage > 0) {
-                        const avgDamage = gesamtDamage / gesamtErfolge;
-                        result += "<br>" + "(" + util.round(avgDamage, 2) + ")";
-                        result += "<br>" + "(" + min + " - " + max + ")";
+                        const avgDamage = formatDamageValue(gesamtDamage / gesamtErfolge);
+                        result += "<br>" + "(" + avgDamage + ")";
+                        result += "<br>" + "(" + formatDamageValue(min) + " - " + formatDamageValue(max) + ")";
                     }
                     return center(result);
                 });
@@ -2151,13 +2251,15 @@
                 this.columns.push(resistColumn);
 
                 this.columns.push(new Column("Indirekter Schaden", center("Indirekter<br>Schaden", "Schaden aus HP-Regenerations-Debuffs (z.B. durch Vergiftungen/Verbrennungen)"), dmgStat => {
-                    return center(dmgStat.indirectValue);
+                    return center(formatDamageValue(dmgStat.indirectValue));
                 }));
-                this.columns.push(new Column("Gefährtenschaden", center("Gefährten-<br>schaden"), dmgStat => {
-                    return center(dmgStat.companionValue || 0);
-                }));
+                if (!isDefense) {
+                    this.columns.push(new Column("Gefährtenschaden", center("Gefährten-<br>schaden"), dmgStat => {
+                        return center(formatDamageValue(dmgStat.companionValue || 0));
+                    }));
+                }
                 this.columns.push(new Column("Gesamtschaden", center("Gesamtschaden", "Summe aus direktem Schaden, indirektem Schaden und Gefährtenschaden."), dmgStat => {
-                    return center(dmgStat.directValue + dmgStat.indirectValue + (dmgStat.companionValue || 0));
+                    return center(formatDamageValue(dmgStat.directValue + dmgStat.indirectValue + (dmgStat.companionValue || 0)));
                 }));
 
                 const awColumn = new Column("Angriffswürfe", center("AW Ø<br>(min-max)"), dmgStat => {
@@ -2204,6 +2306,15 @@
                 if (nummer > 0) return "+" + nummer;
             };
 
+            formatDamageValue(value) {
+                const numeric = Number(value || 0);
+                if (!Number.isFinite(numeric)) return value;
+                const rounded = util.round(numeric, 2);
+                const asInt = Math.round(rounded);
+                if (Math.abs(rounded - asInt) < 0.0000001) return asInt;
+                return rounded;
+            }
+
             gesamtDamage(dmgStat) {
                 return dmgStat.value + dmgStat.ruestung + dmgStat.resistenz;
             }
@@ -2232,7 +2343,7 @@
                 const table = document.createElement("table");
                 table.width = "100%";
                 for (const [dmgType, dmgStat] of Object.entries(specificArray)) {
-                    table.innerHTML += "<tr><td width=50%>" + dmgType + "</td>" + this.center(dmgStat.value) + this.center(this.mitVorzeichen(-dmgStat.ruestung)) + this.center(this.mitVorzeichen(-dmgStat.resistenz)) + "</tr>";
+                    table.innerHTML += "<tr><td width=50%>" + dmgType + "</td>" + this.center(this.formatDamageValue(dmgStat.value)) + this.center(this.mitVorzeichen(-this.formatDamageValue(dmgStat.ruestung))) + this.center(this.mitVorzeichen(-this.formatDamageValue(dmgStat.resistenz))) + "</tr>";
                 }
                 return table.outerHTML;
             }
