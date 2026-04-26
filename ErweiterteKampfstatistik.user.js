@@ -642,6 +642,7 @@
         static DEBUG_INDIRECT = false;
         static DEBUG_INDIRECT_VERBOSE = false;
         static DEBUG_INDIRECT_TRACE = false;
+        static DEBUG_INDIRECT_BOREX = false;
         static DEBUG_OWNER = false;
 
         static debugIndirect(...args) {
@@ -655,6 +656,7 @@
                 console.log("[EKS][indirekt][verbose]", ...args);
             }
         }
+
 
         static createStat() {
             return {
@@ -972,6 +974,52 @@
             return result;
         }
 
+        static buildEffectSourceKeyCandidates(sourceName) {
+            const raw = ("" + (sourceName || "")).trim();
+            if (!raw) return [];
+            const rawCandidates = [raw];
+            rawCandidates.push(raw.replace(/\([^)]*\)/g, "").trim());
+            const colonParts = raw.split(":");
+            if (colonParts.length > 1) {
+                rawCandidates.push(colonParts[0].trim());
+                rawCandidates.push(colonParts[colonParts.length - 1].trim());
+            }
+            const dashParts = raw.split(" - ");
+            if (dashParts.length > 1) {
+                rawCandidates.push(dashParts[0].trim());
+                rawCandidates.push(dashParts[dashParts.length - 1].trim());
+            }
+
+            const result = [];
+            rawCandidates.forEach(cur => {
+                const normalized = this.normalizeEffectSourceName(cur);
+                if (normalized && !result.includes(normalized)) result.push(normalized);
+            });
+            return result;
+        }
+
+        static resolveEffectSourceHistoryKey(effectSourceHistory, sourceName, targetKey) {
+            if (!effectSourceHistory) return "";
+            const candidates = this.buildEffectSourceKeyCandidates(sourceName);
+            if (candidates.length === 0) return "";
+
+            // Prefer aliases that actually have contributors for the current target.
+            for (const candidate of candidates) {
+                const byTarget = effectSourceHistory[candidate];
+                if (byTarget && targetKey && byTarget[targetKey] && Object.keys(byTarget[targetKey]).length > 0) {
+                    return candidate;
+                }
+            }
+
+            // Fallback: existing alias key even if target-specific entries are currently missing.
+            for (const candidate of candidates) {
+                if (effectSourceHistory[candidate]) {
+                    return candidate;
+                }
+            }
+            return "";
+        }
+
         static getUnitKey(unit) {
             if (!unit || !unit.id) return "?";
             return (unit.id.name || "?") + "|" + (unit.id.idx || 1) + "|" + (!!unit.id.isHero ? "h" : "m");
@@ -1114,10 +1162,20 @@
         static registerActionEffectSources(effectSourceHistory, action) {
             const isEventAction = !!(action && (action.event || (action.skill && action.skill.event)));
             if (!action || !action.unit || isEventAction) return;
-            const sourceNames = [];
-            if (action.skill && action.skill.name) sourceNames.push(action.skill.name);
+            const sourceInfos = [];
+            if (action.skill && action.skill.name) {
+                sourceInfos.push({
+                    name: action.skill.name,
+                    typeRef: action.skill.typeRef || action.skill.name,
+                });
+            }
             ((action.skill && action.skill.items) || []).forEach(item => {
-                if (item && item.name) sourceNames.push(item.name);
+                if (item && item.name) {
+                    sourceInfos.push({
+                        name: item.name,
+                        typeRef: item.srcRef || item.name,
+                    });
+                }
             });
             const unitKey = this.getUnitKey(action.unit);
             const targetKeys = [];
@@ -1129,24 +1187,31 @@
             });
             if (targetKeys.length === 0) return;
             const actionSkillType = (action.skill && action.skill.angriffstyp) ? action.skill.angriffstyp : "Unbekannt";
-            sourceNames.forEach(sourceName => {
-                const key = this.normalizeEffectSourceName(sourceName);
-                if (!key) return;
-                const byTarget = effectSourceHistory[key] || (effectSourceHistory[key] = {});
-                targetKeys.forEach(targetKey => {
-                    const map = byTarget[targetKey] || (byTarget[targetKey] = {});
-                    let entry = map[unitKey];
-                    if (!entry || !entry.unit) {
-                        entry = {
-                            unit: action.unit,
-                            skillTypeWeights: {},
-                        };
-                        map[unitKey] = entry;
-                    } else if (!entry.skillTypeWeights) {
-                        entry.skillTypeWeights = {};
-                    }
-                    entry.unit = action.unit;
-                    entry.skillTypeWeights[actionSkillType] = (entry.skillTypeWeights[actionSkillType] || 0) + 1;
+            sourceInfos.forEach(sourceInfo => {
+                const sourceName = sourceInfo && sourceInfo.name;
+                const aliasKeys = this.buildEffectSourceKeyCandidates(sourceName);
+                aliasKeys.forEach(key => {
+                    if (!key) return;
+                    const byTarget = effectSourceHistory[key] || (effectSourceHistory[key] = {});
+                    targetKeys.forEach(targetKey => {
+                        const map = byTarget[targetKey] || (byTarget[targetKey] = {});
+                        let entry = map[unitKey];
+                        if (!entry || !entry.unit) {
+                            entry = {
+                                unit: action.unit,
+                                skillTypeWeights: {},
+                            };
+                            map[unitKey] = entry;
+                        } else if (!entry.skillTypeWeights) {
+                            entry.skillTypeWeights = {};
+                        }
+                        entry.unit = action.unit;
+                        entry.skillTypeWeights[actionSkillType] = (entry.skillTypeWeights[actionSkillType] || 0) + 1;
+                        if (sourceInfo && sourceInfo.name) entry.sourceName = sourceInfo.name;
+                        if (sourceInfo && sourceInfo.typeRef && (!entry.sourceTypeRef || ("" + entry.sourceTypeRef).indexOf("<a") === -1)) {
+                            entry.sourceTypeRef = sourceInfo.typeRef;
+                        }
+                    });
                 });
             });
         }
@@ -1165,18 +1230,16 @@
             return winner || "Unbekannt";
         }
 
-        static pickDominantSourceName(sourceNameWeights) {
-            if (!sourceNameWeights) return "Persistenter Effekt";
-            let winner = "Persistenter Effekt";
-            let winnerWeight = -1;
-            Object.entries(sourceNameWeights).forEach(([name, weight]) => {
-                const curWeight = Number(weight || 0);
-                if (curWeight > winnerWeight) {
-                    winnerWeight = curWeight;
-                    winner = name || "Persistenter Effekt";
-                }
-            });
-            return winner || "Persistenter Effekt";
+        static ensureSkillTypeRef(sourceName, sourceTypeRef) {
+            if (sourceTypeRef && ("" + sourceTypeRef).trim() !== "") return sourceTypeRef;
+            if (!sourceName) return "Persistenter Effekt";
+            try {
+                const link = _.WoD.createSkillLink(sourceName);
+                if (link && link.outerHTML) return link.outerHTML;
+            } catch (e) {
+                // Fallback below when no skill link can be generated
+            }
+            return sourceName;
         }
 
         static registerRoundEffectSources(effectSourceHistory, round) {
@@ -1323,8 +1386,8 @@
                 }
                 totalWeight += hpLossValue;
 
-                const sourceKey = this.normalizeEffectSourceName(sourceEntry.quelle);
                 const targetKey = this.getTargetUnitKey(targetUnit);
+                const sourceKey = this.resolveEffectSourceHistoryKey(effectSourceHistory, sourceEntry.quelle, targetKey);
                 const byTarget = effectSourceHistory[sourceKey];
                 const toContributorMeta = contributorEntry => {
                     if (!contributorEntry) return null;
@@ -1332,11 +1395,15 @@
                         return {
                             unit: contributorEntry.unit,
                             skillTypeWeights: contributorEntry.skillTypeWeights || {},
+                            sourceName: contributorEntry.sourceName || null,
+                            sourceTypeRef: contributorEntry.sourceTypeRef || null,
                         };
                     }
                     return {
                         unit: contributorEntry,
                         skillTypeWeights: {},
+                        sourceName: null,
+                        sourceTypeRef: null,
                     };
                 };
                 let contributors = (byTarget && byTarget[targetKey]) ? Object.values(byTarget[targetKey]).map(toContributorMeta).filter(cur => cur && cur.unit) : [];
@@ -1411,7 +1478,8 @@
                     acceptedContributors.push({
                         unit: unit,
                         skillType: this.pickDominantSkillType(meta.skillTypeWeights),
-                        sourceName: sourceDisplayName,
+                        sourceName: meta.sourceName || sourceDisplayName,
+                        sourceTypeRef: this.ensureSkillTypeRef(meta.sourceName || sourceDisplayName, meta.sourceTypeRef),
                     });
                     sourceDebug.acceptedCount++;
                     sourceDebug.contributorDecisions.push({
@@ -1438,6 +1506,7 @@
                         weight: 0,
                         skillType: skillType,
                         sourceName: sourceName,
+                        sourceTypeRef: contributorMeta.sourceTypeRef || sourceName,
                     };
                     current.weight += contributionPerSource;
                     weights[attributionKey] = current;
@@ -1476,6 +1545,7 @@
                     value: assignableDamage,
                     skillType: contributors[0].skillType || "Unbekannt",
                     sourceName: contributors[0].sourceName || "Persistenter Effekt",
+                    sourceTypeRef: contributors[0].sourceTypeRef || contributors[0].sourceName || "Persistenter Effekt",
                 }];
             }
 
@@ -1500,6 +1570,7 @@
                             value: value,
                             skillType: contributor.skillType || "Unbekannt",
                             sourceName: contributor.sourceName || "Persistenter Effekt",
+                            sourceTypeRef: contributor.sourceTypeRef || contributor.sourceName || "Persistenter Effekt",
                         });
                     }
                 }
@@ -1539,6 +1610,7 @@
                         value: value,
                         skillType: contributors[i].skillType || "Unbekannt",
                         sourceName: contributors[i].sourceName || "Persistenter Effekt",
+                        sourceTypeRef: contributors[i].sourceTypeRef || contributors[i].sourceName || "Persistenter Effekt",
                     });
                 }
             }
@@ -1926,6 +1998,7 @@
                                         unit: attribution.unit,
                                         skill: {
                                             name: attribution.sourceName || "Persistenter Effekt",
+                                            typeRef: attribution.sourceTypeRef || attribution.sourceName || "Persistenter Effekt",
                                             typ: "Verschlechterung",
                                             angriffstyp: attribution.skillType || "Unbekannt",
                                         },

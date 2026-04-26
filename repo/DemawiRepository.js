@@ -3787,18 +3787,42 @@ class demawiRepository {
         static updateSuccessInformationsInSchlachtFromBattleReport(doc, success) {
             doc = doc || document;
             success = success || {};
-            const gewonnen = doc.getElementsByClassName("rep_room_end")[0].textContent === "Die Angreifer haben gesiegt!";
-            success.rooms = [gewonnen ? 1 : 0, 1];
-            success.levels = [gewonnen ? 1 : 0, 1];
+            const roomEndElement = doc.getElementsByClassName("rep_room_end")[0];
+            if (roomEndElement && typeof roomEndElement.textContent === "string") {
+                const gewonnen = roomEndElement.textContent.trim() === "Die Angreifer haben gesiegt!";
+                success.rooms = [gewonnen ? 1 : 0, 1];
+                success.levels = [gewonnen ? 1 : 0, 1];
+            }
 
             const lastActionHeroes = this.getLastHeroTableOnKampfbericht(doc);
-            if (!lastActionHeroes) console.log("Cant find lastAction Heroes: ", doc);
+            if (!lastActionHeroes) {
+                console.log("Cant find lastAction Heroes: ", doc);
+                return success;
+            }
             const heroTags = lastActionHeroes.querySelectorAll(".rep_hero, .rep_myhero, .rep_myotherheros");
+            if (!heroTags || heroTags.length === 0) return success;
             let countHeroes = 0;
             let countHeroesSuccess = 0;
             for (const heroTag of heroTags) {
                 countHeroes++;
-                if (heroTag.parentElement.parentElement.parentElement.children[6].textContent !== "bewusstlos") {
+                const row = heroTag.closest("tr");
+                let statusText;
+
+                if (row && row.cells && row.cells.length > 0) {
+                    const statusCell = row.cells[6] || row.cells[row.cells.length - 1];
+                    if (statusCell && typeof statusCell.textContent === "string") {
+                        statusText = statusCell.textContent.trim().toLowerCase();
+                    }
+                }
+
+                if (!statusText) {
+                    const fallbackCell = heroTag.parentElement?.parentElement?.parentElement?.children?.[6];
+                    if (fallbackCell && typeof fallbackCell.textContent === "string") {
+                        statusText = fallbackCell.textContent.trim().toLowerCase();
+                    }
+                }
+
+                if (statusText !== "bewusstlos") {
                     countHeroesSuccess++;
                 }
             }
@@ -5385,6 +5409,10 @@ class demawiRepository {
 
             //Einen Lookup ausführen, damit die Unit auch immer alle möglichen Information (z.B. Position) trägt.
             unitLookup(unitId, returnNullIfUnknown) {
+                if (!unitId || !unitId.name) {
+                    if (returnNullIfUnknown) return null;
+                    return this.unknownUnit(unitId || new UnitId("Unbekannt", undefined, true));
+                }
                 if (unitId.isEreignis) return unitId;
                 let lookupUnit = ReportParser.unitSearch(unitId, this.helden);
                 if (!lookupUnit) lookupUnit = ReportParser.unitSearch(unitId, this.monster);
@@ -5714,10 +5742,6 @@ class demawiRepository {
          */
         class ActionParser {
 
-            /**
-             * Liest Runden-Statuszeilen wie "erleidet X HP Schaden" oder "verliert X MP".
-             * rep_loss ist nur ein Darstellungsmarker, die Ressource wird aus dem Text ermittelt.
-             */
             static parseRoundLossEvent(curRound, actionTR, actionTD) {
                 const text = actionTD.textContent.replace(/\s+/g, " ").trim();
                 const isHpLoss = /erleidet\s+\d+\s+HP\s+Schaden\.?/i.test(text);
@@ -6250,6 +6274,7 @@ class demawiRepository {
              * Prüft nur auf gleiche Namen nicht auf Identität.
              */
             static isUnitEqual(unit1, unit2) {
+                if (!unit1 || !unit2 || !unit1.id || !unit2.id) return false;
                 return unit1.id.name === unit2.id.name;
             }
 
@@ -6261,9 +6286,11 @@ class demawiRepository {
              * Allgemeine Methode, um eine Unit in einem Array zu finden
              */
             static unitSearch(unitId, unitArray) {
+                if (!unitId || !unitId.name) return;
                 if (unitId.id) throw new Error("Hier wurde keine UnitId genutzt!", unitId);
                 if (!unitArray) return;
                 for (const curUnit of unitArray) {
+                    if (!curUnit || !curUnit.id || !curUnit.id.name) continue;
                     if (curUnit.id.name === unitId.name && curUnit.id.idx === unitId.idx) {
                         return curUnit;
                     } else {
@@ -6275,6 +6302,7 @@ class demawiRepository {
             }
 
             static unitNameOhneGestalt(unitName) {
+                if (!unitName) return unitName;
                 let matches = unitName.match(/\((.*gestalt)\)/);
                 if (matches) {
                     return unitName.replace(" (" + matches[1] + ")", "");
