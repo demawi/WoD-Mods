@@ -2274,13 +2274,16 @@
                     dmgStat.targets.forEach(target => {
                         let targetDmg = 0;
                         (target.damage || []).forEach(damage => {
-                            targetDmg += damage.value + damage.ruestung + damage.resistenz;
+                            const isIndirect = damage && damage.type === "indirekt";
+                            if (!isIndirect) {
+                                targetDmg += damage.value + damage.ruestung + damage.resistenz;
+                            }
                         });
-                        dmgs.push(targetDmg);
+                        if (targetDmg > 0) dmgs.push(targetDmg);
                     })
                     const min = util.arrayMin(dmgs);
                     const max = util.arrayMax(dmgs);
-                    const gesamtDamage = this.gesamtDamage(dmgStat);
+                    const gesamtDamage = dmgStat.directValue + dmgStat.ruestung + dmgStat.resistenz;
                     const gesamtErfolge = this.gesamtErfolge(dmgStat);
                     var result = formatDamageValue(gesamtDamage);
                     if (gesamtErfolge > 0 && gesamtDamage > 0) {
