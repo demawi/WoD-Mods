@@ -227,6 +227,10 @@ function assertCrKeysMatchReportUid(SearchEngine, actions) {
         namesInListed.some(s => /Vorbeugende Heilung/i.test(s)),
         `EKS Aktionsliste: „Vorbeugende Heilung“ fehlt: ${namesInListed.slice(0, 20).join(" | ")}`,
     );
+    assert(
+        namesInListed.some(s => /Fröhlicher Gesang/i.test(s)),
+        `EKS Aktionsliste: HoT „Fröhlicher Gesang“ (Tooltip Heilung Hitpoints) fehlt — Parser-Fallback: ${namesInListed.slice(0, 25).join(" | ")}`,
+    );
     const vorbeugCount = namesInListed.filter(s => /Vorbeugende Heilung/i.test(s)).length;
     assert(
         vorbeugCount >= 3,

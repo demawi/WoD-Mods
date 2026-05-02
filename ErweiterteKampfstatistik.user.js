@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.28
+// @version        0.21.30
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -2519,10 +2519,15 @@
                                 if (!!supUnit.id.isHero !== wantHeroes) return;
                                 const tk = SearchEngine.getTargetUnitKey(supUnit);
                                 if (hpgainSeenTargetKeys.has(tk)) return;
+                                const healCap = SearchEngine.getHealedAmountCap(supUnit, observedMaxHpByUnitKey);
+                                const healCapInt = Math.floor(Math.max(0, Number(healCap) || 0));
+                                if (!(healCapInt > 0)) return;
                                 const ctx = SearchEngine.resolveHpHealContributors(round, supUnit, effectSourceHistory);
                                 const nominalHeal = Math.floor(Number(ctx.totalWeight || 0));
                                 if (!(nominalHeal > 0)) return;
-                                distributeHealPool(supUnit, nominalHeal);
+                                const pool = Math.min(nominalHeal, healCapInt);
+                                if (!(pool > 0)) return;
+                                distributeHealPool(supUnit, pool);
                             });
                         }
 

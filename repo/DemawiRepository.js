@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.14.1";
+    static version = "1.1.14.2";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -5921,7 +5921,7 @@ class demawiRepository {
              */
             static async parse(curRound, actionTR, actionTD, targetTD) {
                 const [fertigkeit, actionUnit] = await this.actionParse(curRound, actionTD, targetTD);
-                const targets = this.parseTargets(curRound, actionUnit, targetTD, fertigkeit);
+                const targets = this.parseTargets(curRound, actionUnit, targetTD, fertigkeit, actionTD);
 
                 // Action
                 const myAction = new Action();
@@ -5932,7 +5932,7 @@ class demawiRepository {
                 return [myAction];
             }
 
-            static parseTargets(curRound, actionUnit, targetTD, fertigkeit) {
+            static parseTargets(curRound, actionUnit, targetTD, fertigkeit, actionTD) {
                 // Parse Targets
                 var curTargetUnit;
                 var currentTarget;
@@ -6004,8 +6004,22 @@ class demawiRepository {
                         }
                     }
                 }
-                ActionParser.applyHealTargetTypFallback(targets, fertigkeit);
+                ActionParser.applyHealTargetTypFallback(targets, fertigkeit, actionTD);
                 return targets;
+            }
+
+            /**
+             * Skill-Tooltip (onmouseover) enthält „Heilung Hitpoints“ mit positivem Bonus — typischer HoT wie „Fröhlicher Gesang“,
+             * ohne dass der Skillname „Heilung“ trägt oder {@link WoDSkillsDb.TYP.HEILUNG} gesetzt ist.
+             */
+            static skillTooltipIndicatesHpHealHot(actionTD) {
+                if (!actionTD) return false;
+                const skillA = actionTD.querySelector("a[href*=\"/skill/\"]");
+                if (!skillA) return false;
+                const tip = skillA.getAttribute("onmouseover") || "";
+                if (!/Heilung\s+Hitpoints/i.test(tip)) return false;
+                if (/Heilung\s+Hitpoints[\s\S]{0,160}?bonus_negative/i.test(tip)) return false;
+                return /bonus_positive/i.test(tip);
             }
 
             /**
@@ -6013,14 +6027,15 @@ class demawiRepository {
              * Für ausgewiesene Heil-Fertigkeiten setzen wir den Typ konsistent auf „Heilung“, damit Auswertung und Statistik
              * dieselbe Semantik wie bei klassischen Heilwürfen haben.
              */
-            static applyHealTargetTypFallback(targets, fertigkeit) {
+            static applyHealTargetTypFallback(targets, fertigkeit, actionTD) {
                 if (!targets || !fertigkeit) {
                     return;
                 }
                 const skillName = (fertigkeit.name || "").trim();
                 const isHealNamed = /\bheilung\b/i.test(skillName);
                 const isHealTyp = fertigkeit.typ === _.WoDSkillsDb.TYP.HEILUNG;
-                if (!isHealNamed && !isHealTyp) {
+                const tooltipHpHealHot = actionTD ? ActionParser.skillTooltipIndicatesHpHealHot(actionTD) : false;
+                if (!isHealNamed && !isHealTyp && !tooltipHpHealHot) {
                     return;
                 }
                 for (let i = 0, l = targets.length; i < l; i++) {
