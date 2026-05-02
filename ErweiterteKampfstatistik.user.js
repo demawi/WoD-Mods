@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.27
+// @version        0.21.28
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -2362,17 +2362,15 @@
                         }
 
                         if (!wantAll && wantHeal) {
-                            const hpGainEvents = (round.actions.regen || []).filter(a => a && a.event && a.event.kind === "hpgain");
-                            hpGainEvents.forEach(gainAction => {
-                                const targetUnit = (gainAction.targets && gainAction.targets[0] && gainAction.targets[0].unit) || gainAction.unit;
-                                if (!targetUnit || !targetUnit.id) return;
-                                if (!!targetUnit.id.isHero !== wantHeroes) return;
-                                const hpHealValue = Number(gainAction.event.value || 0);
-                                if (!(hpHealValue > 0)) return;
+                            const hpgainSeenTargetKeys = new Set();
+                            const distributeHealPool = (targetUnit, hpHealFloat) => {
+                                const healIntTotal = Math.floor(Number(hpHealFloat || 0));
+                                if (!(healIntTotal > 0)) return;
+
                                 const contributionContext = SearchEngine.resolveHpHealContributors(round, targetUnit, effectSourceHistory);
-                                const attributionsRaw = SearchEngine.splitHpLossDamageByContributors(hpHealValue, contributionContext);
+                                const attributionsRaw = SearchEngine.splitHpLossDamageByContributors(healIntTotal, contributionContext);
                                 const knownW = contributionContext.knownWeight || 0;
-                                const assignableHeal = Math.min(hpHealValue, knownW);
+                                const assignableHeal = Math.min(healIntTotal, knownW);
                                 const assignableInt = Math.floor(assignableHeal);
                                 const attributions = assignableInt > 0
                                     ? SearchEngine.integerizeProportionalShares(assignableInt, attributionsRaw)
@@ -2380,7 +2378,7 @@
                                 const syntheticHealTarget = { unit: targetUnit };
                                 const attributedSum = attributions.reduce((s, a) => s + Number(a.value || 0), 0);
                                 if (attributions.length === 0 || !(attributedSum > 0)) {
-                                    const healInt = Math.floor(hpHealValue);
+                                    const healInt = healIntTotal;
                                     if (!(healInt > 0)) return;
                                     const regenAction = {
                                         unit: targetUnit,
@@ -2398,7 +2396,7 @@
                                             fromMe: wantHeroes === !!curAction.unit.id.isHero,
                                             atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
                                             fromGroup: wantHeroes === !!curAction.unit.id.isHero,
-                                            atGroup: wantHeroes === !!util.arraySearch(regenAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            atGroup: !!util.arraySearch(regenAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
                                             cmp: "nxt",
                                         };
                                     };
@@ -2444,7 +2442,7 @@
                                             fromMe: wantHeroes === !!curAction.unit.id.isHero,
                                             atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
                                             fromGroup: wantHeroes === !!curAction.unit.id.isHero,
-                                            atGroup: wantHeroes === !!util.arraySearch(virtualAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            atGroup: !!util.arraySearch(virtualAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
                                             cmp: "nxt",
                                         };
                                     };
@@ -2464,6 +2462,67 @@
                                         doAnalysis(stats, filter, ownerAction, syntheticHealTarget, true, attributionIdx, companionHealValue);
                                     }
                                 });
+                                const remainder = Math.max(0, healIntTotal - attributedSum);
+                                if (remainder > 0) {
+                                    const regenAction = {
+                                        unit: targetUnit,
+                                        skill: { name: "(Regeneration)", typ: "Heilung", items: [] },
+                                        targets: [syntheticHealTarget],
+                                        level: level,
+                                        area: area,
+                                        round: round,
+                                        type: "regen",
+                                    };
+                                    SearchEngine.addUnitId(regenAction, regenAction.unit);
+                                    SearchEngine.addUnitId(regenAction, targetUnit);
+                                    stats.actionClassification = function (curAction) {
+                                        return {
+                                            fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                            atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                            fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                            atGroup: !!util.arraySearch(regenAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            cmp: "nxt",
+                                        };
+                                    };
+                                    const healOnly = {
+                                        value: remainder,
+                                        directValue: 0,
+                                        indirectValue: 0,
+                                        type: "heilung",
+                                        autoRegen: true,
+                                    };
+                                    doAnalysis(stats, filter, regenAction, syntheticHealTarget, healOnly, 0);
+                                    const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, regenAction, round);
+                                    const companionHealValue = Math.floor(this.getCompanionDamageValue(healOnly));
+                                    if (companionOwnerUnit && companionHealValue > 0) {
+                                        const ownerAction = Object.assign({}, regenAction, { unit: companionOwnerUnit });
+                                        ownerAction.syntheticCompanionOwnerAction = true;
+                                        doAnalysis(stats, filter, ownerAction, syntheticHealTarget, true, 0, companionHealValue);
+                                    }
+                                }
+                            };
+
+                            const hpGainEvents = (round.actions.regen || []).filter(a => a && a.event && a.event.kind === "hpgain");
+                            hpGainEvents.forEach(gainAction => {
+                                const targetUnit = (gainAction.targets && gainAction.targets[0] && gainAction.targets[0].unit) || gainAction.unit;
+                                if (!targetUnit || !targetUnit.id) return;
+                                if (!!targetUnit.id.isHero !== wantHeroes) return;
+                                const hpHealValue = Number(gainAction.event.value || 0);
+                                if (!(hpHealValue > 0)) return;
+                                hpgainSeenTargetKeys.add(SearchEngine.getTargetUnitKey(targetUnit));
+                                distributeHealPool(targetUnit, hpHealValue);
+                            });
+
+                            const supplementUnits = wantHeroes ? (round.helden || []) : (round.monster || []);
+                            supplementUnits.forEach(supUnit => {
+                                if (!supUnit || !supUnit.id) return;
+                                if (!!supUnit.id.isHero !== wantHeroes) return;
+                                const tk = SearchEngine.getTargetUnitKey(supUnit);
+                                if (hpgainSeenTargetKeys.has(tk)) return;
+                                const ctx = SearchEngine.resolveHpHealContributors(round, supUnit, effectSourceHistory);
+                                const nominalHeal = Math.floor(Number(ctx.totalWeight || 0));
+                                if (!(nominalHeal > 0)) return;
+                                distributeHealPool(supUnit, nominalHeal);
                             });
                         }
 
