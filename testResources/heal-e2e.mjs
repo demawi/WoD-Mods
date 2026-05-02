@@ -227,6 +227,11 @@ function assertCrKeysMatchReportUid(SearchEngine, actions) {
         namesInListed.some(s => /Vorbeugende Heilung/i.test(s)),
         `EKS Aktionsliste: „Vorbeugende Heilung“ fehlt: ${namesInListed.slice(0, 20).join(" | ")}`,
     );
+    const vorbeugCount = namesInListed.filter(s => /Vorbeugende Heilung/i.test(s)).length;
+    assert(
+        vorbeugCount >= 3,
+        `EKS: „Vorbeugende Heilung“ sollte pro Cast in der Chronologie erscheinen (Fixture: 3+), ist ${vorbeugCount}.`,
+    );
 
     const uidsHero = stats.actions.filter(a => a && a.reportCombatRowDedupeUid != null && String(a.reportCombatRowDedupeUid).startsWith("0|"));
     assert(uidsHero.length > 0, "Mindestens eine Action sollte reportCombatRowDedupeUid haben.");

@@ -5189,7 +5189,7 @@ class demawiRepository {
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    static ReportParserDataVersion = 12;
+    static ReportParserDataVersion = 13;
     static ReportParser = function () {
 
         let warnings;
@@ -6004,7 +6004,31 @@ class demawiRepository {
                         }
                     }
                 }
+                ActionParser.applyHealTargetTypFallback(targets, fertigkeit);
                 return targets;
+            }
+
+            /**
+             * Ohne sofortige „+X HP“-Zeile in der Zielspalte bleibt {@link Target#typ} leer (z. B. „Vorbeugende Heilung“).
+             * Für ausgewiesene Heil-Fertigkeiten setzen wir den Typ konsistent auf „Heilung“, damit Auswertung und Statistik
+             * dieselbe Semantik wie bei klassischen Heilwürfen haben.
+             */
+            static applyHealTargetTypFallback(targets, fertigkeit) {
+                if (!targets || !fertigkeit) {
+                    return;
+                }
+                const skillName = (fertigkeit.name || "").trim();
+                const isHealNamed = /\bheilung\b/i.test(skillName);
+                const isHealTyp = fertigkeit.typ === _.WoDSkillsDb.TYP.HEILUNG;
+                if (!isHealNamed && !isHealTyp) {
+                    return;
+                }
+                for (let i = 0, l = targets.length; i < l; i++) {
+                    const t = targets[i];
+                    if (t && t.typ == null) {
+                        t.typ = "Heilung";
+                    }
+                }
             }
 
             /**

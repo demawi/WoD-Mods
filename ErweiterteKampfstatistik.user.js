@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.23
+// @version        0.21.27
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -644,7 +644,7 @@
         static DEBUG_INDIRECT_TRACE = false;
         static DEBUG_INDIRECT_BOREX = false;
         static DEBUG_OWNER = false;
-        static DEBUG_HEAL = true;
+        static DEBUG_HEAL = false;
 
         static debugIndirect(...args) {
             if (this.DEBUG_INDIRECT) {
@@ -1090,6 +1090,37 @@
             return ("" + (action && action.skill && action.skill.typ ? action.skill.typ : ""));
         }
 
+        /** Stabile Kennung für Aktionszeilen (Ausklapp-Liste, Tests); bevorzugt Parser-UID aus Demawi. */
+        static getListedActionEventKey(action) {
+            if (!action) return "";
+            const uid = action.reportCombatRowDedupeUid;
+            if (uid != null && String(uid).trim() !== "") {
+                return "cr|" + uid;
+            }
+            const L = action.level;
+            const A = action.area;
+            const R = action.round;
+            const tgt0 = action.targets && action.targets[0] && action.targets[0].unit;
+            let srcSig = 0;
+            const src = action.src;
+            if (src && typeof src === "string") {
+                for (let i = 0; i < src.length; i++) {
+                    srcSig = ((srcSig * 31 + src.charCodeAt(i)) >>> 0);
+                }
+            }
+            return [
+                L && L.nr,
+                A && A.nr,
+                R && R.nr,
+                action.type || "",
+                action.unit && action.unit.id && action.unit.id.name,
+                action.skill && action.skill.name,
+                tgt0 && tgt0.id && tgt0.id.name,
+                tgt0 && tgt0.id && tgt0.id.idx,
+                srcSig,
+            ].map(p => (p == null ? "" : String(p))).join("|");
+        }
+
         static isSummonAction(action) {
             if (!action || !action.skill) return false;
             const skillType = this.actionSkillType(action).toLowerCase();
@@ -1223,12 +1254,14 @@
 
         static addTargetHealStats = function (toStat, action, target, heal, hadHealType, healIndexFinal, companionHealValue) {
             const isSyntheticCompanionOwnerAction = !!(action && action.syntheticCompanionOwnerAction);
-            if (!isSyntheticCompanionOwnerAction && (hadHealType || healIndexFinal === 0)) {
+            const isAutoRegenHeal = heal !== true && !!heal && !!heal.autoRegen;
+            const skipActionRow = isSyntheticCompanionOwnerAction || isAutoRegenHeal;
+            if (!skipActionRow && (hadHealType || healIndexFinal === 0)) {
                 if (!toStat.targets.includes(target)) {
                     toStat.targets.push(target);
                 }
             }
-            if (!isSyntheticCompanionOwnerAction) {
+            if (!skipActionRow) {
                 if (!toStat.actions.includes(action)) {
                     toStat.actions.push(action);
                 }
@@ -2086,8 +2119,29 @@
                                         }
                                     }
                                 });
+                                if (wantHeal && !action.event && action.type !== "regen"
+                                        && (action.targets || []).some(t => t && t.typ === "Heilung")) {
+                                    const listTarget = (action.targets || []).find(t => t && t.typ === "Heilung") || (action.targets || [])[0];
+                                    if (listTarget && listTarget.unit) {
+                                        stats.actionClassification = function (curAction) {
+                                            return {
+                                                fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                                atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                                fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                                atGroup: !!util.arraySearch(action.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                                cmp: "nxt",
+                                            };
+                                        };
+                                        doAnalysis(stats, filter, action, listTarget, true, 0);
+                                    }
+                                }
                             }
                         });
+
+                        // Effektquellen aus Vorrunde, Initiative und Hauptrunde müssen vor den regen-basierten
+                        // indirekten HP-Ereignissen (hploss/hpgain) im Verlauf stehen — sonst fehlen Auslöser
+                        // wie „Vorbeugende Heilung“ für dieselbe Runde.
+                        SearchEngine.registerRoundEffectSources(effectSourceHistory, round);
 
                         if (!wantAll && !wantHeal && (statQuery.type === "attack" || statQuery.type === "defense")) {
                             const expectedTargetIsHero = statQuery.type === "attack" ? !wantHeroes : wantHeroes;
@@ -2374,6 +2428,8 @@
                                         area: area,
                                         round: round,
                                         type: "regen",
+                                        // Nur für interne Statistik; nicht in der Aktions-Ausklapp-Liste: dort zählt die
+                                        // geparste Quellzeile (Vorrunde / Fertigkeitswurf), nicht jeder HoT in regen.
                                         syntheticCompanionOwnerAction: true,
                                         src: "<tr><td></td><td>" + SearchEngine.getDisplayUnitName(attribution.unit) + " - Persistenter Effekt verursacht " + v + " indirekte Heilung</td></tr>",
                                     };
@@ -2411,7 +2467,6 @@
                             });
                         }
 
-                        SearchEngine.registerRoundEffectSources(effectSourceHistory, round);
                     }
                 }
             }
