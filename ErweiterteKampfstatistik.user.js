@@ -644,6 +644,7 @@
         static DEBUG_INDIRECT_TRACE = false;
         static DEBUG_INDIRECT_BOREX = false;
         static DEBUG_OWNER = false;
+        static DEBUG_HEAL = true;
 
         static debugIndirect(...args) {
             if (this.DEBUG_INDIRECT) {
@@ -654,6 +655,12 @@
         static debugIndirectVerbose(...args) {
             if (this.DEBUG_INDIRECT && this.DEBUG_INDIRECT_VERBOSE) {
                 console.log("[EKS][indirekt][verbose]", ...args);
+            }
+        }
+
+        static debugHeal(...args) {
+            if (this.DEBUG_HEAL) {
+                console.log("[EKS][heal]", ...args);
             }
         }
 
@@ -670,6 +677,10 @@
                 directValue: 0,
                 indirectValue: 0,
                 companionValue: 0,
+                healValue: 0,
+                directHealValue: 0,
+                indirectHealValue: 0,
+                autoRegenHealValue: 0,
                 ruestung: 0,
                 resistenz: 0,
                 actions: Array(),
@@ -1159,6 +1170,105 @@
             return -parsed;
         }
 
+        static parseHpGainFromWirkung(effect) {
+            if (!effect || !effect.name) return 0;
+            if (!/Heilung\s+Hitpoints/i.test("" + effect.name)) return 0;
+            const match = ("" + (effect.wirkung || "")).match(/([-+]?\d+(?:[\.,]\d+)?)/);
+            if (!match) return 0;
+            const parsed = Number(match[1].replace(",", "."));
+            if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+            return parsed;
+        }
+
+        static parseHpSnapshotValue(value) {
+            const text = ("" + (value || "")).replace(/\s+/g, " ").trim();
+            if (!text) return {current: 0, max: 0};
+            const ratioMatch = text.match(/(\d+(?:[\.,]\d+)?)\s*\/\s*(\d+(?:[\.,]\d+)?)/);
+            if (ratioMatch) {
+                return {
+                    current: Number(ratioMatch[1].replace(",", ".")) || 0,
+                    max: Number(ratioMatch[2].replace(",", ".")) || 0,
+                };
+            }
+            const singleMatch = text.match(/(\d+(?:[\.,]\d+)?)/);
+            if (singleMatch) {
+                const current = Number(singleMatch[1].replace(",", ".")) || 0;
+                return {current: current, max: current};
+            }
+            return {current: 0, max: 0};
+        }
+
+        static getDirectHealingPotential(action, target) {
+            const parsePositiveNumber = value => {
+                const parsed = Number(("" + (value || "")).replace(",", "."));
+                return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+            };
+            const directTargetValue = parsePositiveNumber(target && target.wirkung && target.wirkung.value);
+            if (target && target.typ === "Heilung" && directTargetValue > 0) {
+                return directTargetValue;
+            }
+            const fallbackHpGain = parsePositiveNumber(action && action.skill && action.skill.hpGain);
+            return fallbackHpGain > 0 ? fallbackHpGain : 0;
+        }
+
+        static getHealedAmountCap(unit, observedMaxHpByUnitKey) {
+            if (!unit || !unit.id) return 0;
+            const key = this.getUnitKey(unit);
+            const snapshot = this.parseHpSnapshotValue(unit.hp);
+            const current = snapshot.current > 0 ? snapshot.current : 0;
+            const maxHp = snapshot.max > 0 ? snapshot.max : (observedMaxHpByUnitKey && observedMaxHpByUnitKey[key]) || 0;
+            if (!(maxHp > 0)) return 0;
+            return Math.max(0, maxHp - current);
+        }
+
+        static addTargetHealStats = function (toStat, action, target, heal, hadHealType, healIndexFinal, companionHealValue) {
+            const isSyntheticCompanionOwnerAction = !!(action && action.syntheticCompanionOwnerAction);
+            if (!isSyntheticCompanionOwnerAction && (hadHealType || healIndexFinal === 0)) {
+                if (!toStat.targets.includes(target)) {
+                    toStat.targets.push(target);
+                }
+            }
+            if (!isSyntheticCompanionOwnerAction) {
+                if (!toStat.actions.includes(action)) {
+                    toStat.actions.push(action);
+                }
+                if (action.unit.id.isHero) {
+                    if (!toStat.actionsHelden.includes(action)) {
+                        toStat.actionsHelden.push(action);
+                    }
+                } else {
+                    if (!toStat.actionsMonster.includes(action)) {
+                        toStat.actionsMonster.push(action);
+                    }
+                }
+            }
+            if (heal !== true && !!heal) {
+                const totalValue = Number(heal.value || 0);
+                const directValue = Number(heal.directValue || 0);
+                const indirectValue = Number(heal.indirectValue || 0);
+                if (heal.autoRegen) {
+                    toStat.autoRegenHealValue += totalValue;
+                } else {
+                    toStat.value += totalValue;
+                    toStat.healValue += totalValue;
+                    toStat.directValue += directValue;
+                    toStat.indirectValue += indirectValue;
+                    toStat.directHealValue += directValue;
+                    toStat.indirectHealValue += indirectValue;
+                    if (!target.heal) {
+                        target.heal = {
+                            value: totalValue,
+                            directValue: directValue,
+                            indirectValue: indirectValue,
+                        };
+                    }
+                }
+            }
+            if (companionHealValue > 0 && toStat.actionUnit && _.ReportParser.isUnitEqual(toStat.actionUnit, action.unit)) {
+                toStat.companionValue += companionHealValue;
+            }
+        }
+
         static registerActionEffectSources(effectSourceHistory, action) {
             const isEventAction = !!(action && (action.event || (action.skill && action.skill.event)));
             if (!action || !action.unit || isEventAction) return;
@@ -1323,6 +1433,17 @@
         }
 
         static resolveHpLossContributors(round, targetUnit, effectSourceHistory) {
+            return this.resolveHpEffectContributors(round, targetUnit, effectSourceHistory, false);
+        }
+
+        static resolveHpHealContributors(round, targetUnit, effectSourceHistory) {
+            return this.resolveHpEffectContributors(round, targetUnit, effectSourceHistory, true);
+        }
+
+        /**
+         * @param healMode false: HP-Verlust (DoT) aus negativen „Heilung Hitpoints“-Effekten; true: Regenerations-HoT aus positiven „Heilung Hitpoints“ auf der Statuszeile.
+         */
+        static resolveHpEffectContributors(round, targetUnit, effectSourceHistory, healMode) {
              const statusUnit = this.getRoundStatusUnit(round, targetUnit);
              let sourceList = [];
 
@@ -1339,7 +1460,7 @@
                          // Das bedeutet, dieser Effekt war in vorherigen Runden aktiv und sollte weiterwirken
                          sourceList.push({
                              quelle: sourceKey,
-                             fx: [{name: "Persistent", wirkung: "-1"}],
+                             fx: [{name: "Persistent", wirkung: healMode ? "+1" : "-1"}],
                          });
                      }
                  }
@@ -1376,15 +1497,15 @@
                     addReason(sourceRejectSummary, "SOURCE_ENTRY_INVALID");
                     continue;
                 }
-                let hpLossValue = 0;
+                let hpEffectValue = 0;
                 sourceEntry.fx.forEach(effect => {
-                    hpLossValue += this.parseHpLossFromWirkung(effect);
+                    hpEffectValue += healMode ? this.parseHpGainFromWirkung(effect) : this.parseHpLossFromWirkung(effect);
                 });
-                if (!(hpLossValue > 0)) {
-                    addReason(sourceRejectSummary, "HPLOSS_NON_POSITIVE");
+                if (!(hpEffectValue > 0)) {
+                    addReason(sourceRejectSummary, healMode ? "HPHEAL_NON_POSITIVE" : "HPLOSS_NON_POSITIVE");
                     continue;
                 }
-                totalWeight += hpLossValue;
+                totalWeight += hpEffectValue;
 
                 const targetKey = this.getTargetUnitKey(targetUnit);
                 const sourceKey = this.resolveEffectSourceHistoryKey(effectSourceHistory, sourceEntry.quelle, targetKey);
@@ -1427,11 +1548,13 @@
                 const sourceDebug = {
                     source: sourceEntry.quelle,
                     normalizedSource: sourceKey,
-                    hpLossValue: hpLossValue,
+                    hpLossValue: healMode ? 0 : hpEffectValue,
+                    hpHealValue: healMode ? hpEffectValue : 0,
                     effects: (sourceEntry.fx || []).map(effect => ({
                         name: effect && effect.name,
                         wirkung: effect && effect.wirkung,
-                        parsedHpLoss: this.parseHpLossFromWirkung(effect),
+                        parsedHpLoss: healMode ? 0 : this.parseHpLossFromWirkung(effect),
+                        parsedHpHeal: healMode ? this.parseHpGainFromWirkung(effect) : 0,
                     })),
                     targetKey: targetKey,
                     usedFallback: usedFallback,
@@ -1452,7 +1575,7 @@
                 const acceptedContributors = [];
                 contributors.forEach(meta => {
                     const unit = meta.unit;
-                    if (_.ReportParser.isUnitEqual(unit, targetUnit)) {
+                    if (!healMode && _.ReportParser.isUnitEqual(unit, targetUnit)) {
                         sourceDebug.rejectedCount++;
                         sourceDebug.contributorDecisions.push({
                             unit: unit && unit.id && unit.id.name,
@@ -1493,7 +1616,7 @@
                     addReason(sourceRejectSummary, "NO_ELIGIBLE_CONTRIBUTORS");
                     continue;
                 }
-                const contributionPerSource = hpLossValue / acceptedContributors.length;
+                const contributionPerSource = hpEffectValue / acceptedContributors.length;
                 acceptedContributors.forEach(contributorMeta => {
                     const unit = contributorMeta.unit;
                     const unitKey = this.getUnitKey(unit);
@@ -1527,6 +1650,29 @@
                 sourceRejectSummary: sourceRejectSummary,
                 contributorRejectSummary: contributorRejectSummary,
             };
+        }
+
+        /**
+         * Verteilt eine ganzzahlige HP-Menge proportional auf bestehende Anteile (größter-Rest),
+         * damit die Summe exakt der Berichts-HP entspricht (keine Bruchteile).
+         */
+        static integerizeProportionalShares(totalInt, attributions) {
+            const ti = Math.max(0, Math.floor(Number(totalInt) || 0));
+            if (!attributions || attributions.length === 0) return attributions;
+            const rawSum = attributions.reduce((s, a) => s + Math.max(0, Number(a.value || 0)), 0);
+            if (!(ti > 0) || !(rawSum > 0)) {
+                return attributions.map(a => Object.assign({}, a, { value: 0 }));
+            }
+            const n = attributions.length;
+            const exact = attributions.map(a => ti * (Math.max(0, Number(a.value || 0)) / rawSum));
+            const out = exact.map(x => Math.floor(x));
+            let sumOut = out.reduce((s, v) => s + v, 0);
+            const missing = ti - sumOut;
+            const order = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => (b.r - a.r) || (a.i - b.i));
+            for (let k = 0; k < missing; k++) {
+                out[order[k % n].i]++;
+            }
+            return attributions.map((a, i) => Object.assign({}, a, { value: out[i] }));
         }
 
         static splitHpLossDamageByContributors(damageValue, contributionContext) {
@@ -1642,10 +1788,22 @@
             const wantHeroes = statQuery.side === "heroes";
             const wantDefense = statQuery.type === "defense";
             const wantAll = statQuery.type === "all";
+            const wantHeal = statQuery.type === "heal";
 
-            function doAnalysis(stats, filter, action, target, damage, damageIndexFinal, companionDamageValue) {
+            if (wantHeal && this.DEBUG_HEAL) {
+                SearchEngine.debugHeal("Query", {
+                    side: statQuery.side,
+                    type: statQuery.type,
+                    wantHeroes: wantHeroes,
+                    wantAll: wantAll,
+                    wantDefense: wantDefense,
+                });
+            }
+
+            function doAnalysis(stats, filter, action, target, amount, amountIndexFinal, companionAmountValue) {
                 const statRoot = {
                     hadDmgType: false,
+                    hadHealType: false,
                     levelDataArray: levelDataArray,
                     wantHeroes: wantHeroes,
                 }
@@ -1656,7 +1814,7 @@
                     if (!filterKriterium) {
                         throw _.util.error("StatQuery-Filter ist nicht valide: '" + queryFilter.spec + "'");
                     }
-                    const subStats = filterKriterium.apply(statRoot, curStats, queryFilter, action, target, statTarget, damage);
+                    const subStats = filterKriterium.apply(statRoot, curStats, queryFilter, action, target, statTarget, amount);
                     if (!subStats) return subStats;
                     SearchEngine.createActionClassification(curStats, subStats, action, target, statTarget, queryFilter.spec);
                     if (!subStats.actionUnit && curStats.actionUnit) {
@@ -1668,7 +1826,11 @@
 
                 const execFilter = function (curStats, filters) {
                     if (!filters || filters.length === 0) {
-                        SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, companionDamageValue);
+                        if (wantHeal) {
+                            SearchEngine.addTargetHealStats(curStats, action, target, amount, statRoot.hadHealType, amountIndexFinal, companionAmountValue);
+                        } else {
+                            SearchEngine.addTargetDmgStats(curStats, action, target, amount, statRoot.hadDmgType, amountIndexFinal, companionAmountValue);
+                        }
                         return true;
                     }
 
@@ -1696,14 +1858,22 @@
                     if (statTarget) {
                         let subStats = applyFilter(curStats, queryFilter, action, target, statTarget);
                         if (subStats) {
-                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, companionDamageValue);
+                            if (wantHeal) {
+                                SearchEngine.addTargetHealStats(curStats, action, target, amount, statRoot.hadHealType, amountIndexFinal, companionAmountValue);
+                            } else {
+                                SearchEngine.addTargetDmgStats(curStats, action, target, amount, statRoot.hadDmgType, amountIndexFinal, companionAmountValue);
+                            }
                             execFilter(subStats, tail);
                         }
                     }
                     if (secondStatTarget) {
                         let subStats = applyFilter(curStats, queryFilter, action, target, secondStatTarget);
                         if (subStats) {
-                            SearchEngine.addTargetDmgStats(curStats, action, target, damage, statRoot.hadDmgType, damageIndexFinal, companionDamageValue);
+                            if (wantHeal) {
+                                SearchEngine.addTargetHealStats(curStats, action, target, amount, statRoot.hadHealType, amountIndexFinal, companionAmountValue);
+                            } else {
+                                SearchEngine.addTargetDmgStats(curStats, action, target, amount, statRoot.hadDmgType, amountIndexFinal, companionAmountValue);
+                            }
                             execFilter(subStats, tail);
                         }
                     }
@@ -1715,6 +1885,7 @@
             const companionOwnerByUnitKey = {};
             const indirectAttributionByContributor = {};
             const indirectAttributionTrace = [];
+            const observedMaxHpByUnitKey = {};
 
 
             var filter = statQuery.filter; // position, attackType, fertigkeit, units
@@ -1732,11 +1903,27 @@
                     const finalAreaNr = areaNr;
                     const effectSourceHistory = {};
 
+                        const observeUnitHp = unit => {
+                            if (!unit || !unit.id) return;
+                            const key = this.getUnitKey(unit);
+                            const snapshot = this.parseHpSnapshotValue(unit.hp);
+                            const current = snapshot.current > 0 ? snapshot.current : 0;
+                            const max = snapshot.max > 0 ? snapshot.max : current;
+                            if (current > 0) {
+                                observedMaxHpByUnitKey[key] = Math.max(observedMaxHpByUnitKey[key] || 0, current);
+                            }
+                            if (max > 0) {
+                                observedMaxHpByUnitKey[key] = Math.max(observedMaxHpByUnitKey[key] || 0, max);
+                            }
+                        };
+
                     const rounds = area.rounds;
                     for (var roundNr = 0, l = rounds.length; roundNr < l; roundNr++) {
                         var round = rounds[roundNr];
                         round.nr = roundNr + 1;
                         let actionForStats = Array();
+                            (round.helden || []).forEach(observeUnitHp);
+                            (round.monster || []).forEach(observeUnitHp);
                         if (wantAll) {
                             stats.actionClassification = function (curAction) {
                                 return {
@@ -1783,6 +1970,23 @@
                                 action.type = "action";
                                 actionForStats.push(action);
                             });
+                        } else if (wantHeal) {
+                            (round.actions.vorrunde || []).forEach(action => {
+                                action.type = "vorrunde";
+                                actionForStats.push(action);
+                            });
+                            (round.actions.regen || []).forEach(action => {
+                                action.type = "regen";
+                                actionForStats.push(action);
+                            });
+                            (round.actions.initiative || []).forEach(action => {
+                                action.type = "initiative";
+                                actionForStats.push(action);
+                            });
+                            (round.actions.runde || []).forEach(action => {
+                                action.type = "action";
+                                actionForStats.push(action);
+                            });
                         } else {
                             round.actions.runde.forEach(action => {
                                 action.type = "action";
@@ -1818,23 +2022,74 @@
                                         }
                                     }
 
-                                    var damages = target.damage; // nur bei "true" wird die action auch gezählt
-                                    if (!damages || damages.length === 0) damages = [true];
-                                    for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
-                                        const damage = damages[damageIndex];
-                                        doAnalysis(stats, filter, action, target, damage, damageIndex);
-                                        const companionDamageValue = this.getCompanionDamageValue(damage);
-                                        if (companionOwnerUnit && companionDamageValue > 0) {
+                                    if (wantHeal) {
+                                        if (action.event) return;
+                                        const directPotential = this.getDirectHealingPotential(action, target);
+                                        const indirectPotential = 0;
+                                        let healCap = this.getHealedAmountCap(target.unit, observedMaxHpByUnitKey);
+                                        const potentialSum = directPotential + indirectPotential;
+                                        if (!(healCap > 0) && potentialSum > 0) {
+                                            healCap = potentialSum;
+                                        }
+                                        const rawDirectHeal = Math.min(directPotential, healCap);
+                                        const rawIndirectHeal = Math.min(indirectPotential, Math.max(0, healCap - rawDirectHeal));
+                                        const rawTotalHeal = rawDirectHeal + rawIndirectHeal;
+                                        const totalHealValue = Math.floor(rawTotalHeal);
+                                        if (SearchEngine.DEBUG_HEAL) {
+                                            SearchEngine.debugHeal("Event", {
+                                                level: level.nr,
+                                                area: area.nr,
+                                                round: round.nr,
+                                                actor: action.unit && action.unit.id && action.unit.id.name,
+                                                actorIsHero: !!(action.unit && action.unit.id && action.unit.id.isHero),
+                                                target: target.unit && target.unit.id && target.unit.id.name,
+                                                targetIsHero: !!(target.unit && target.unit.id && target.unit.id.isHero),
+                                                targetType: target.typ,
+                                                directPotential: directPotential,
+                                                indirectPotential: indirectPotential,
+                                                healCap: healCap,
+                                                rawDirectHeal: rawDirectHeal,
+                                                rawIndirectHeal: rawIndirectHeal,
+                                                rawTotalHeal: rawTotalHeal,
+                                                totalHealValue: totalHealValue,
+                                            });
+                                        }
+                                        if (!(totalHealValue > 0)) return;
+                                        const directHealValue = Math.min(totalHealValue, Math.floor(rawDirectHeal));
+                                        const indirectHealValue = totalHealValue - directHealValue;
+                                        const heal = {
+                                            value: totalHealValue,
+                                            directValue: directHealValue,
+                                            indirectValue: indirectHealValue,
+                                            type: "heilung",
+                                            autoRegen: !!(action && action.autoRegenerationHeal),
+                                        };
+                                        doAnalysis(stats, filter, action, target, heal, 0);
+                                        const companionHealValue = Math.floor(this.getCompanionDamageValue(heal));
+                                        if (companionOwnerUnit && companionHealValue > 0) {
                                             const ownerAction = Object.assign({}, action, {unit: companionOwnerUnit});
                                             ownerAction.syntheticCompanionOwnerAction = true;
-                                            doAnalysis(stats, filter, ownerAction, target, true, damageIndex, companionDamageValue);
+                                            doAnalysis(stats, filter, ownerAction, target, true, 0, companionHealValue);
+                                        }
+                                    } else {
+                                        var damages = target.damage; // nur bei "true" wird die action auch gezählt
+                                        if (!damages || damages.length === 0) damages = [true];
+                                        for (var damageIndex = 0, damageLength = damages.length; damageIndex < damageLength; damageIndex++) {
+                                            const damage = damages[damageIndex];
+                                            doAnalysis(stats, filter, action, target, damage, damageIndex);
+                                            const companionDamageValue = this.getCompanionDamageValue(damage);
+                                            if (companionOwnerUnit && companionDamageValue > 0) {
+                                                const ownerAction = Object.assign({}, action, {unit: companionOwnerUnit});
+                                                ownerAction.syntheticCompanionOwnerAction = true;
+                                                doAnalysis(stats, filter, ownerAction, target, true, damageIndex, companionDamageValue);
+                                            }
                                         }
                                     }
                                 });
                             }
                         });
 
-                        if (!wantAll && (statQuery.type === "attack" || statQuery.type === "defense")) {
+                        if (!wantAll && !wantHeal && (statQuery.type === "attack" || statQuery.type === "defense")) {
                             const expectedTargetIsHero = statQuery.type === "attack" ? !wantHeroes : wantHeroes;
                             const hpLossEvents = (round.actions.regen || []).filter(action => action && action.event && action.event.kind === "hploss");
                             hpLossEvents.forEach(lossAction => {
@@ -1900,7 +2155,13 @@
                                     });
                                     return;
                                 }
-                                const attributions = SearchEngine.splitHpLossDamageByContributors(hpLossValue, contributionContext);
+                                const attributionsRaw = SearchEngine.splitHpLossDamageByContributors(hpLossValue, contributionContext);
+                                const knownW = contributionContext.knownWeight || 0;
+                                const assignableDamage = Math.min(hpLossValue, knownW);
+                                const assignableInt = Math.floor(assignableDamage);
+                                const attributions = assignableInt > 0
+                                    ? SearchEngine.integerizeProportionalShares(assignableInt, attributionsRaw)
+                                    : attributionsRaw.map(a => Object.assign({}, a, { value: 0 }));
                                 SearchEngine.debugIndirect("Event", {
                                     level: level.nr,
                                     area: area.nr,
@@ -1941,10 +2202,13 @@
                                 }
                                 if (attributions.length === 0) return;
 
+                                const syntheticHpTotal = attributions.reduce((s, a) => s + Number(a.value || 0), 0);
+                                if (!(syntheticHpTotal > 0)) return;
+
                                 const syntheticTarget = {
                                     unit: targetUnit,
                                     damage: [{
-                                        value: hpLossValue,
+                                        value: syntheticHpTotal,
                                         ruestung: 0,
                                         resistenz: 0,
                                         type: "indirekt",
@@ -2008,7 +2272,7 @@
                                         round: round,
                                         type: "regen",
                                         syntheticCompanionOwnerAction: true,
-                                        src: "<tr><td></td><td>" + SearchEngine.getDisplayUnitName(attribution.unit) + " - Persistenter Effekt verursacht " + Math.round(attribution.value) + " indirekten Schaden</td></tr>",
+                                        src: "<tr><td></td><td>" + SearchEngine.getDisplayUnitName(attribution.unit) + " - Persistenter Effekt verursacht " + Math.floor(Number(attribution.value || 0)) + " indirekten Schaden</td></tr>",
                                     };
                                     const isHero = virtualAction.unit.id.isHero;
                                     if (!(wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero))) {
@@ -2033,11 +2297,115 @@
                                     };
                                     doAnalysis(stats, filter, virtualAction, syntheticTarget, attributedDamage, attributionIdx);
                                     const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, virtualAction, round);
-                                    const companionDamageValue = this.getCompanionDamageValue(attributedDamage);
+                                    const companionDamageValue = Math.floor(this.getCompanionDamageValue(attributedDamage));
                                     if (companionOwnerUnit && companionDamageValue > 0) {
                                         const ownerAction = Object.assign({}, virtualAction, {unit: companionOwnerUnit});
                                         ownerAction.syntheticCompanionOwnerAction = true;
                                         doAnalysis(stats, filter, ownerAction, syntheticTarget, true, attributionIdx, companionDamageValue);
+                                    }
+                                });
+                            });
+                        }
+
+                        if (!wantAll && wantHeal) {
+                            const hpGainEvents = (round.actions.regen || []).filter(a => a && a.event && a.event.kind === "hpgain");
+                            hpGainEvents.forEach(gainAction => {
+                                const targetUnit = (gainAction.targets && gainAction.targets[0] && gainAction.targets[0].unit) || gainAction.unit;
+                                if (!targetUnit || !targetUnit.id) return;
+                                if (!!targetUnit.id.isHero !== wantHeroes) return;
+                                const hpHealValue = Number(gainAction.event.value || 0);
+                                if (!(hpHealValue > 0)) return;
+                                const contributionContext = SearchEngine.resolveHpHealContributors(round, targetUnit, effectSourceHistory);
+                                const attributionsRaw = SearchEngine.splitHpLossDamageByContributors(hpHealValue, contributionContext);
+                                const knownW = contributionContext.knownWeight || 0;
+                                const assignableHeal = Math.min(hpHealValue, knownW);
+                                const assignableInt = Math.floor(assignableHeal);
+                                const attributions = assignableInt > 0
+                                    ? SearchEngine.integerizeProportionalShares(assignableInt, attributionsRaw)
+                                    : attributionsRaw.map(a => Object.assign({}, a, { value: 0 }));
+                                const syntheticHealTarget = { unit: targetUnit };
+                                const attributedSum = attributions.reduce((s, a) => s + Number(a.value || 0), 0);
+                                if (attributions.length === 0 || !(attributedSum > 0)) {
+                                    const healInt = Math.floor(hpHealValue);
+                                    if (!(healInt > 0)) return;
+                                    const regenAction = {
+                                        unit: targetUnit,
+                                        skill: { name: "(Regeneration)", typ: "Heilung", items: [] },
+                                        targets: [syntheticHealTarget],
+                                        level: level,
+                                        area: area,
+                                        round: round,
+                                        type: "regen",
+                                    };
+                                    SearchEngine.addUnitId(regenAction, regenAction.unit);
+                                    SearchEngine.addUnitId(regenAction, targetUnit);
+                                    stats.actionClassification = function (curAction) {
+                                        return {
+                                            fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                            atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                            fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                            atGroup: wantHeroes === !!util.arraySearch(regenAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            cmp: "nxt",
+                                        };
+                                    };
+                                    const healOnly = {
+                                        value: healInt,
+                                        directValue: 0,
+                                        indirectValue: 0,
+                                        type: "heilung",
+                                        autoRegen: true,
+                                    };
+                                    doAnalysis(stats, filter, regenAction, syntheticHealTarget, healOnly, 0);
+                                    return;
+                                }
+                                attributions.forEach((attribution, attributionIdx) => {
+                                    const v = Math.floor(Number(attribution.value || 0));
+                                    if (!(v > 0)) return;
+                                    const virtualAction = {
+                                        unit: attribution.unit,
+                                        skill: {
+                                            name: attribution.sourceName || "Persistenter Effekt",
+                                            typeRef: attribution.sourceTypeRef || attribution.sourceName || "Persistenter Effekt",
+                                            typ: "Heilung",
+                                            angriffstyp: attribution.skillType || "Unbekannt",
+                                        },
+                                        targets: [syntheticHealTarget],
+                                        level: level,
+                                        area: area,
+                                        round: round,
+                                        type: "regen",
+                                        syntheticCompanionOwnerAction: true,
+                                        src: "<tr><td></td><td>" + SearchEngine.getDisplayUnitName(attribution.unit) + " - Persistenter Effekt verursacht " + v + " indirekte Heilung</td></tr>",
+                                    };
+                                    const isHero = virtualAction.unit.id.isHero;
+                                    if (!(wantAll || (wantHeroes && !wantDefense && isHero) || (!wantHeroes && wantDefense && isHero) || (!wantHeroes && !wantDefense && !isHero) || (wantHeroes && wantDefense && !isHero))) {
+                                        return;
+                                    }
+                                    SearchEngine.addUnitId(virtualAction, virtualAction.unit);
+                                    SearchEngine.addUnitId(virtualAction, targetUnit);
+                                    stats.actionClassification = function (curAction) {
+                                        return {
+                                            fromMe: wantHeroes === !!curAction.unit.id.isHero,
+                                            atMe: !!util.arraySearch(curAction.targets, target => wantHeroes === !!target.unit.id.isHero),
+                                            fromGroup: wantHeroes === !!curAction.unit.id.isHero,
+                                            atGroup: wantHeroes === !!util.arraySearch(virtualAction.targets, target => _.ReportParser.isUnitEqual(curAction.unit, target.unit)),
+                                            cmp: "nxt",
+                                        };
+                                    };
+                                    const healOnly = {
+                                        value: v,
+                                        directValue: 0,
+                                        indirectValue: v,
+                                        type: "heilung",
+                                        autoRegen: false,
+                                    };
+                                    doAnalysis(stats, filter, virtualAction, syntheticHealTarget, healOnly, attributionIdx);
+                                    const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, virtualAction, round);
+                                    const companionHealValue = Math.floor(this.getCompanionDamageValue(healOnly));
+                                    if (companionOwnerUnit && companionHealValue > 0) {
+                                        const ownerAction = Object.assign({}, virtualAction, { unit: companionOwnerUnit });
+                                        ownerAction.syntheticCompanionOwnerAction = true;
+                                        doAnalysis(stats, filter, ownerAction, syntheticHealTarget, true, attributionIdx, companionHealValue);
                                     }
                                 });
                             });
@@ -2106,6 +2474,15 @@
         static FilterTypes = {
             "attack": this.attackFilterType,
             "defense": this.attackFilterType,
+            "heal": {
+                level: "Level",
+                fight: "Kampf",
+                position: "Position",
+                unit: "Einheit",
+                skillName: "Fertigkeit",
+                skill_active: "Fertigkeit(Aktiv)",
+                items: "Gegenstände",
+            },
             "all": {
                 level: "Level",
                 fight: "Kampf",
@@ -2241,6 +2618,90 @@
                     }).length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
+            }
+        }
+
+        static TableViewHeilung = class extends Viewer.TableViewType {
+            columns = Array();
+
+            constructor(statView) {
+                super();
+                const center = this.center;
+                const Column = Viewer.Column;
+                const formatHealValue = value => {
+                    const numeric = Number(value || 0);
+                    if (!Number.isFinite(numeric)) return value;
+                    const rounded = util.round(numeric, 2);
+                    const asInt = Math.round(rounded);
+                    if (Math.abs(rounded - asInt) < 0.0000001) return asInt;
+                    return rounded;
+                };
+                this.columns.push(new Column("Heilaktionen", center("Heil-<br>aktionen"), healStat => center(healStat.actions.length)));
+
+                this.columns.push(new Column("Direkte Heilung", center("Direkte<br>Heilung<br>(Ø)<br>(min-max)"), healStat => {
+                    const [min, max] = this.minMaxHealByType(healStat, "directValue");
+                    const total = Number(healStat.directHealValue || 0);
+                    let result = formatHealValue(total);
+                    if (healStat.actions.length > 0 && total > 0) {
+                        result += "<br>(" + formatHealValue(total / healStat.actions.length) + ")";
+                        result += "<br>(" + formatHealValue(min) + " - " + formatHealValue(max) + ")";
+                    }
+                    return center(result);
+                }));
+
+                this.columns.push(new Column("Indirekte Heilung", center("Indirekte<br>Heilung<br>(Ø)<br>(min-max)"), healStat => {
+                    const [min, max] = this.minMaxHealByType(healStat, "indirectValue");
+                    const total = Number(healStat.indirectHealValue || 0);
+                    let result = formatHealValue(total);
+                    if (healStat.actions.length > 0 && total > 0) {
+                        result += "<br>(" + formatHealValue(total / healStat.actions.length) + ")";
+                        result += "<br>(" + formatHealValue(min) + " - " + formatHealValue(max) + ")";
+                    }
+                    return center(result);
+                }));
+
+                this.columns.push(new Column("Auto Regeneration", center("Auto-<br>Regeneration", "Heilung ohne zugeordnete Fertigkeit oder Tooltip-Effekt (z. B. passive Regenerationszeile „… heilt n HP.“)."), healStat => {
+                    return center(formatHealValue(healStat.autoRegenHealValue || 0));
+                }));
+
+                this.columns.push(new Column("Gefährten Heilung", center("Gefährten-<br>Heilung", "Heilung, die eurem Gefährten zugutekommt und im Gesamtwert dem Helden zugerechnet wird (analog zum Gefährtenschaden)."), healStat => {
+                    return center(formatHealValue(healStat.companionValue || 0));
+                }));
+
+                this.columns.push(new Column("Gesamt Heilung", center("Gesamt<br>Heilung<br>(Ø)<br>(min-max)", "Summe aus direkter, indirekter, Auto-Regeneration und Gefährtenheilung."), healStat => {
+                    const [min, max] = this.minMaxHealGesamt(healStat);
+                    const total = Number(healStat.healValue || 0) + Number(healStat.companionValue || 0) + Number(healStat.autoRegenHealValue || 0);
+                    let result = formatHealValue(total);
+                    if (healStat.actions.length > 0 && total > 0) {
+                        result += "<br>(" + formatHealValue(total / healStat.actions.length) + ")";
+                        result += "<br>(" + formatHealValue(min) + " - " + formatHealValue(max) + ")";
+                    }
+                    return center(result);
+                }));
+            }
+
+            minMaxHealGesamt(healStat) {
+                const values = [];
+                (healStat.targets || []).forEach(target => {
+                    const heal = target && target.heal;
+                    const value = heal ? Number(heal.value || 0) : 0;
+                    if (value > 0) values.push(value);
+                });
+                const autoRegen = Number(healStat.autoRegenHealValue || 0);
+                if (autoRegen > 0) values.push(autoRegen);
+                if (values.length === 0) return [0, 0];
+                return [util.arrayMin(values), util.arrayMax(values)];
+            }
+
+            minMaxHealByType(healStat, key) {
+                const values = Array();
+                (healStat.targets || []).forEach(target => {
+                    const heal = target && target.heal;
+                    const value = heal ? Number(heal[key] || 0) : 0;
+                    if (value > 0) values.push(value);
+                });
+                if (values.length === 0) return [0, 0];
+                return [util.arrayMin(values), util.arrayMax(values)];
             }
         }
 
@@ -2432,6 +2893,7 @@
             static views = {
                 "attack": Viewer.TableViewAngriffVerteidigung,
                 "defense": Viewer.TableViewAngriffVerteidigung,
+                "heal": Viewer.TableViewHeilung,
                 "all": Viewer.TableViewAlleAktionen, // HP/MP am Anfang der Runde, MP-Verbrauch
             }
 
@@ -2607,7 +3069,7 @@
                     if (!statResult.title && statResult.unit) {
                         statResult.title = SearchEngine.getDisplayUnitTitle(statResult.unit);
                     }
-                    if (statResult.actions.length > 0 || (Number(statResult.companionValue || 0) > 0)) {
+                    if (statResult.actions.length > 0 || (Number(statResult.companionValue || 0) > 0) || (Number(statResult.autoRegenHealValue || 0) > 0)) {
                         addLine(statView, id === "" ? "" : (id + ""), statResult, statResult.byDmgType);
                     }
                 }
@@ -2950,7 +3412,7 @@
 
                 // Attack - Verteidigung
                 const typeElement = document.createElement("span");
-                const [typeSelectContainer, typeSelectInput] = util.createSelectableElement(typeElement, [["attack", "Angriff"], ["defense", "Verteidigung"], ["all", "Alle Aktionen"]]);
+                const [typeSelectContainer, typeSelectInput] = util.createSelectableElement(typeElement, [["attack", "Angriff"], ["defense", "Verteidigung"], ["heal", "Heilung"], ["all", "Alle Aktionen"]]);
                 typeSelectInput.value = query.type;
                 typeSelectInput.onchange = function (value) {
                     query.type = typeSelectInput.value;
@@ -2970,6 +3432,8 @@
                     typeElement.innerHTML = "Angriff";
                 } else if (query.type === "defense") {
                     typeElement.innerHTML = "Verteidigung";
+                } else if (query.type === "heal") {
+                    typeElement.innerHTML = "Heilung";
                 } else {
                     typeElement.innerHTML = "Alle Aktionen";
                 }

@@ -1,0 +1,16 @@
+{
+  "name": "wod-mods-tests",
+  "private": true,
+  "description": "Node/jsdom-Tests: Dedupe, Heilungs-Helfer, DOM-Smoke und E2E Parse+EKS doQuery(heal) auf Fixture-HTML.",
+  "type": "module",
+  "scripts": {
+    "test:dom": "node testResources/dom-fixture-smoke.mjs",
+    "test:eks": "node testResources/eks-expanded-dedupe-test.mjs",
+    "test:heal-fixture": "node testResources/heal-report-fixture-test.mjs",
+    "test:e2e:heal": "node testResources/heal-e2e.mjs",
+    "test:node": "node testResources/eks-expanded-dedupe-test.mjs && node testResources/heal-report-fixture-test.mjs && node testResources/dom-fixture-smoke.mjs && node testResources/heal-e2e.mjs"
+  },
+  "devDependencies": {
+    "jsdom": "^26.1.0"
+  }
+}

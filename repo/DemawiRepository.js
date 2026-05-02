@@ -5304,7 +5304,12 @@ class demawiRepository {
             monster;
             actions; // aufgeteilt in vorrunde, regen, initiative, runde
 
-            async load(nr, roundTR) {
+            /**
+             * @param {number} nr Rundennummer innerhalb des Kampfes (1-basiert)
+             * @param {HTMLTableRowElement} roundTR Berichtszeile „Runde n“
+             * @param {number} [reportBattleAreaIx=0] Index des Kampfes im Bericht (0-basiert) — für stabile action.reportCombatRowDedupeUid
+             */
+            async load(nr, roundTR, reportBattleAreaIx = 0) {
                 let statusTables = roundTR.getElementsByClassName("rep_status_table"); // üblicherweise sollten es immer 2 sein, nur am Ende des Kampfes dann 4
                 if (statusTables.length !== 2 && statusTables.length !== 4) {
                     addWarning("Es wurden keine zwei StatusTable in einer Runde gefunden: " + statusTables.length)
@@ -5323,9 +5328,12 @@ class demawiRepository {
                 var regen = Array();
                 var runde = Array();
                 let actionsElement = roundTR.getElementsByTagName("table")[2].querySelectorAll("tr");
+                let combatTableTrIx = 0;
                 for (const currentActionTR of actionsElement) { // Round-Action-TR
                     const currentActionTRlength = currentActionTR.children.length;
                     if (currentActionTRlength === 1) continue; // nothing to do <hr>
+
+                    const reportCombatRowDedupeUidForTr = reportBattleAreaIx + "|R" + nr + "|tr" + combatTableTrIx++;
 
                     const iniTD = currentActionTR.children[0];
                     const hatInitiativeWurf = iniTD.textContent.trim() !== "";
@@ -5342,16 +5350,31 @@ class demawiRepository {
                         if (genutzterSkill) { // Initiative
 
                         } else { // Regen
-                            const parsedLossEvent = ActionParser.parseRoundLossEvent(this, currentActionTR, actionTD);
-                            if (parsedLossEvent) regen.push(parsedLossEvent);
+                            const parsedHpGain = ActionParser.parseRoundHpGainEvent(this, currentActionTR, actionTD);
+                            if (parsedHpGain) {
+                                parsedHpGain.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                regen.push(parsedHpGain);
+                            } else {
+                                const parsedLossEvent = ActionParser.parseRoundLossEvent(this, currentActionTR, actionTD);
+                                if (parsedLossEvent) {
+                                    parsedLossEvent.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                    regen.push(parsedLossEvent);
+                                }
+                            }
                         }
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         const actionTD = currentActionTR.children[1];
                         const targetTD = currentActionTR.children[2];
                         if (hatInitiativeWurf) { // Vorrunden-Aktion
-                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => runde.push(a));
+                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => {
+                                a.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                runde.push(a);
+                            });
                         } else { // Runden-Aktion
-                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => vorrunde.push(a));
+                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => {
+                                a.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                vorrunde.push(a);
+                            });
                         }
                     }
                 }
@@ -5471,12 +5494,15 @@ class demawiRepository {
                         console.log("Keine Parade", strLine);
                     }
                 } else {
-                    var matching = strLine.match(/\+(\d*) HP/)
-                    if (matching) { // Single Target Heal
+                    let matching = strLine.match(/\+(\d+(?:[\.,]\d+)?)\s*HP\b/i);
+                    if (!matching) {
+                        matching = strLine.match(/\b(\d+(?:[\.,]\d+)?)\s*HP\b/i);
+                    }
+                    if (matching) { // Single Target Heal (+6 HP oder „heilt … 3 HP“)
                         this.typ = "Heilung";
                         this.wirkung = {
                             what: "HP",
-                            value: matching[1],
+                            value: Number(matching[1].replace(",", ".")),
                         }
                     }
                 }
@@ -5846,6 +5872,51 @@ class demawiRepository {
             }
 
             /**
+             * Zweispaltige Zeile: „&lt;Held&gt; heilt [n] HP.“ (Regeneration, ohne Fertigkeit) → Ereignis wie HP-Verlust,
+             * damit die EKS indirekte Heilung über Status-Effekte + Effekt-Historie zuordnen kann.
+             */
+            static parseRoundHpGainEvent(curRound, actionTR, actionTD) {
+                const text = (actionTD.textContent || "").replace(/\s+/g, " ").trim();
+                if (!/\bheilt\b/i.test(text) || /\bheilt\s+mittels\b/i.test(text)) return null;
+                const unitAnchors = actionTD.querySelectorAll("a[href*=\"/hero/\"], a[href*=\"/npc/\"]");
+                if (!unitAnchors || unitAnchors.length === 0) return null;
+                const affectedAnchor = unitAnchors[0];
+                const affectedUnitId = ReportParser.getUnitIdFromElement(affectedAnchor);
+                if (!affectedUnitId) return null;
+                let affectedIdx;
+                for (let curNode = affectedAnchor.nextSibling; curNode; curNode = curNode.nextSibling) {
+                    if (curNode.nodeType === Node.ELEMENT_NODE) {
+                        if (curNode.tagName === "SPAN") {
+                            const match = (curNode.textContent || "").match(/^\s*(\d+)\s*$/);
+                            if (match) {
+                                affectedIdx = Number(match[1]);
+                            }
+                            break;
+                        }
+                        if (curNode.tagName === "A") {
+                            break;
+                        }
+                    }
+                }
+                if (affectedIdx) affectedUnitId.idx = affectedIdx;
+                const affectedUnit = curRound.unitLookup(affectedUnitId);
+                const amountMatch = text.match(/(\d+(?:[\.,]\d+)?)\s*HP\b/i);
+                if (!amountMatch) return null;
+                const gain = Number(amountMatch[1].replace(",", "."));
+                if (!(gain > 0)) return null;
+                const target = { unit: affectedUnit };
+                const eventAction = new Action(affectedUnit);
+                eventAction.targets = [target];
+                eventAction.event = {
+                    kind: "hpgain",
+                    resource: "HP",
+                    value: gain,
+                };
+                if (withSources) eventAction.src = actionTR.outerHTML;
+                return eventAction;
+            }
+
+            /**
              * Gibt eine Liste von Actions zurück.
              */
             static async parse(curRound, actionTR, actionTD, targetTD) {
@@ -5902,8 +5973,18 @@ class demawiRepository {
                             if (curElement.tagName && (curElement.tagName === "A" || curElement.querySelector("a"))) { // Schaden an einem Gegenstand
                                 lineNr = -1; // solange ignorieren bis eine neue Entität kommt
                             } else {
-                                const damage = new Damage(curElement);
-                                currentTarget.addDamage(damage);
+                                const healLine = (curElement.textContent || "").replace(/\s+/g, " ").trim();
+                                const healMatch = healLine.match(/^[+]?\s*(\d+(?:[\.,]\d+)?)\s*HP\.?$/i);
+                                if (healMatch && currentTarget) {
+                                    const hv = Number(healMatch[1].replace(",", "."));
+                                    if (hv > 0) {
+                                        currentTarget.typ = "Heilung";
+                                        currentTarget.wirkung = {what: "HP", value: hv};
+                                    }
+                                } else {
+                                    const damage = new Damage(curElement);
+                                    currentTarget.addDamage(damage);
+                                }
                             }
                         } else {
                             currentLine.push(curElement);
@@ -5912,6 +5993,16 @@ class demawiRepository {
                 }
                 if (lineNr === 1) {
                     addTarget();
+                } else if (lineNr > 1 && currentLine.length > 0 && currentTarget) {
+                    const tail = _.util.arrayMap(currentLine, a => a.textContent).join("").replace(/\s+/g, " ").trim();
+                    const healMatch = tail.match(/^[+]?\s*(\d+(?:[\.,]\d+)?)\s*HP\.?$/i);
+                    if (healMatch) {
+                        const hv = Number(healMatch[1].replace(",", "."));
+                        if (hv > 0) {
+                            currentTarget.typ = "Heilung";
+                            currentTarget.wirkung = {what: "HP", value: hv};
+                        }
+                    }
                 }
                 return targets;
             }
@@ -5955,13 +6046,13 @@ class demawiRepository {
 
                 // HP/MP-Gain/Loss bestimmen
                 for (const curNode of actionTD.querySelectorAll(".rep_gain, .rep_loss")) {
-                    let mpGain = curNode.textContent.match(/(.*) MP/);
+                    let mpGain = curNode.textContent.match(/([+-]?\d+(?:[\.,]\d+)?)\s*MP/);
                     if (mpGain) {
-                        fertigkeit.mpGain = Number(mpGain[1]);
+                        fertigkeit.mpGain = Number(mpGain[1].replace(",", "."));
                     } else {
-                        let hpGain = curNode.textContent.match(/(.d*) HP/);
+                        let hpGain = curNode.textContent.match(/([+-]?\d+(?:[\.,]\d+)?)\s*HP/);
                         if (hpGain) {
-                            fertigkeit.hpGain = Number(hpGain[1]);
+                            fertigkeit.hpGain = Number(hpGain[1].replace(",", "."));
                         } else {
                             addWarning("Rep_Gain/Rep_Loss kann nicht aufgelöst werden '" + curNode.textContent + "'", curNode);
                         }
@@ -5982,6 +6073,14 @@ class demawiRepository {
                 const actionSkillA = actionTD.querySelector("a[href*=\"/skill/\"]");
                 if (actionSkillA) {
                     fertigkeit.name = actionSkillA.textContent.trim();
+                    try {
+                        const href = actionSkillA.getAttribute("href") || "";
+                        const idMatch = href.match(/[?&]id=(\d+)/i);
+                        if (idMatch) {
+                            fertigkeit.wodSkillId = idMatch[1];
+                        }
+                    } catch (e) {
+                    }
                     const wirkungen = Wirkung.getWirkungenFromElement(actionSkillA);
                     if (wirkungen) fertigkeit.fx = wirkungen;
                     if (withSources) fertigkeit.typeRef = actionSkillA.outerHTML;
@@ -6032,8 +6131,9 @@ class demawiRepository {
             }
 
             static isHeilung(targetTD) {
-                const text = targetTD.textContent;
-                return text.match(/\+ \d* HP/) || text.match(/\+ \d* MP/);
+                const text = (targetTD.textContent || "").replace(/\s+/g, " ");
+                return /\+\s*\d+(?:[\.,]\d+)?\s*HP\b/i.test(text)
+                    || /\+\s*\d+(?:[\.,]\d+)?\s*MP\b/i.test(text);
             }
 
             static getFertigkeitTypFromTarget(targetTD, actionUnit, curRound) {
@@ -6257,7 +6357,8 @@ class demawiRepository {
                             areas.push(curArea);
                         }
                         const round = new Round();
-                        await round.load(curArea.rounds.length + 1, roundTR);
+                        const battleAreaIx = areas.length > 0 ? areas.length - 1 : 0;
+                        await round.load(curArea.rounds.length + 1, roundTR, battleAreaIx);
                         curArea.rounds.push(round);
                     }
                     closeArea(curArea);
