@@ -3,7 +3,7 @@
  */
 class demawiRepository {
 
-    static version = "1.1.14.2";
+    static version = "1.1.14.3";
     /**
      * Änderungen für das Subpackage CSProxy+Storages+WindowManager (CSProxy + alles was direkt oder reingereicht genutzt werden soll inkl. derer Abhängigkeiten...).
      * Da dieses nur einmalig im Responder ausgeführt wird. Erwarten alle Skripte, die diesen nutzen hier die gleiche Funktionalität.
@@ -5885,18 +5885,16 @@ class demawiRepository {
                 if (!affectedUnitId) return null;
                 let affectedIdx;
                 for (let curNode = affectedAnchor.nextSibling; curNode; curNode = curNode.nextSibling) {
-                    if (curNode.nodeType === Node.ELEMENT_NODE) {
-                        if (curNode.tagName === "SPAN") {
-                            const match = (curNode.textContent || "").match(/^\s*(\d+)\s*$/);
-                            if (match) {
-                                affectedIdx = Number(match[1]);
-                            }
-                            break;
-                        }
-                        if (curNode.tagName === "A") {
-                            break;
-                        }
+                    if (curNode.nodeType !== Node.ELEMENT_NODE) continue;
+                    if (curNode.tagName === "SPAN") {
+                        // Heilungs-/Schadenszahlen (.rep_gain / .rep_loss) nicht als Listenindex interpretieren.
+                        const cls = curNode.className || "";
+                        if (/\brep_gain\b|\brep_loss\b/.test(cls)) continue;
+                        const match = (curNode.textContent || "").match(/^\s*(\d+)\s*$/);
+                        if (match) affectedIdx = Number(match[1]);
+                        break;
                     }
+                    if (curNode.tagName === "A") break;
                 }
                 if (affectedIdx) affectedUnitId.idx = affectedIdx;
                 const affectedUnit = curRound.unitLookup(affectedUnitId);
