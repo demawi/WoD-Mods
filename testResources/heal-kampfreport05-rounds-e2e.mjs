@@ -71,8 +71,20 @@ function polyfillInnerTextForReports(window) {
 
 function levelDataFirstNRounds(levelData, n) {
     const A = levelData.areas[0];
-    const rounds = A.rounds.slice(0, n).map((r, i) => Object.assign({}, r, { nr: i + 1 }));
-    return [{ nr: 1, areas: [{ nr: 1, rounds }] }];
+    const fullRounds = A.rounds;
+    const rounds = fullRounds.slice(0, n).map((r, i) => Object.assign({}, r, { nr: i + 1 }));
+    const area = { nr: 1, rounds };
+    if (n < fullRounds.length) {
+        const next = fullRounds[n];
+        if (next) {
+            area._prescanNextHeldend = next.helden;
+            area._prescanNextMonster = next.monster;
+        }
+    } else {
+        if (A.heldenEnd) area.heldenEnd = A.heldenEnd;
+        if (A.monsterEnd) area.monsterEnd = A.monsterEnd;
+    }
+    return [{ nr: 1, areas: [area] }];
 }
 
 /** Helden-Sub-Keys wie in der EKS (Anzeigenamen aus Runde 1). */
@@ -98,7 +110,7 @@ function sumIndirectReceivedByParty(stats, heroKeys) {
  * Regression: marginale **empfangene** indirekte Heilung der Heldengruppe pro Runde.
  * (Nach Empfänger-Buchung in der EKS; nicht mehr nach Auslöser „atrix“/„Nachtigall“ in sub-Keys.)
  */
-const GOLDEN_PARTY_INDIRECT_RECEIVED_MARGINAL = [2, 10, 48, 36, 48, 61, 70, 19, 19, 16, 22, 24, 20, 24, 20, 19, 17, 13];
+const GOLDEN_PARTY_INDIRECT_RECEIVED_MARGINAL = [2, 10, 23, 36, 48, 52, 70, 19, 19, 16, 22, 24, 20, 24, 20, 19, 17, 13];
 
 (async function main() {
     assert(fs.existsSync(reportPath), "Fixture fehlt: " + reportPath);

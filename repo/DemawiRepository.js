@@ -5189,7 +5189,8 @@ class demawiRepository {
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    static ReportParserDataVersion = 13;
+    // Bump when parser output shape changes; Erweiterte Kampfstatistik drops persisted levelData with mismatched dv (#invalidateOldCache).
+    static ReportParserDataVersion = 14;
     static ReportParser = function () {
 
         let warnings;

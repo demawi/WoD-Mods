@@ -1,13 +1,14 @@
 {
   "name": "wod-mods-tests",
   "private": true,
-  "description": "Node/jsdom-Tests: Dedupe, Heilungs-Helfer, DOM-Smoke, EKS Phasenparität Schaden/Heilung (K05) und E2E auf Fixture-HTML.",
+  "description": "Node/jsdom-Tests: Dedupe, Heilungs-Helfer, DOM-Smoke, EKS Bilanz pro Runde/Held (K05), Phasenparität und E2E auf Fixture-HTML.",
   "type": "module",
   "scripts": {
     "test:dom": "node testResources/dom-fixture-smoke.mjs",
     "test:eks": "node testResources/eks-expanded-dedupe-test.mjs",
     "test:heal-fixture": "node testResources/heal-report-fixture-test.mjs",
     "test:e2e:heal": "node testResources/heal-e2e.mjs",
+    "test:balance:per-round": "node testResources/heal-balance-per-round-k05.mjs",
     "test:node": "node testResources/eks-expanded-dedupe-test.mjs && node testResources/heal-report-fixture-test.mjs && node testResources/dom-fixture-smoke.mjs && node testResources/heal-e2e.mjs && node testResources/eks-damage-heal-balance-k05.mjs"
   },
   "devDependencies": {

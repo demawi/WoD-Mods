@@ -23,10 +23,10 @@ const reportPath = path.join(__dirname, "Kampfreport_05_Heilung.html");
 const demawiPath = path.join(repoRoot, "repo", "DemawiRepository.js");
 const eksPath = path.join(repoRoot, "ErweiterteKampfstatistik.user.js");
 
-/** Referenzwerte Stand EKS 0.21.47 + Fixture Kampfreport_05_Heilung.html — bei bewusstem Rebalance anpassen. */
+/** Referenzwerte Stand EKS 0.21.48 + Fixture Kampfreport_05_Heilung.html — bei bewusstem Rebalance anpassen. */
 const GOLDEN_HEROES_DEFENSE_SUM = 415;
-/** Summe „Gesamt Heilung“ über Helden-Zeilen (healValue + Auto-Regen + Gefährten); healValue+Auto = Root-Heilung 757. */
-const GOLDEN_HEROES_HEAL_SUM = 775;
+/** Summe „Gesamt Heilung“ über Helden-Zeilen (healValue + Auto-Regen + Gefährten). */
+const GOLDEN_HEROES_HEAL_SUM = 741;
 
 function assert(cond, msg) {
     if (!cond) throw new Error(msg || "Assertion failed");
@@ -191,7 +191,7 @@ function countVorrundeInitiativeActions(levelDataOne) {
         subHealNoComp === rootNoComp,
         `Interne Konsistenz: Summe(healValue+autoRegen) Heldenzeilen=${subHealNoComp} muss Root (ohne Filter)=${rootNoComp} sein`,
     );
-    assert(subComp === GOLDEN_HEROES_HEAL_SUM - rootNoComp, `Gefährten-Summe: erwartet ${GOLDEN_HEROES_HEAL_SUM - rootNoComp}, ist ${subComp}`);
+    assert(subComp === GOLDEN_HEROES_HEAL_SUM - rootNoComp, `Gefährten-Summe: erwartet ${GOLDEN_HEROES_HEAL_SUM - rootNoComp}, ist ${subComp}`); // 741 − 723 = 18
 
     console.log("[OK] eks-damage-heal-balance-k05", {
         vorrundeInitiativeActionRows: counts,

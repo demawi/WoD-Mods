@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.47
+// @version        0.21.53
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -1240,9 +1240,9 @@
         }
 
         /**
-         * Effektiver Heil-Pool für HoT-Zuschreibung: max(gemeldete Regenerations-HP, Überlappung aus Nominal-HoT mit
-         * Heilraum und/oder DoT (Regen-Zeile oder Status „Heilung Hitpoints“). Angeschlagen mit Gesang in der Liste:
-         * min(Nominal, DoT + Regenerations-HP-Zeile), damit z. B. 9 DoT + 1 gemeldete Heilung → 10 Zuschreibungs-HP (K05 R3 Dharigaaz).
+         * Heil-Pool für HoT-Zuschreibung: Bei **gemeldeter** „+X HP“-Zeile ist der verbuchte Pool genau **X**
+         * (Bilanz mit Kampfbericht). Ohne solche Zeile: inferred overlap aus Nominal-HoT, Heilraum, DoT/Status
+         * (min(Nominal, …) wie in overlapCap).
          */
         static computeIndirectHealPoolTotal(round, targetUnit, reportHealFloat, effectSourceHistory, observedMaxHpByUnitKey) {
             const reportHeal = Math.floor(Math.max(0, Number(reportHealFloat || 0)));
@@ -1297,7 +1297,16 @@
                 }
             }
 
-            return Math.floor(Math.max(reportHeal, overlapCap));
+            /**
+             * Bilanz: Ist in der Regenerationsphase eine konkrete **+X HP**-Zeile geparst (reportHeal > 0),
+             * darf die EKS nicht mehr Heilung verbuchen als diese Zeile meldet — sonst stimmt
+             * ΔHP ≠ Heilung − Schaden nie, egal wie groß der nominelle HoT-/DoT-Overlap für Zuschreibungen wäre.
+             * Ohne gemeldete Zeile (reportHeal === 0) weiter inferred overlapCap (z. B. Supplement-Pfad).
+             */
+            if (reportHeal > 0) {
+                return reportHeal;
+            }
+            return Math.floor(Math.max(0, overlapCap));
         }
 
         static parseHpSnapshotValue(value) {
@@ -2225,13 +2234,21 @@
                             }
                         };
 
-                    const rounds = area.rounds;
+                    const rounds = area.rounds || [];
+                    /** Statuslisten vollständig einlesen (Rundenanfänge, Kampfende, optional nächster Listenkopf
+                     * bei kürzeren Slices), bevor Aktionen laufen — sonst fehlen HP-Spitzen für Cap/Pool. */
+                    rounds.forEach(r => {
+                        (r.helden || []).forEach(observeUnitHp);
+                        (r.monster || []).forEach(observeUnitHp);
+                    });
+                    (area.heldenEnd || []).forEach(observeUnitHp);
+                    (area.monsterEnd || []).forEach(observeUnitHp);
+                    (area._prescanNextHeldend || []).forEach(observeUnitHp);
+                    (area._prescanNextMonster || []).forEach(observeUnitHp);
                     for (var roundNr = 0, l = rounds.length; roundNr < l; roundNr++) {
                         var round = rounds[roundNr];
                         round.nr = roundNr + 1;
                         let actionForStats = Array();
-                            (round.helden || []).forEach(observeUnitHp);
-                            (round.monster || []).forEach(observeUnitHp);
                         if (wantAll) {
                             stats.actionClassification = function (curAction) {
                                 return {
@@ -2856,6 +2873,7 @@
                                     if (!!tu.id.isHero !== !!supUnit.id.isHero) return false;
                                     return heroBaseName(tu.id.name) === heroBaseName(supUnit.id.name);
                                 });
+
                             supplementUnits.forEach(supUnit => {
                                 if (!supUnit || !supUnit.id) return;
                                 if (!!supUnit.id.isHero !== wantHeroes) return;
