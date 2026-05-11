@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.64
+// @version        0.21.66
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -709,10 +709,13 @@
         /** Pro doQuery-Paar (Helden Heilung + Verteidigung): gebuchte Mengen je Runde/Ziel für Snapshot-Abgleich */
         static _bookingRoundHealByKey = null;
         static _bookingRoundDmgByKey = null;
+        /** @type {null|"in"|"out"} in: Buchung nach Empfänger (wie bisher); out: Stat-Zeile nach Quelle, Buchungs-Key weiter Empfänger */
+        static _bookingHealAttributionMode = null;
 
         static resetRoundHpBooking() {
             this._bookingRoundHealByKey = {};
             this._bookingRoundDmgByKey = {};
+            this._bookingHealAttributionMode = null;
         }
 
         static roundBookingCompositeKey(level, area, round) {
@@ -843,6 +846,7 @@
                 const canSynthesizeDamage = !this.hasRoundRegenHpLossForTarget(round, targetUnit);
                 const lossCtx = canSynthesizeDamage ? this.resolveHpLossContributorsAugmented(round, targetUnit, effectSourceHistory) : null;
                 const grossDamage = canSynthesizeDamage ? Math.floor(Math.max(0, Number(lossCtx && lossCtx.knownWeight || 0))) : 0;
+                if (!(grossDamage > 0)) return [];
                 const grossHeal = Math.floor(Math.max(0, hpHealValue)) + grossDamage;
                 const healEffects = this.buildIndirectHealEffectListForTarget(
                     round,
@@ -1403,8 +1407,15 @@
                 if (toStat.filterType) return;
             } else if (fp.includes("unit")) {
                 if (!toStat.unit || !target.unit) return;
+                if (!action || !action.unit) return;
                 /** Wie die Einheiten-Zeile: gleicher Name, nicht zwingend gleiches id.idx (Parser/Status vs. Aktion). */
-                if (!_.ReportParser.isUnitEqual(toStat.unit, target.unit)) return;
+                const matchRecv = _.ReportParser.isUnitEqual(toStat.unit, target.unit);
+                const matchSrc = _.ReportParser.isUnitEqual(toStat.unit, action.unit);
+                if (SearchEngine._bookingHealAttributionMode === "out") {
+                    if (!matchSrc) return;
+                } else {
+                    if (!matchRecv) return;
+                }
             } else {
                 return;
             }
@@ -1621,11 +1632,28 @@
                 case "unit":
                     subStats.actionClassification = function (curAction) {
                         let curSettings = curStats.actionClassification(curAction);
+                        const agg = curStats.statRoot && curStats.statRoot.healUnitAgg;
+                        if (agg === "in") {
+                            /** HP-Heilung (erhalten): Zeile = Empfänger — alle Heilaktionen, die diesen Helden treffen. */
+                            return {
+                                fromMe: curSettings.fromMe,
+                                atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, t => _.ReportParser.isUnitEqual(statTarget.unit, t.unit)),
+                                cmp: "unit-heal-in",
+                            };
+                        }
+                        if (agg === "out") {
+                            /** HP-Heilung (ausgehend): Zeile = Quelle — Aktionen dieses Auslösers. */
+                            return {
+                                fromMe: curSettings.fromMe && _.ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
+                                atMe: curSettings.atMe,
+                                cmp: "unit-heal-out",
+                            };
+                        }
                         return {
                             fromMe: curSettings.fromMe && _.ReportParser.isUnitEqual(statTarget.unit, curAction.unit),
                             atMe: curSettings.atMe && !!util.arraySearch(curAction.targets, target => _.ReportParser.isUnitEqual(statTarget.unit, target.unit)),
-                            cmp: "unit", // nur fürs debugging
-                        }
+                            cmp: "unit",
+                        };
                     }
                     break;
                 default:
@@ -3059,12 +3087,16 @@
             const wantHeroes = statQuery.side === "heroes";
             const wantDefense = statQuery.type === "defense";
             const wantAll = statQuery.type === "all";
-            const wantHeal = statQuery.type === "heal";
+            const wantHealIn = statQuery.type === "heal";
+            const wantHealOut = statQuery.type === "heal_out";
+            const wantHeal = wantHealIn || wantHealOut;
+            const healUnitAgg = wantHealIn ? "in" : wantHealOut ? "out" : null;
 
             SearchEngine._bookingQuerySide = statQuery.side;
             SearchEngine._bookingFilterPattern = (statQuery.filter || []).map(f => f && f.spec).filter(Boolean);
+            SearchEngine._bookingHealAttributionMode = wantHealOut ? "out" : wantHealIn ? "in" : null;
 
-            if (wantHeal && this.DEBUG_HEAL) {
+            if (wantHealIn && this.DEBUG_HEAL) {
                 SearchEngine.debugHeal("Query", {
                     side: statQuery.side,
                     type: statQuery.type,
@@ -3080,6 +3112,7 @@
                     hadHealType: false,
                     levelDataArray: levelDataArray,
                     wantHeroes: wantHeroes,
+                    healUnitAgg: healUnitAgg,
                 }
 
                 function applyFilter(curStats, queryFilter, action, target, statTarget) {
@@ -3125,8 +3158,8 @@
                     } else if (curFilter.startsWith("enemy_")) {
                         statTarget = wantDefense ? action : target;
                     } else {
-                        /** Heilung + „Einheit“: wie Verteidigungsschaden nach **Empfänger** (Ziel), damit Summe(Helden) zur Gruppen-HP-Bilanz passt. Angriff: Auslöser. */
-                        statTarget = wantHeal ? target : wantDefense ? target : action;
+                        /** heal: Einheit = Empfänger (HP erhalten). heal_out: Einheit = Quelle (= action, wie Angriff). Verteidigung: Ziel. */
+                        statTarget = wantHealIn ? target : wantHealOut ? action : wantDefense ? target : action;
                     }
 
                     const tail = filters.slice(1);
@@ -3696,9 +3729,10 @@
 
                         if (!wantAll && wantHeal) {
                             const hpgainSeenTargetKeys = new Set();
-                            const distributeHealPool = (targetUnit, reportHealFloat) => {
+                            const distributeHealPool = (targetUnit, reportHealFloat, allowInferredWhenZero = true) => {
                                 if (!SearchEngine.isUnitEligibleForRegenBooking(targetUnit)) return;
                                 const reportHealIn = Math.floor(Math.max(0, Number(reportHealFloat || 0)));
+                                if (!allowInferredWhenZero && !(reportHealIn > 0)) return;
                                 const healIntTotal = SearchEngine.computeIndirectHealPoolTotal(
                                     round,
                                     targetUnit,
@@ -3935,7 +3969,7 @@
                                 const canSynthesizeDamage = !SearchEngine.hasRoundRegenHpLossForTarget(round, supUnit);
                                 const lossCtx = canSynthesizeDamage ? SearchEngine.resolveHpLossContributorsAugmented(round, supUnit, effectSourceHistory) : null;
                                 const grossDamage = canSynthesizeDamage ? Math.floor(Math.max(0, Number(lossCtx && lossCtx.knownWeight || 0))) : 0;
-                                distributeHealPool(supUnit, grossDamage);
+                                distributeHealPool(supUnit, grossDamage, false);
                             });
                         }
 
@@ -3980,6 +4014,7 @@
                     });
                 }
             }
+            SearchEngine._bookingHealAttributionMode = null;
             return stats;
         }
     }
@@ -4010,6 +4045,15 @@
                 skill_active: "Fertigkeit(Aktiv)",
                 items: "Gegenstände",
             },
+            "heal_out": {
+                level: "Level",
+                fight: "Kampf",
+                position: "Position",
+                unit: "Einheit",
+                skillName: "Fertigkeit",
+                skill_active: "Fertigkeit(Aktiv)",
+                items: "Gegenstände",
+            },
             "all": {
                 level: "Level",
                 fight: "Kampf",
@@ -4026,7 +4070,7 @@
         // z.B. monster, target.unit.position
         static StatQuery = class {
             side; // "heroes" oder "monsters"
-            type; // 1: für Angriff, 2: für Verteidigung
+            type; // attack | defense | heal (empfangen) | heal_out (Quelle) | all
             filter; // Array von QueryFilter
             possibleFilter;
 
@@ -4153,6 +4197,7 @@
 
             constructor(statView) {
                 super();
+                const outgoing = statView.query.type === "heal_out";
                 const center = this.center;
                 const Column = Viewer.Column;
                 const formatHealValue = value => {
@@ -4163,9 +4208,11 @@
                     if (Math.abs(rounded - asInt) < 0.0000001) return asInt;
                     return rounded;
                 };
-                this.columns.push(new Column("Heilaktionen", center("Heil-<br>aktionen"), healStat => center(healStat.actions.length)));
+                this.columns.push(new Column("Heilaktionen", center(outgoing ? "Heil-<br>aktionen<br>(Quelle)" : "Heil-<br>aktionen"), healStat => center(healStat.actions.length)));
 
-                this.columns.push(new Column("Direkte Heilung", center("Direkte<br>Heilung<br>(Ø)<br>(min-max)", "Empfangene direkte Heilung (Zielheld)."), healStat => {
+                this.columns.push(new Column("Direkte Heilung", center("Direkte<br>Heilung<br>(Ø)<br>(min-max)", outgoing
+                    ? "Als Quelle ausgehende direkte HP-Heilung (Empfänger siehe Berichtszeile)."
+                    : "Empfangene direkte HP-Heilung (Zielheld)."), healStat => {
                     const [min, max] = this.minMaxHealByType(healStat, "directValue");
                     const total = Number(healStat.directHealValue || 0);
                     let result = formatHealValue(total);
@@ -4176,7 +4223,9 @@
                     return center(result);
                 }));
 
-                this.columns.push(new Column("Indirekte Heilung", center("Indirekte<br>Heilung<br>(Ø)<br>(min-max)", "Nur Regenerationsphase (HoT-Zuweisung). Keine indirekte Heilung aus Vorrunde/Hauptrunde in der Bilanz."), healStat => {
+                this.columns.push(new Column("Indirekte Heilung", center("Indirekte<br>Heilung<br>(Ø)<br>(min-max)", outgoing
+                    ? "Regenerationsphase: dieser Quelle zugerechneter HoT-Anteil (Ziel im Bericht)."
+                    : "Nur Regenerationsphase (HoT-Zuweisung). Keine indirekte Heilung aus Vorrunde/Hauptrunde in der Bilanz."), healStat => {
                     const [min, max] = this.minMaxHealByType(healStat, "indirectValue");
                     const total = Number(healStat.indirectHealValue || 0);
                     let result = formatHealValue(total);
@@ -4187,21 +4236,27 @@
                     return center(result);
                 }));
 
-                this.columns.push(new Column("Auto Regeneration", center("Auto-<br>Regeneration", "Heilung ohne zugeordnete Fertigkeit oder Tooltip-Effekt (z. B. passive Regenerationszeile „… heilt n HP.“)."), healStat => {
+                this.columns.push(new Column("Auto Regeneration", center("Auto-<br>Regeneration", outgoing
+                    ? "Als Quelle zugerechnete passive Regenerations-HP (Ziel oft identisch mit Quelle)."
+                    : "Heilung ohne zugeordnete Fertigkeit oder Tooltip-Effekt (z. B. passive Regenerationszeile „… heilt n HP.“)."), healStat => {
                     return center(formatHealValue(healStat.autoRegenHealValue || 0));
                 }));
 
-                this.columns.push(new Column("Gefährten Heilung", center("Gefährten-<br>Heilung", "Heilung, die eurem Gefährten zugutekommt und im Gesamtwert dem Helden zugerechnet wird (analog zum Gefährtenschaden)."), healStat => {
+                this.columns.push(new Column("Gefährten Heilung", center("Gefährten-<br>Heilung", outgoing
+                    ? "Von dieser Quelle ausgehende Heilung, die dem Gefährten zugutekommt und dem Helden zugerechnet wird."
+                    : "Heilung, die eurem Gefährten zugutekommt und im Gesamtwert dem Helden zugerechnet wird (analog zum Gefährtenschaden)."), healStat => {
                     return center(formatHealValue(healStat.companionValue || 0));
                 }));
 
-                this.columns.push(new Column("Gesamt Heilung", center("Gesamt<br>Heilung<br>(Ø)<br>(min-max)", "Summe der empfangenen Heilung (direkt, indirekt, Auto-Regeneration, Gefährten) plus Runden-Bilanzkorrektur (ΔHP aus Statuslisten je Runde = gebuchte Heilung − gebuchter Schaden). Indirekte Effekte nur Regenerationsphase."), healStat => {
+                this.columns.push(new Column("Gesamt Heilung", center("Gesamt<br>Heilung<br>(Ø)<br>(min-max)", outgoing
+                    ? "Summe ausgehender HP-Heilung (direkt, indirekt, Auto-Regeneration, Gefährten). Ohne Runden-Bilanzkorrektur — die bezieht sich nur auf empfangene HP in „HP-Heilung (erhalten)“."
+                    : "Summe der empfangenen Heilung (direkt, indirekt, Auto-Regeneration, Gefährten) plus Runden-Bilanzkorrektur (ΔHP aus Statuslisten je Runde = gebuchte Heilung − gebuchter Schaden). Indirekte Effekte nur Regenerationsphase."), healStat => {
                     const [min, max] = this.minMaxHealGesamt(healStat);
                     const total =
                         Number(healStat.healValue || 0) +
                         Number(healStat.companionValue || 0) +
                         Number(healStat.autoRegenHealValue || 0) +
-                        Number(healStat.healRoundBilanzKorrektur || 0);
+                        (outgoing ? 0 : Number(healStat.healRoundBilanzKorrektur || 0));
                     let result = formatHealValue(total);
                     if (healStat.actions.length > 0 && total > 0) {
                         result += "<br>(" + formatHealValue(total / healStat.actions.length) + ")";
@@ -4427,6 +4482,7 @@
                 "attack": Viewer.TableViewAngriffVerteidigung,
                 "defense": Viewer.TableViewAngriffVerteidigung,
                 "heal": Viewer.TableViewHeilung,
+                "heal_out": Viewer.TableViewHeilung,
                 "all": Viewer.TableViewAlleAktionen, // HP/MP am Anfang der Runde, MP-Verbrauch
             }
 
@@ -4773,7 +4829,7 @@
                 const info = document.createElement("span");
                 var infoTipp = "Über die Elemente im Header lässt sich die Ausgabe der Statistiken steuern. Mit jeder Änderung wird dabei die Ausgabe direkt aktualisiert.<br><ul>";
                 infoTipp += "<li>Mit einem Klick auf 'Helden' lässt sich dieses auf 'Monster' ändern.</li>";
-                infoTipp += "<li>Mit einem Klick auf 'Angriff' lässt sich dieses auf 'Verteidigung' ändern.</li>";
+                infoTipp += "<li>Mit einem Klick auf den Hauptfilter lässt sich zwischen Angriff, Verteidigung, HP-Heilung (ausgehend), HP-Heilung (erhalten) und Alle Aktionen wechseln.</li>";
                 infoTipp += "<li>Mit einem Klick auf den Verbindungsstrich dazwischen lässt sich beides gleichzeitig ändern.</li>";
                 infoTipp += "<li>Mit einem Klick auf das Plus-Zeichen öffnet sich eine Auswahlliste, nach der man das aktuelle Ergebnis weiterhin aufschlüsseln möchte. Dies lässt sich mehrfach wiederholen.</li>";
                 infoTipp += "<li>Hat man bereits mehr als eine Aufschlüsselung hinzugefügt, kann man über das Anklicken von '>' die benachbarten Aufschlüsselungen miteinander tauschen lassen.</li>";
@@ -4959,7 +5015,13 @@
 
                 // Attack - Verteidigung
                 const typeElement = document.createElement("span");
-                const [typeSelectContainer, typeSelectInput] = util.createSelectableElement(typeElement, [["attack", "Angriff"], ["defense", "Verteidigung"], ["heal", "Heilung"], ["all", "Alle Aktionen"]]);
+                const [typeSelectContainer, typeSelectInput] = util.createSelectableElement(typeElement, [
+                    ["attack", "Angriff"],
+                    ["defense", "Verteidigung"],
+                    ["heal_out", "HP-Heilung (ausgehend)"],
+                    ["heal", "HP-Heilung (erhalten)"],
+                    ["all", "Alle Aktionen"],
+                ]);
                 typeSelectInput.value = query.type;
                 typeSelectInput.onchange = function (value) {
                     query.type = typeSelectInput.value;
@@ -4979,8 +5041,10 @@
                     typeElement.innerHTML = "Angriff";
                 } else if (query.type === "defense") {
                     typeElement.innerHTML = "Verteidigung";
+                } else if (query.type === "heal_out") {
+                    typeElement.innerHTML = "HP-Heilung (ausgehend)";
                 } else if (query.type === "heal") {
-                    typeElement.innerHTML = "Heilung";
+                    typeElement.innerHTML = "HP-Heilung (erhalten)";
                 } else {
                     typeElement.innerHTML = "Alle Aktionen";
                 }

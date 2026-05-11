@@ -214,9 +214,19 @@ function assertCrKeysMatchReportUid(SearchEngine, actions) {
 
     const statQuery = new exp.QueryModel.StatQuery("heroes", "heal", []);
     const stats = exp.SearchEngine.doQuery(statQuery, [levelData]);
+    const statQueryOut = new exp.QueryModel.StatQuery("heroes", "heal_out", []);
+    const statsOut = exp.SearchEngine.doQuery(statQueryOut, [levelData]);
+    const rootRaw = s =>
+        Number(s.healValue || 0) + Number(s.autoRegenHealValue || 0) + Number(s.companionValue || 0);
+    assert(
+        rootRaw(stats) === rootRaw(statsOut),
+        `EKS heal vs heal_out Root-Rohsumme: ${rootRaw(stats)} vs. ${rootRaw(statsOut)}`,
+    );
+    assert(Number(statsOut.healRoundBilanzKorrektur || 0) === 0, "heal_out: keine Runden-Bilanzkorrektur am Root ohne UI-Reconciliation.");
 
     assert(stats && stats.healValue > 0, `EKS healValue sollte > 0 sein (ist ${stats && stats.healValue}).`);
     assert(stats.actions && stats.actions.length > 0, "EKS Heilungs-Aktionsliste leer.");
+    assert(statsOut.actions && statsOut.actions.length > 0, "EKS heal_out Aktionsliste leer.");
 
     const namesInListed = collectHealSkillNames(stats.actions);
     assert(

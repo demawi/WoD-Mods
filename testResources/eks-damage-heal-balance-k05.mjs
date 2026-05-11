@@ -6,6 +6,10 @@
  *    leer sind: die vollen Summen müssen **mindestens** so groß sein wie die gestrippten.
  * 2) **Goldwerte** (Helden, Einheiten-Filter): fängt Regressionen ab (Parser-/EKS-Änderungen).
  * 3) Indirekte Schäden/Heilung bilanzrelevant nur über die Regenerationsphase (EKS).
+ * 4) **Snapshot−Buchung**: Summe ΔHP(Statustafel) − (gebuchte Heilung − Schaden) pro Runde
+ *    gleich `healRoundBilanzKorrektur` nach `applyRoundHpReconciliation` (keine „verlorenen“ Korrekturen).
+ * 5) **HP-Heilung (erhalten)** vs. **HP-Heilung (ausgehend)**: gleiche Root-Roh-Summe (ohne Rundenkorrektur) bei leerem Filter
+ *    (pro Kante einmal auf die Wurzel gebucht; Unterteilung nach Einheit ist nur andere Schnittrichtung).
  *
  * Run: node testResources/eks-damage-heal-balance-k05.mjs
  */
@@ -24,9 +28,9 @@ const eksPath = path.join(repoRoot, "ErweiterteKampfstatistik.user.js");
 /** Referenzwerte Stand EKS 0.21.48 + Fixture Kampfreport_05_Heilung.html — bei bewusstem Rebalance anpassen. */
 const GOLDEN_HEROES_DEFENSE_SUM = 572;
 /** Summe „Gesamt Heilung“ inkl. healRoundBilanzKorrektur (Statuslisten-ΔHP vs. gebuchte Mengen). */
-const GOLDEN_HEROES_HEAL_SUM = 541;
+const GOLDEN_HEROES_HEAL_SUM = 533;
 /** healValue + Auto-Regen + Gefährten über Helden-Zeilen ohne Bilanzkorrektur — Rohwerte aus dem Bericht. */
-const GOLDEN_HEROES_HEAL_RAW_SUB_ROWS = 768;
+const GOLDEN_HEROES_HEAL_RAW_SUB_ROWS = 566;
 
 function assert(cond, msg) {
     if (!cond) throw new Error(msg || "Assertion failed");
@@ -97,6 +101,56 @@ function sumSubHealGesamt(stats) {
     return { healValue: heal, autoRegen: autoR, companion: comp, roundKorr: rrk, gesamt: heal + autoR + comp + rrk };
 }
 
+/** Root: direkt + Auto + Gefährten ohne Rundenkorrektur — einmalige Aggregation (Filter []). */
+function rootHealRawNoRoundKorr(stats) {
+    return (
+        Number(stats.healValue || 0) +
+        Number(stats.autoRegenHealValue || 0) +
+        Number(stats.companionValue || 0)
+    );
+}
+
+/**
+ * Summe aller Runden: ΔHP(Snapshot) − gebuchte (Heilung − Schaden), analog zu applyRoundHpReconciliation.
+ * Vor Reconciliation; muss danach gleich healStats.healRoundBilanzKorrektur (und Sub-rbk-Summe) sein.
+ */
+function computeGrandSnapshotBookingResidual(SE, levelDataArray, wantHeroes) {
+    let grand = 0;
+    const healBooked = SE._bookingRoundHealByKey || {};
+    const dmgBooked = SE._bookingRoundDmgByKey || {};
+    for (let levelNr = 1; levelNr <= levelDataArray.length; levelNr++) {
+        const level = levelDataArray[levelNr - 1];
+        if (!level || !level.areas) continue;
+        level.nr = level.nr || levelNr;
+        for (let areaNr = 1; areaNr <= level.areas.length; areaNr++) {
+            const area = level.areas[areaNr - 1];
+            if (!area) continue;
+            area.nr = area.nr || areaNr;
+            const rounds = area.rounds || [];
+            for (let ri = 0; ri < rounds.length; ri++) {
+                const round = rounds[ri];
+                if (!round) continue;
+                round.nr = round.nr || ri + 1;
+                const rk = SE.roundBookingCompositeKey(level, area, round);
+                const deltaByKey = SE.computeRoundHpDeltaByTargetKey(area, ri, wantHeroes);
+                const hMap = healBooked[rk] || {};
+                const dMap = dmgBooked[rk] || {};
+                const keys = new Set();
+                Object.keys(deltaByKey || {}).forEach(k => keys.add(k));
+                Object.keys(hMap).forEach(k => keys.add(k));
+                Object.keys(dMap).forEach(k => keys.add(k));
+                keys.forEach(k => {
+                    const d = deltaByKey[k] != null ? Number(deltaByKey[k]) : 0;
+                    const h = hMap[k] || 0;
+                    const dm = dMap[k] || 0;
+                    grand += Math.round(d - (h - dm));
+                });
+            }
+        }
+    }
+    return grand;
+}
+
 /** Klon: Vorrunde + Initiative leer (simuliert fehlende Phasen in der Auswertung). */
 function levelDataStripVorrundeInitiative(levelDataOne) {
     const level = levelDataOne[0];
@@ -151,6 +205,22 @@ function collectRoundRegenEffectsForUnit(levelDataOne, roundNr, unitName) {
 
 function hasEffect(effects, pred) {
     return (effects || []).some(e => !!e && pred(e));
+}
+
+function collectAllRegenActions(levelDataOne) {
+    const out = [];
+    const levels = levelDataOne || [];
+    for (const level of levels) {
+        for (const area of (level.areas || [])) {
+            for (let ri = 0; ri < (area.rounds || []).length; ri++) {
+                const round = area.rounds[ri];
+                for (const action of ((round.actions && round.actions.regen) || [])) {
+                    out.push({ level, area, round, action });
+                }
+            }
+        }
+    }
+    return out;
 }
 
 function collectEksRowsForTargetFromStats(stats, roundNr, unitName) {
@@ -230,16 +300,39 @@ function collectEksRowsFromStats(stats) {
     const QF = exp.QueryModel.QueryFilter;
     const unitFilter = [new QF("unit", null)];
 
+    {
+        exp.SearchEngine.resetRoundHpBooking();
+        const healInRaw = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "heal", []), levelArray);
+        const healOutRaw = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "heal_out", []), levelArray);
+        const rin = rootHealRawNoRoundKorr(healInRaw);
+        const rout = rootHealRawNoRoundKorr(healOutRaw);
+        assert(rin === rout, `Helden Heilung erhalten vs. ausgehend (Root, ohne Rundenkorrektur): ${rin} vs. ${rout}`);
+        assert(
+            Number(healOutRaw.healRoundBilanzKorrektur || 0) === 0,
+            "heal_out ohne Reconciliation: healRoundBilanzKorrektur am Root muss 0 sein.",
+        );
+    }
+
     exp.SearchEngine.resetRoundHpBooking();
     const defenseFull = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "defense", unitFilter), levelArray);
     const healFull = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "heal", unitFilter), levelArray);
+    const grandResidualFull = computeGrandSnapshotBookingResidual(exp.SearchEngine, levelArray, true);
     exp.SearchEngine.applyRoundHpReconciliation(levelArray, healFull, defenseFull, true);
+    assert(
+        grandResidualFull === Number(healFull.healRoundBilanzKorrektur || 0),
+        `K05 Snapshot−Buchung: Gesamtrest ${grandResidualFull} muss healRoundBilanzKorrektur ${healFull.healRoundBilanzKorrektur} sein (Helden, voll).`,
+    );
 
     const stripped = levelDataStripVorrundeInitiative(levelArray);
     exp.SearchEngine.resetRoundHpBooking();
     const defenseStripped = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "defense", unitFilter), stripped);
     const healStripped = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "heal", unitFilter), stripped);
+    const grandResidualStrip = computeGrandSnapshotBookingResidual(exp.SearchEngine, stripped, true);
     exp.SearchEngine.applyRoundHpReconciliation(stripped, healStripped, defenseStripped, true);
+    assert(
+        grandResidualStrip === Number(healStripped.healRoundBilanzKorrektur || 0),
+        `K05 Snapshot−Buchung: Gesamtrest ${grandResidualStrip} muss healRoundBilanzKorrektur ${healStripped.healRoundBilanzKorrektur} sein (Helden, gestrippt).`,
+    );
 
     const dFull = sumSubDefenseTotals(defenseFull);
     const dStrip = sumSubDefenseTotals(defenseStripped);
@@ -366,6 +459,12 @@ function collectEksRowsFromStats(stats) {
         `Runde 1 Balor: keine EKS-Heilbuchung erwartet, gefunden: ${JSON.stringify(balorR1HealRows)}`,
     );
 
+    const terkasR5 = collectRoundRegenEffectsForUnit(levelArray, 5, "Terkas");
+    assert(
+        terkasR5.length === 0,
+        `Runde 5 Terkas: ohne effektive HP-Änderung darf keine EKS-Buchung entstehen, gefunden: ${JSON.stringify(terkasR5)}`,
+    );
+
     {
         const SE = exp.SearchEngine;
         const allEksRows = collectEksRowsFromStats(defenseFull).concat(collectEksRowsFromStats(healFull));
@@ -378,6 +477,35 @@ function collectEksRowsFromStats(stats) {
             invalid.length === 0,
             "EKS-Invariante: synthetische Regen-/Status-Buchungen dürfen nur aktive Kampfeinheiten betreffen.",
         );
+    }
+
+    {
+        const SE = exp.SearchEngine;
+        const allRegen = collectAllRegenActions(levelArray);
+        allRegen.forEach(({ level, area, round, action }) => {
+            if (!action || !Array.isArray(action.eksRegenIndirectEffects) || action.eksRegenIndirectEffects.length === 0) return;
+            const net = action.eksRegenIndirectEffects.reduce((sum, e) => {
+                const v = Math.floor(Number((e && e.value) || 0));
+                if (!(v > 0)) return sum;
+                if (e.kind === "heal") return sum + v;
+                if (e.kind === "damage") return sum - v;
+                return sum;
+            }, 0);
+            const expectedNet = (() => {
+                if (action.syntheticRegenBilanzZeile) return 0;
+                if (!action.event) return 0;
+                const v = Math.floor(Number(action.event.value || action.event.loss || 0));
+                if (action.event.kind === "hpgain") return Math.max(0, v);
+                if (action.event.kind === "hploss") return -Math.max(0, v);
+                return 0;
+            })();
+            const tu = (action.targets && action.targets[0] && action.targets[0].unit) || action.unit;
+            const targetName = tu && tu.id && tu.id.name || "?";
+            assert(
+                net === expectedNet,
+                `Regen-Bilanzfehler L${level.nr || 1}.A${area.nr || 1}.R${round.nr || 0} ${targetName}: netto ${net} statt erwartet ${expectedNet}`,
+            );
+        });
     }
 
     const thoramburR2 = collectRoundRegenEffectsForUnit(levelArray, 2, "Thorambur");
