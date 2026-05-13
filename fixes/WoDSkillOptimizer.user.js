@@ -1791,7 +1791,7 @@ class oSkillOptimizerSkills {
                 this.createThrowRows(oSkillObject, oItemObject, oCell, "initiative");
                 break;
             case "rt_powerdown":
-                this.createThrowRows(oSkillObject, oItemObject, oCell, "attacks");
+                this.createThrowRows(oSkillObject, oItemObject, oCell, "powerdown");
                 break;
             case "rt_attack":
                 this.createThrowRows(oSkillObject, oItemObject, oCell, "attacks");
@@ -2866,6 +2866,7 @@ class oSkillOptimizerSkills {
         const oLabel = {
             "healing": "Heilung",
             "attacks": "Angriff",
+            "powerdown": "Debuff",
             "parades": "Parade",
             "initiative": "Initiative",
             "damage": oClassData.oTypes.schadens_typ[sDamageType]
