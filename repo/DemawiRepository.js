@@ -5189,8 +5189,7 @@ class demawiRepository {
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    // Bump when parser output shape changes; Erweiterte Kampfstatistik drops persisted levelData with mismatched dv (#invalidateOldCache).
-    static ReportParserDataVersion = 14;
+    static ReportParserDataVersion = 15;
     static ReportParser = function () {
 
         let warnings;
@@ -6495,7 +6494,7 @@ class demawiRepository {
         return ReportParser;
     }();
 
-    static ItemParserDataVersion = 5;
+    static ItemParserDataVersion = 7;
     static ItemParser = class {
 
         /**
@@ -6630,7 +6629,7 @@ class demawiRepository {
             });
             if (needRewrite.length > 0) {
                 const migration = _.Migration.start("Items werden neu geschrieben", needRewrite.length);
-                console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...");
+                console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...", needRewrite);
                 for (const curItemId of needRewrite) {
                     const sourceItem = await itemSourcesDB.getValue(curItemId);
                     if (sourceItem) {
@@ -6659,6 +6658,7 @@ class demawiRepository {
 
         // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
         static async #writeItemData(item, itemSource) {
+            if(!itemSource.src) return;
             const itemHTMLElement = document.createElement("div");
             itemHTMLElement.innerHTML = itemSource.src;
 
@@ -6673,11 +6673,11 @@ class demawiRepository {
                 item.dv = _.ItemParserDataVersion;
 
                 if (einschraenkungAnwendungen) { // Gegenstandsklasse
-                    console.log("Einschränkung Anwendungen:", einschraenkungAnwendungen);
+                    //console.log("Einschränkung Anwendungen:", einschraenkungAnwendungen);
                     item.data.anw.onlyFor = einschraenkungAnwendungen;
                 }
                 if (einschraenkungWirkungen) { // Gegenstandsklasse
-                    console.log("Einschränkung Wirkung:", einschraenkungWirkungen);
+                    //console.log("Einschränkung Wirkung:", einschraenkungWirkungen);
                     item.effects.target.onlyFor = einschraenkungWirkungen;
                 }
 
@@ -6839,6 +6839,8 @@ class demawiRepository {
             var ownerType;
 
             function getBoniContext(ctxName) {
+                // wirkung geht auch auf den Fertigkeit/Talentklasse-Kontext und trägt sich dort nur mit zusätzlichem Marker ein
+                if(ctxName === "wirkung") ctxName = "fertigkeit";
                 var result = currentOwnerContext[ctxName];
                 if (!result) {
                     result = [];
@@ -6848,6 +6850,7 @@ class demawiRepository {
             }
 
             for (var i = 0, l = div.children.length; i < l; i++) {
+                var nurWirkung = false;
                 const cur = div.children[i];
                 if (cur.tagName === "H2") {
                     ownerType = this.getOwnerType(cur.textContent.trim());
@@ -6879,7 +6882,6 @@ class demawiRepository {
                         case "eigenschaft":
                         case "angriff":
                         case "parade":
-                        case "wirkung":
                         case "beute": // 2-Spalten-Standard
                             this.addBoni(currentBoniContext, tableTRs, curTR => {
                                 const boni = {
@@ -6891,6 +6893,8 @@ class demawiRepository {
                                 return boni;
                             });
                             break;
+                        case "wirkung":
+                            nurWirkung = true;
                         case "fertigkeit":
                             for (const curTR of tableTRs) {
                                 var type = curTR.children[0].textContent.trim();
@@ -6899,11 +6903,14 @@ class demawiRepository {
                                     targetContext = getBoniContext("talentklasse");
                                     type = type.substring(29);
                                 } else {
-                                    targetContext = currentBoniContext;
+                                    targetContext = getBoniContext("fertigkeit");
                                 }
                                 const skill = {
                                     type: type,
                                     bonus: curTR.children[1].textContent.trim(),
+                                }
+                                if(nurWirkung) {
+                                    skill.nurWirkung = true;
                                 }
                                 if (curTR.children.length > 2) skill.dauer = curTR.children[2].textContent.trim();
                                 if (curTR.children.length > 3) skill.bemerkung = curTR.children[3].textContent.trim();
