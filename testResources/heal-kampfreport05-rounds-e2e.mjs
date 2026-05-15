@@ -110,7 +110,7 @@ function sumIndirectReceivedByParty(stats, heroKeys) {
  * Regression: marginale **empfangene** indirekte Heilung der Heldengruppe pro Runde.
  * (Nach Empfänger-Buchung in der EKS; nicht mehr nach Auslöser „atrix“/„Nachtigall“ in sub-Keys.)
  */
-const GOLDEN_PARTY_INDIRECT_RECEIVED_MARGINAL = [2, 10, 23, 36, 48, 52, 70, 19, 19, 16, 22, 24, 20, 24, 20, 19, 17, 13];
+const GOLDEN_PARTY_INDIRECT_RECEIVED_MARGINAL = [2, 10, 48, 29, 32, 53, 70, 19, 10, 12, 22, 24, 16, 18, 18, 15, 11, 11];
 
 (async function main() {
     assert(fs.existsSync(reportPath), "Fixture fehlt: " + reportPath);

@@ -1791,7 +1791,7 @@ class oSkillOptimizerSkills {
                 this.createThrowRows(oSkillObject, oItemObject, oCell, "initiative");
                 break;
             case "rt_powerdown":
-                this.createThrowRows(oSkillObject, oItemObject, oCell, "powerdown");
+                this.createThrowRows(oSkillObject, oItemObject, oCell, "attacks");
                 break;
             case "rt_attack":
                 this.createThrowRows(oSkillObject, oItemObject, oCell, "attacks");

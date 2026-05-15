@@ -25,12 +25,12 @@ const reportPath = path.join(__dirname, "Kampfreport_05_Heilung.html");
 const demawiPath = path.join(repoRoot, "repo", "DemawiRepository.js");
 const eksPath = path.join(repoRoot, "ErweiterteKampfstatistik.user.js");
 
-/** Referenzwerte Stand EKS 0.21.48 + Fixture Kampfreport_05_Heilung.html — bei bewusstem Rebalance anpassen. */
-const GOLDEN_HEROES_DEFENSE_SUM = 572;
+/** Referenzwerte Stand EKS 0.21.77 (Brutto-Kappung an knownWeight nur bei 0 HP) + Fixture Kampfreport_05_Heilung.html. */
+const GOLDEN_HEROES_DEFENSE_SUM = 840;
 /** Summe „Gesamt Heilung“ inkl. healRoundBilanzKorrektur (Statuslisten-ΔHP vs. gebuchte Mengen). */
-const GOLDEN_HEROES_HEAL_SUM = 533;
+const GOLDEN_HEROES_HEAL_SUM = 834;
 /** healValue + Auto-Regen + Gefährten über Helden-Zeilen ohne Bilanzkorrektur — Rohwerte aus dem Bericht. */
-const GOLDEN_HEROES_HEAL_RAW_SUB_ROWS = 566;
+const GOLDEN_HEROES_HEAL_RAW_SUB_ROWS = 801;
 
 function assert(cond, msg) {
     if (!cond) throw new Error(msg || "Assertion failed");
@@ -203,6 +203,31 @@ function collectRoundRegenEffectsForUnit(levelDataOne, roundNr, unitName) {
     return out;
 }
 
+function collectRoundRegenEffectsForUnitKind(levelDataOne, roundNr, unitName, eventKind) {
+    const out = [];
+    const levels = levelDataOne || [];
+    const norm = s => String(s || "").toLowerCase();
+    for (const level of levels) {
+        for (const area of (level.areas || [])) {
+            for (let ri = 0; ri < (area.rounds || []).length; ri++) {
+                const round = area.rounds[ri];
+                const curRoundNr = Number(round && round.nr || (ri + 1));
+                if (curRoundNr !== Number(roundNr)) continue;
+                for (const action of (round.actions && round.actions.regen) || []) {
+                    const tu = (action && action.targets && action.targets[0] && action.targets[0].unit) || (action && action.unit);
+                    if (!tu || !tu.id) continue;
+                    if (norm(tu.id.name) !== norm(unitName)) continue;
+                    const kind = action && action.event && action.event.kind;
+                    if (kind !== eventKind) continue;
+                    const effects = action.eksRegenIndirectEffects || [];
+                    effects.forEach(e => out.push(e));
+                }
+            }
+        }
+    }
+    return out;
+}
+
 function hasEffect(effects, pred) {
     return (effects || []).some(e => !!e && pred(e));
 }
@@ -351,6 +376,143 @@ function collectEksRowsFromStats(stats) {
     assert(hFull.gesamt === GOLDEN_HEROES_HEAL_SUM, `Helden-Heilung Gesamt: erwartet ${GOLDEN_HEROES_HEAL_SUM}, ist ${hFull.gesamt}`);
 
     {
+        const round2 = levelArray[0].areas[0].rounds[1];
+        let r2HeroRegenDamageBrutto = 0;
+        for (const a of round2.actions.regen || []) {
+            const tu = (a.targets && a.targets[0] && a.targets[0].unit) || a.unit;
+            if (!tu || !tu.id || !tu.id.isHero) continue;
+            for (const e of a.eksRegenIndirectEffects || []) {
+                if (e && e.kind === "damage") r2HeroRegenDamageBrutto += Math.floor(Number(e.value || 0));
+            }
+        }
+        assert(
+            r2HeroRegenDamageBrutto === 36,
+            `K05 Runde 2: Summe indirekter Schaden (EKS Brutto, Helden-Regen) erwartet 36, ist ${r2HeroRegenDamageBrutto}`,
+        );
+    }
+
+    {
+        exp.SearchEngine.resetRoundHpBooking();
+        const roundF = [new QF("unit", null), new QF("round", "L1.K1.R4")];
+        const defR4 = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "defense", roundF), levelArray);
+        let r4Indirect = 0;
+        for (const row of Object.values(defR4.sub || {})) {
+            if (!row || typeof row !== "object") continue;
+            r4Indirect += Number(row.indirectValue || 0);
+        }
+        assert(
+            r4Indirect === 27,
+            `K05 Runde 4 Helden indirekt Brutto-Gesang: 3×9 — ist ${r4Indirect}`,
+        );
+    }
+
+    {
+        const calR4 = collectRoundRegenEffectsForUnit(levelArray, 4, "Calanthus 巫女 (Al)");
+        assert(
+            calR4.length > 0,
+            `K05 Runde 4 Calanthus: mploss-Regenzeile braucht EKS-Tooltip (indirekte Schaden/Heilung) — ${calR4.length} Effekte`,
+        );
+        let dSum = 0;
+        let hSum = 0;
+        for (const e of calR4) {
+            const v = Math.floor(Number((e && e.value) || 0));
+            if (!(v > 0)) continue;
+            if (e.kind === "damage") dSum += v;
+            else if (e.kind === "heal") hSum += v;
+        }
+        assert(
+            dSum === hSum && dSum > 0,
+            `K05 R4 Calanthus mploss: indirekter Schaden (${dSum}) und indirekte Heilung (${hSum}) müssen gleich sein.`,
+        );
+        assert(
+            hasEffect(calR4, e =>
+                e.kind === "damage" &&
+                Number(e.value || 0) === 9 &&
+                /gesang des hohnes/i.test(String(e.sourceName || "")),
+            ),
+            "K05 R4 Calanthus: Brutto-DoT bleibt 9 (Gesang des Hohnes).",
+        );
+        assert(
+            hasEffect(calR4, e =>
+                e.kind === "heal" &&
+                Number(e.value || 0) === 8 &&
+                /vorbeugende heilung/i.test(String(e.sourceName || "")),
+            ),
+            "K05 R4 Calanthus: Vorbeugende Heilung 8 (HoT-Zuweisung unverändert).",
+        );
+        assert(
+            hasEffect(calR4, e => e.kind === "heal" && Number(e.value || 0) === 1 && e.role === "remainder_auto"),
+            "K05 R4 Calanthus: fehlendes 1 HP zur Bilanz mit DoT als Auto-Regeneration (remainder_auto).",
+        );
+    }
+
+    {
+        const borexR4 = collectRoundRegenEffectsForUnit(levelArray, 4, "Borex");
+        let dSum = 0;
+        let hSum = 0;
+        for (const e of borexR4) {
+            const v = Math.floor(Number((e && e.value) || 0));
+            if (!(v > 0)) continue;
+            if (e.kind === "damage") dSum += v;
+            else if (e.kind === "heal") hSum += v;
+        }
+        assert(
+            borexR4.length === 0 && dSum === 0 && hSum === 0,
+            `K05 R4 Borex mploss (Nachtigall-Zeile): ohne indirekten Schaden darf kein indirektes Heil im Tooltip stehen — ${borexR4.length} Effekte, dmg ${dSum} heal ${hSum}`,
+        );
+    }
+
+    // mploss-Zeile: nibora wird in derselben Runde auch durch Vorbeugende Heilung (+8 HP) gebufft.
+    // Damit darf der komplette Heil-Anteil nicht als remainder_auto landen.
+    {
+        const nibR6 = collectRoundRegenEffectsForUnitKind(levelArray, 6, "nibora regaj", "mploss");
+        // (Keine Debug-Ausgaben: Fixture liefert bereits genug für den Invarianz-Check.)
+        let dSum = 0;
+        let hSum = 0;
+        for (const e of nibR6) {
+            const v = Math.floor(Number((e && e.value) || 0));
+            if (!(v > 0)) continue;
+            if (e.kind === "damage") dSum += v;
+            else if (e.kind === "heal") hSum += v;
+        }
+        assert(dSum === 9 && hSum === 9, `K05 Runde 6 nibora: erwartet dmg 9 und heal 9 im mploss-Tooltip, ist dmg ${dSum} heal ${hSum}`);
+        assert(
+            hasEffect(nibR6, e => e.kind === "damage" && Number(e.value || 0) === 9),
+            "K05 Runde 6 nibora: erwarteter Gesang-Schaden 9 fehlt.",
+        );
+        assert(
+            hasEffect(
+                nibR6,
+                e =>
+                    e.kind === "heal" &&
+                    e.role === "attributed_split" &&
+                    Number(e.value || 0) === 8 &&
+                    /vorbeugende heilung/i.test(String(e.sourceName || "")),
+            ),
+            "K05 Runde 6 nibora: erwartete +8 Heilung aus Vorbeugender Heilung fehlt oder landet nicht als attributed_split.",
+        );
+        assert(
+            hasEffect(nibR6, e => e.kind === "heal" && e.role === "remainder_auto" && Number(e.value || 0) === 1),
+            "K05 Runde 6 nibora: erwartete remainder_auto +1 (Auto-Regeneration) fehlt.",
+        );
+    }
+
+    {
+        exp.SearchEngine.resetRoundHpBooking();
+        const roundF = [new QF("unit", null), new QF("round", "L1.K1.R3")];
+        const defR3 = exp.SearchEngine.doQuery(new exp.QueryModel.StatQuery("heroes", "defense", roundF), levelArray);
+        let r3Indirect = 0;
+        for (const row of Object.values(defR3.sub || {})) {
+            if (!row || typeof row !== "object") continue;
+            r3Indirect += Number(row.indirectValue || 0);
+        }
+        assert(
+            r3Indirect === 54,
+            `K05 Runde 3 Helden indirekt Brutto-Gesang: 6×9 — ist ${r3Indirect}`,
+        );
+    }
+
+    {
         const SE = exp.SearchEngine;
         const round3 = levelArray[0].areas[0].rounds[2];
         const thor = (round3.helden || []).find(u => u && u.id && u.id.name === "Thorambur");
@@ -484,6 +646,22 @@ function collectEksRowsFromStats(stats) {
         const allRegen = collectAllRegenActions(levelArray);
         allRegen.forEach(({ level, area, round, action }) => {
             if (!action || !Array.isArray(action.eksRegenIndirectEffects) || action.eksRegenIndirectEffects.length === 0) return;
+            /** MP-Zeilen: Tooltip nur konsistente DoT/HoT-Überlappung (Summe Schaden = Summe Heilung). */
+            if (action.event && action.event.kind === "mploss") {
+                let dSum = 0;
+                let hSum = 0;
+                for (const e of action.eksRegenIndirectEffects) {
+                    const v = Math.floor(Number((e && e.value) || 0));
+                    if (!(v > 0)) continue;
+                    if (e.kind === "damage") dSum += v;
+                    else if (e.kind === "heal") hSum += v;
+                }
+                assert(
+                    dSum === hSum,
+                    `mploss L${level.nr || 1}.A${area.nr || 1}.R${round.nr || 0}: Tooltip indirekt ${dSum} Schaden vs. ${hSum} Heilung`,
+                );
+                return;
+            }
             const net = action.eksRegenIndirectEffects.reduce((sum, e) => {
                 const v = Math.floor(Number((e && e.value) || 0));
                 if (!(v > 0)) return sum;

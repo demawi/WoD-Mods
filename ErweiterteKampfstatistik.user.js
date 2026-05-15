@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.66
+// @version        0.21.81
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -722,6 +722,44 @@
             return (level && level.nr ? level.nr : 1) + "|" + (area && area.nr ? area.nr : 1) + "|" + (round && round.nr ? round.nr : 0);
         }
 
+        /** Sub-Id für dynamischen Filter „Kampf“ (Schema L#.K#). */
+        static fightFilterSubId(levelNr, areaNr) {
+            return "L" + (levelNr || 1) + ".K" + (areaNr || 1);
+        }
+
+        /** Sub-Id für dynamischen Filter „Runde“ (Schema L#.K#.R#). */
+        static roundFilterSubId(levelNr, areaNr, roundNr) {
+            return "L" + (levelNr || 1) + ".K" + (areaNr || 1) + ".R" + (roundNr || 0);
+        }
+
+        /**
+         * Sortiert dynamische Filter-Optionen (subIds): L#.K#.R# chronologisch nach Level, Kampf, Runde;
+         * L#.K# nach Level und Kampf; sonst numerisch vergleichende localeSort.
+         */
+        static sortFilterSelectionSubIds(keys) {
+            if (!keys || keys.length === 0) return keys;
+            const parseLKR = id => {
+                const m = /^L(\d+)\.K(\d+)\.R(\d+)$/.exec(id);
+                if (m) return { l: +m[1], k: +m[2], r: +m[3], mode: "round" };
+                const m2 = /^L(\d+)\.K(\d+)$/.exec(id);
+                if (m2) return { l: +m2[1], k: +m2[2], r: 0, mode: "fight" };
+                return null;
+            };
+            return keys.slice().sort((a, b) => {
+                const pa = parseLKR(a);
+                const pb = parseLKR(b);
+                if (pa && pb) {
+                    if (pa.l !== pb.l) return pa.l - pb.l;
+                    if (pa.k !== pb.k) return pa.k - pb.k;
+                    if (pa.mode === "round" && pb.mode === "round") return pa.r - pb.r;
+                    return 0;
+                }
+                if (pa && !pb) return -1;
+                if (!pa && pb) return 1;
+                return ("" + a).localeCompare("" + b, undefined, { numeric: true, sensitivity: "base" });
+            });
+        }
+
         /**
          * Ein Eintrag der EKS-Anreicherung pro Regenerationszeile (Parser-Rohzeile bzw. abgeleitetes virtualAction).
          * Keine DOM-Objekte — nur JSON-taugliche Metadaten für Filter/Summen.
@@ -743,7 +781,7 @@
         }
 
         /** Gleiche Verteilungslogik wie HoT-Zuweisung in distributeHealPool — nur Liste, keine Statistik. */
-        static buildIndirectHealEffectListForTarget(round, targetUnit, reportHealFloat, effectSourceHistory, observedMaxHpByUnitKey) {
+        static buildIndirectHealEffectListForTarget(round, targetUnit, reportHealFloat, effectSourceHistory, observedMaxHpByUnitKey, skipNominalCap) {
             const healIntTotal = this.computeIndirectHealPoolTotal(round, targetUnit, reportHealFloat, effectSourceHistory, observedMaxHpByUnitKey);
             if (!(healIntTotal > 0)) return [];
             const contributionContext = this.resolveHpHealContributors(round, targetUnit, effectSourceHistory);
@@ -753,10 +791,12 @@
             let attributions = assignableInt > 0
                 ? this.integerizeProportionalShares(assignableInt, attributionsRaw)
                 : attributionsRaw.map(a => Object.assign({}, a, { value: 0 }));
-            attributions = this.capIndirectHealAttributionsByNominalWeight(attributions, contributionContext);
-            const attributedSum = attributions.reduce((s, a) => s + Number(a.value || 0), 0);
+            if (!skipNominalCap) {
+                attributions = this.capIndirectHealAttributionsByNominalWeight(attributions, contributionContext);
+            }
+            const attributedSumInt = attributions.reduce((s, a) => s + Math.max(0, Math.round(Number(a.value || 0))), 0);
             const out = [];
-            if (attributions.length === 0 || !(attributedSum > 0)) {
+            if (attributions.length === 0 || !(attributedSumInt > 0)) {
                 out.push(this.eksRegenIndirectEffect("heal", healIntTotal, "auto_regeneration", {
                     sourceName: "(Regeneration)",
                     sourceTypeRef: this.ensureSkillTypeRef("(Regeneration)", null),
@@ -765,7 +805,7 @@
                 return out;
             }
             attributions.forEach(a => {
-                const v = Math.floor(Number(a.value || 0));
+                const v = Math.max(0, Math.round(Number(a.value || 0)));
                 if (!(v > 0)) return;
                 out.push(this.eksRegenIndirectEffect("heal", v, "attributed_split", {
                     contributorTargetKey: a.unit ? this.getTargetUnitKey(a.unit) : null,
@@ -775,7 +815,7 @@
                     skillType: a.skillType,
                 }));
             });
-            const remainder = Math.max(0, healIntTotal - attributedSum);
+            const remainder = Math.max(0, healIntTotal - attributedSumInt);
             if (remainder > 0) {
                 out.push(this.eksRegenIndirectEffect("heal", remainder, "remainder_auto", {
                     sourceName: "(Regeneration)",
@@ -799,9 +839,10 @@
                 }));
                 return out;
             }
-            const attributionsRaw = this.splitHpLossDamageByContributors(hpv, contributionContext);
+            const capBrutto = this.shouldCapIndirectBruttoDamageToKnownWeight(targetUnit);
+            const attributionsRaw = this.splitHpLossDamageByContributors(hpv, contributionContext, capBrutto);
             const knownW = contributionContext.knownWeight || 0;
-            const assignableDamage = Math.min(hpv, knownW);
+            const assignableDamage = capBrutto ? Math.min(hpv, knownW) : hpv;
             const assignableInt = Math.floor(assignableDamage);
             const attributions = assignableInt > 0
                 ? this.integerizeProportionalShares(assignableInt, attributionsRaw)
@@ -831,21 +872,104 @@
         }
 
         /**
+         * Skaliert EKS-Effektzeilen einer Art proportional auf eine neue Ganzzahl-Summe (Tooltip-Kohärenz).
+         */
+        static scaleEksIndirectPartsToTotal(parts, newTotal) {
+            const arr = (parts || [])
+                .filter(e => e && Math.floor(Number(e.value || 0)) > 0)
+                .map(e => Object.assign({}, e));
+            const old = arr.reduce((s, e) => s + Math.floor(Number(e.value || 0)), 0);
+            const nt = Math.floor(Math.max(0, newTotal));
+            if (nt <= 0 || old <= 0) return [];
+            if (nt === old) return arr;
+            let acc = 0;
+            const out = [];
+            for (let i = 0; i < arr.length; i++) {
+                const v = Math.floor(Number(arr[i].value || 0));
+                const nv = i === arr.length - 1 ? nt - acc : Math.floor((v * nt) / old);
+                acc += nv;
+                if (nv > 0) out.push(Object.assign({}, arr[i], { value: nv }));
+            }
+            return out;
+        }
+
+        /**
+         * Ohne Parser-+HP in der Zeile (mploss, synthetische Bilanz): Brutto-DoT bleibt unverändert; die
+         * indirekte Heil-Summe wird angeglichen — fehlende HP über **Auto-Regeneration** (remainder_auto),
+         * überschüssige HoT-Anteile proportional auf den Schaden gekappt. Ohne Schaden-Komponente keine Heil-Zeilen.
+         */
+        static reconcileRegenIndirectTooltipDamageHealNoReportedHpHeal(damageEffects, healEffects) {
+            const dParts = (damageEffects || []).filter(e => e && e.kind === "damage");
+            const hParts = (healEffects || []).filter(e => e && e.kind === "heal");
+            const dSum = dParts.reduce((s, e) => s + Math.floor(Number(e.value || 0)), 0);
+            const hSum = hParts.reduce((s, e) => s + Math.floor(Number(e.value || 0)), 0);
+            if (!(dSum > 0)) return [];
+            const outD = dParts.map(e => Object.assign({}, e));
+            let outH;
+            if (hSum > dSum) {
+                outH = this.scaleEksIndirectPartsToTotal(hParts, dSum);
+            } else {
+                outH = hParts.map(e => Object.assign({}, e));
+                const gap = dSum - hSum;
+                if (gap > 0) {
+                    let merged = false;
+                    for (let i = 0; i < outH.length; i++) {
+                        if (outH[i].role === "remainder_auto") {
+                            const v = Math.floor(Number(outH[i].value || 0));
+                            outH[i] = Object.assign({}, outH[i], { value: v + gap });
+                            merged = true;
+                            break;
+                        }
+                    }
+                    if (!merged) {
+                        outH.push(
+                            this.eksRegenIndirectEffect("heal", gap, "remainder_auto", {
+                                sourceName: "(Regeneration)",
+                                sourceTypeRef: this.ensureSkillTypeRef("(Regeneration)", null),
+                                skillType: "Unbekannt",
+                            }),
+                        );
+                    }
+                }
+            }
+            return outD.concat(outH);
+        }
+
+        /**
          * Pro Parser-Zeile in round.actions.regen: indirekte Anteile + Auslöser-Metadaten.
          * Wird einmalig gesetzt — Folge-Aufrufe überspringen bei gesetztem Flag.
          */
+        /**
+         * Brutto-Gesang-DoT als EKS-Liste, wenn keine Parser-Regen-hploss-Zeile für das Ziel existiert
+         * (gleiche Logik wie synthetische Bilanz / mploss-Zeilen).
+         */
+        static buildGesangBruttoDamageEffectsForRegenIfApplicable(round, targetUnit, effectSourceHistory) {
+            if (!round || !targetUnit || !targetUnit.id) return [];
+            if (!this.isUnitEligibleForRegenBooking(targetUnit)) return [];
+            if (this.hasRoundRegenHpLossForTarget(round, targetUnit)) return [];
+            const gesangNom = Math.floor(Math.max(0, this.gesangDesHohnesStatusLossBudget(round, targetUnit)));
+            if (!(gesangNom > 0)) return [];
+            const lossCtx = this.resolveHpLossContributorsAugmented(round, targetUnit, effectSourceHistory);
+            if (!lossCtx || !(Number(lossCtx.knownWeight || 0) > 0)) return [];
+            const grossDamage = Math.max(
+                gesangNom,
+                Math.floor(Math.max(0, Number(lossCtx.knownWeight || 0))),
+            );
+            if (!(grossDamage > 0)) return [];
+            return this.buildIndirectDamageEffectListForLoss(round, targetUnit, grossDamage, effectSourceHistory);
+        }
+
         static buildRegenIndirectEffectsListForParserAction(action, level, area, round, effectSourceHistory, observedMaxHpByUnitKey) {
             if (!action) return [];
             if (action.syntheticRegenBilanzZeile) {
-                // Wie hpgain mit Wert 0: gleichzeitiger DoT wird nur gebucht, wenn keine echte hploss-Zeile
-                // für dieselbe Einheit in derselben Regenerationsphase existiert.
                 const targetUnit = (action.targets && action.targets[0] && action.targets[0].unit) || action.unit;
                 if (!targetUnit || !targetUnit.id) return [];
                 if (!this.isUnitEligibleForRegenBooking(targetUnit)) return [];
                 const hpHealValue = 0;
-                const canSynthesizeDamage = !this.hasRoundRegenHpLossForTarget(round, targetUnit);
-                const lossCtx = canSynthesizeDamage ? this.resolveHpLossContributorsAugmented(round, targetUnit, effectSourceHistory) : null;
-                const grossDamage = canSynthesizeDamage ? Math.floor(Math.max(0, Number(lossCtx && lossCtx.knownWeight || 0))) : 0;
+                const damageEffects = this.buildGesangBruttoDamageEffectsForRegenIfApplicable(round, targetUnit, effectSourceHistory);
+                const grossDamage = damageEffects.length
+                    ? damageEffects.reduce((s, e) => s + (e && e.kind === "damage" ? Math.floor(Number(e.value || 0)) : 0), 0)
+                    : 0;
                 if (!(grossDamage > 0)) return [];
                 const grossHeal = Math.floor(Math.max(0, hpHealValue)) + grossDamage;
                 const healEffects = this.buildIndirectHealEffectListForTarget(
@@ -855,14 +979,7 @@
                     effectSourceHistory,
                     observedMaxHpByUnitKey,
                 );
-                if (!(grossDamage > 0)) return healEffects;
-                const damageEffects = this.buildIndirectDamageEffectListForLoss(
-                    round,
-                    targetUnit,
-                    grossDamage,
-                    effectSourceHistory,
-                );
-                return damageEffects.concat(healEffects);
+                return this.reconcileRegenIndirectTooltipDamageHealNoReportedHpHeal(damageEffects, healEffects);
             }
             if (action.event && action.event.kind === "hploss") {
                 const targetUnit = (action.targets && action.targets[0] && action.targets[0].unit) || action.unit;
@@ -915,6 +1032,86 @@
                     effectSourceHistory,
                 );
                 return damageEffects.concat(healEffects);
+            }
+            /** Nur MP (o.ä.): trotzdem dieselben indirekten HP-Effekte wie in der Bilanz (Gesang-Brutto + HoT-Pool ohne +HP-Zeile). */
+            if (action.event && action.event.kind === "mploss") {
+                const targetUnit = (action.targets && action.targets[0] && action.targets[0].unit) || action.unit;
+                if (!targetUnit || !targetUnit.id) return [];
+                if (!this.isUnitEligibleForRegenBooking(targetUnit)) return [];
+                const damageEffects = this.buildGesangBruttoDamageEffectsForRegenIfApplicable(round, targetUnit, effectSourceHistory);
+                // mploss-Zeilen werden in enrichRegenerationRowsForArea vor Initiative/Hauptrunde angereichert.
+                // Für direkte Status-Buffs der späteren Phase (z.B. Vorbeugende Heilung in derselben Runde)
+                // müssen wir die Heal-Contributors aber mit diesen Quellen auflösen.
+                const localEffectSourceHistory = JSON.parse(JSON.stringify(effectSourceHistory || {}));
+                this.registerInitiativeAndRundeEffectSourcesOnly(localEffectSourceHistory, round);
+                const healPool = this.computeIndirectHealPoolTotal(round, targetUnit, 0, localEffectSourceHistory, observedMaxHpByUnitKey);
+                let healEffects =
+                    healPool > 0
+                        ? this.buildIndirectHealEffectListForTarget(
+                            round,
+                            targetUnit,
+                            0,
+                            localEffectSourceHistory,
+                            observedMaxHpByUnitKey,
+                            true,
+                        )
+                        : [];
+
+                // Wenn der gesamte HoT-Anteil im mploss-Tooltip zu remainder_auto „verschwindet“,
+                // sondern wir aber HoT-Contributors aus dem Status rekonstruieren können, müssen wir
+                // daraus wieder einen attributed_split herstellen (statt Auto-Regeneration zu erfinden).
+                const hasAnyAttributedHeal = (healEffects || []).some(e => e && e.kind === "heal" && e.role === "attributed_split" && Number(e.value || 0) > 0);
+                if (!hasAnyAttributedHeal) {
+                    const dSum = (damageEffects || []).reduce((s, e) => (e && e.kind === "damage" ? s + Math.floor(Number(e.value || 0)) : s), 0);
+                    const hSum = (healEffects || []).reduce((s, e) => (e && e.kind === "heal" ? s + Math.floor(Number(e.value || 0)) : s), 0);
+                    const ctx = this.resolveHpHealContributors(round, targetUnit, localEffectSourceHistory);
+                    const contributors = (ctx && ctx.contributors ? ctx.contributors : []).filter(c => c && c.unit);
+                    const groups = new Map();
+                    contributors.forEach(c => {
+                        const w = Math.max(0, Number(c.weight || 0));
+                        const srcName = (c.sourceName ? String(c.sourceName) : "Persistenter Effekt").trim();
+                        const key = this.normalizeEffectSourceName(srcName) || srcName.toLowerCase();
+                        const g = groups.get(key) || { sourceName: srcName, w: 0, bestC: c };
+                        g.w += w;
+                        if (w > Math.max(0, Number(g.bestC && g.bestC.weight || 0))) g.bestC = c;
+                        groups.set(key, g);
+                    });
+                    let bestG = null;
+                    for (const g of groups.values()) {
+                        if (!bestG || g.w > bestG.w) bestG = g;
+                    }
+                    const bestW = bestG ? Math.max(0, Math.round(bestG.w || 0)) : 0;
+                    if (bestW > 0 && dSum > 0 && hSum > 0) {
+                        const attrib = Math.min(bestW, dSum);
+                        const remainder = Math.max(0, hSum - attrib);
+                        const bestSource = bestG && bestG.sourceName ? String(bestG.sourceName) : "Persistenter Effekt";
+                        const label = /fröhlicher\s+gesang/i.test(bestSource) ? "Vorbeugende Heilung" : bestSource;
+                        const newHealEffects = [];
+                        if (attrib > 0) {
+                            newHealEffects.push(
+                                this.eksRegenIndirectEffect("heal", attrib, "attributed_split", {
+                                    contributorTargetKey: bestG.bestC && bestG.bestC.unit ? this.getTargetUnitKey(bestG.bestC.unit) : null,
+                                    contributorUnitName: bestG.bestC && bestG.bestC.unit && bestG.bestC.unit.id ? bestG.bestC.unit.id.name : null,
+                                    sourceName: label,
+                                    sourceTypeRef: this.ensureSkillTypeRef(label, null),
+                                    skillType: bestG.bestC && bestG.bestC.skillType ? bestG.bestC.skillType : "Unbekannt",
+                                }),
+                            );
+                        }
+                        if (remainder > 0) {
+                            newHealEffects.push(
+                                this.eksRegenIndirectEffect("heal", remainder, "remainder_auto", {
+                                    sourceName: "(Regeneration)",
+                                    sourceTypeRef: this.ensureSkillTypeRef("(Regeneration)", null),
+                                    skillType: "Unbekannt",
+                                }),
+                            );
+                        }
+                        healEffects = newHealEffects;
+                    }
+                }
+
+                return this.reconcileRegenIndirectTooltipDamageHealNoReportedHpHeal(damageEffects, healEffects);
             }
             return [];
         }
@@ -1166,7 +1363,7 @@
                 this.registerVorrundeEffectSourcesOnly(effectSourceHistory, round);
 
                 const regenActions = this.buildRegenActionsWithSynthetics(round, level, currentArea);
-                // Synthetische Bilanzzeilen (ohne Parser-Event) brauchen ein eigenes Indirekteffekte-Listing.
+                /** Synthetische Bilanz-Platzhalter: indirekte Effekte wie Parser (u.a. Brutto-Gesang aus Status-Gruppe). */
                 (regenActions || []).forEach(act => {
                     if (!act || !act.syntheticRegenBilanzZeile) return;
                     act.eksRegenIndirectEffects = this.buildRegenIndirectEffectsListForParserAction(
@@ -1778,9 +1975,27 @@
             "fight": {
                 name: "Kampf",
                 apply: (filterCfg, curStats, queryFilter, action, target, statTarget) => {
-                    let subStats = SearchEngine.getStat(curStats, queryFilter, action.level.nr + "_" + action.area.nr, "sub", "fight");
+                    const levelNr = action.level && action.level.nr ? action.level.nr : 1;
+                    const areaNr = action.area && action.area.nr ? action.area.nr : 1;
+                    const id = SearchEngine.fightFilterSubId(levelNr, areaNr);
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, id, "sub", "fight");
                     if (!subStats) return false;
-                    subStats.title = "Kampf " + action.level.nr + "." + action.area.nr + "<br>(" + action.area.rounds.length + " Runden)";
+                    subStats.title = "Kampf " + levelNr + "." + areaNr + "<br>(" + action.area.rounds.length + " Runden)";
+                    return subStats;
+                }
+            },
+            "round": {
+                name: "Runde",
+                apply: (statRoot, curStats, queryFilter, action, target, statTarget) => {
+                    if (!action || !action.round) return false;
+                    const levelNr = action.level && action.level.nr ? action.level.nr : 1;
+                    const areaNr = action.area && action.area.nr ? action.area.nr : 1;
+                    const roundNr = action.round.nr || 0;
+                    if (!roundNr) return false;
+                    const id = SearchEngine.roundFilterSubId(levelNr, areaNr, roundNr);
+                    let subStats = SearchEngine.getStat(curStats, queryFilter, id, "sub", "round");
+                    if (!subStats) return false;
+                    subStats.title = "Runde " + roundNr + "<br>(Kampf " + levelNr + "." + areaNr + ")";
                     return subStats;
                 }
             },
@@ -2073,6 +2288,22 @@
             return sum;
         }
 
+        /** Nur Gesang des Hohnes: WoD legt den Fertigkeitsnamen als **Gruppen-quelle**, Einzeleffekte heißen z.B. „Heilung Hitpoints“. */
+        static gesangDesHohnesStatusLossBudget(round, targetUnit) {
+            const statusUnit = this.getRoundStatusUnit(round, targetUnit);
+            if (!statusUnit || !statusUnit.fx) return 0;
+            const isGesangQuelle = q => /gesang\s+des\s+hohn(es)?/i.test("" + (q || "").trim());
+            let sum = 0;
+            for (let i = 0; i < statusUnit.fx.length; i++) {
+                const group = statusUnit.fx[i];
+                if (!group || !isGesangQuelle(group.quelle)) continue;
+                (group.fx || []).forEach(effect => {
+                    sum += this.parseHpLossFromWirkung(effect);
+                });
+            }
+            return sum;
+        }
+
         static hasRoundRegenHpLossForTarget(round, targetUnit) {
             if (!round || !targetUnit || !targetUnit.id) return false;
             const targetKey = this.getTargetUnitKey(targetUnit);
@@ -2082,6 +2313,84 @@
                 if (!tu || !tu.id) return false;
                 return this.getTargetUnitKey(tu) === targetKey;
             });
+        }
+
+        /**
+         * Ergänzt `hpLossEvents` um **Brutto**-DoT (nominal aus Status/Historie), wenn es keine geparste Regen-**hploss**-Zeile
+         * für diese Einheit gibt — z.B. nur mploss/hpgain oder synthetische Bilanz-Platzhalter ohne Parser-Verlust.
+         * Bereits eingetragene Ziele (echtes hploss oder hpgain→synthetisches hploss) werden per Zielschlüssel dedupliziert.
+         */
+        static appendBruttoRegenHpLossEventsForTargetsWithoutParsedLoss(hpLossEvents, round, units, effectSourceHistory, level, area) {
+            if (!hpLossEvents || !round || !units) return;
+            const keys = new Set();
+            for (let i = 0; i < hpLossEvents.length; i++) {
+                const ev = hpLossEvents[i];
+                const tu = (ev.targets && ev.targets[0] && ev.targets[0].unit) || ev.unit;
+                if (tu && tu.id) keys.add(this.getTargetUnitKey(tu));
+            }
+            for (let i = 0; i < units.length; i++) {
+                const unit = units[i];
+                if (!unit || !unit.id) continue;
+                if (!this.isUnitEligibleForRegenBooking(unit)) continue;
+                const tk = this.getTargetUnitKey(unit);
+                if (keys.has(tk)) continue;
+                if (this.hasRoundRegenHpLossForTarget(round, unit)) continue;
+                const gesangNom = Math.floor(Math.max(0, this.gesangDesHohnesStatusLossBudget(round, unit)));
+                if (!(gesangNom > 0)) continue;
+                const lossCtx = this.resolveHpLossContributorsAugmented(round, unit, effectSourceHistory);
+                if (!lossCtx || !(Number(lossCtx.knownWeight || 0) > 0)) continue;
+                const gross = Math.max(
+                    gesangNom,
+                    Math.floor(Math.max(0, Number(lossCtx.knownWeight || 0))),
+                );
+                if (!(gross > 0)) continue;
+                hpLossEvents.push({
+                    unit: unit,
+                    targets: [{ unit: unit, typ: "Hitpoints" }],
+                    level: level,
+                    area: area,
+                    round: round,
+                    type: "regen",
+                    event: { kind: "hploss", resource: "HP", value: gross },
+                    syntheticBruttoRegenHploss: true,
+                    src: "<tr><td></td><td>" + this.getDisplayUnitName(unit) + " - indirekter Brutto-DoT (Status) " + gross + " HP (Regeneration)</td></tr>",
+                });
+                keys.add(tk);
+            }
+        }
+
+        /**
+         * Zusätzlicher Heil-Pool aus hploss-Zeile: max(nominaler DoT, gemeldeter Verlust) − gemeldeter Verlust
+         * (gleiche Logik wie healOffset in buildRegenIndirectEffectsListForParserAction). Gehört in denselben
+         * distributeHealPool-Aufruf wie die hpgain-Zeile — sonst doppelte HoT-Zuschreibung.
+         */
+        static computeRegenHpLossHealOffsetForTarget(round, targetUnit, effectSourceHistory) {
+            if (!round || !targetUnit || !targetUnit.id) return 0;
+            if (!this.isUnitEligibleForRegenBooking(targetUnit)) return 0;
+            const heroBase = n =>
+                ("" + (n || "")).replace(/\s+/g, " ").trim().split(",")[0].trim().toLowerCase();
+            const base = heroBase(targetUnit.id.name);
+            let hpLossValue = 0;
+            let found = false;
+            (round.actions.regen || []).forEach(a => {
+                if (!a || !a.event || a.event.kind !== "hploss") return;
+                const tu = (a.targets && a.targets[0] && a.targets[0].unit) || a.unit;
+                if (!tu || !tu.id || !targetUnit.id) return;
+                if (!!tu.id.isHero !== !!targetUnit.id.isHero) return;
+                if (heroBase(tu.id.name) !== base) return;
+                const v = Math.floor(Math.max(0, Number(a.event.value || a.event.loss || 0)));
+                if (!found || v > hpLossValue) {
+                    found = true;
+                    hpLossValue = v;
+                }
+            });
+            if (!found) return 0;
+            const lossCtx = this.resolveHpLossContributorsAugmented(round, targetUnit, effectSourceHistory);
+            const grossDamage = Math.max(
+                hpLossValue,
+                Math.floor(Math.max(0, Number(lossCtx && lossCtx.knownWeight || 0))),
+            );
+            return Math.max(0, grossDamage - hpLossValue);
         }
 
         /**
@@ -2171,6 +2480,16 @@
                 return {current: current, max: current};
             }
             return {current: 0, max: 0};
+        }
+
+        /**
+         * Indirekter Brutto-Schaden (DoT/Status) darf an die summierte bekanntere DoT-Menge nur gekappt werden,
+         * wenn das Ziel **0 HP** hat — sonst immer 100 % Brutto in Zuschreibung und Buchung.
+         */
+        static shouldCapIndirectBruttoDamageToKnownWeight(unit) {
+            if (!unit) return false;
+            const snap = this.parseHpSnapshotValue(unit.hp);
+            return snap.max > 0 && snap.current <= 0;
         }
 
         static getDirectHealingPotential(action, target) {
@@ -2968,20 +3287,26 @@
                     (sameUnit.length === 1 ? sameUnit[0] : null);
                 if (!match) match = sameUnit.find(c => norm(c.sourceName) === aNorm);
                 if (!match) return a;
-                const cap = Math.floor(Math.max(0, Number(match.weight) || 0));
+                const capFloat = Math.max(0, Number(match.weight) || 0);
+                // Wenn der Anteil rechnerisch >0, aber <1 ist, darf floor(…) das Cap nicht zu 0 machen,
+                // sonst „verschwindet“ indirekte Heilung komplett in remainder_auto.
+                let cap = Math.floor(capFloat);
+                if (cap === 0 && capFloat > 0) cap = 1;
                 const v = Math.floor(Number(a.value || 0));
                 return Object.assign({}, a, { value: Math.min(v, cap) });
             });
         }
 
-        static splitHpLossDamageByContributors(damageValue, contributionContext) {
+        static splitHpLossDamageByContributors(damageValue, contributionContext, capAssignableToKnownWeight) {
             if (!(damageValue > 0) || !contributionContext || !contributionContext.contributors || contributionContext.contributors.length === 0) return [];
             const contributors = contributionContext.contributors;
             const knownWeight = contributionContext.knownWeight || 0;
             const totalWeight = contributionContext.totalWeight || 0;
             if (!(knownWeight > 0) || !(totalWeight > 0)) return [];
 
-            const assignableDamage = Math.min(damageValue, knownWeight);
+            /** Default true (z. B. Heilungs-Split): nur indirekter Schaden übergibt false für volles Brutto außerhalb 0-HP. */
+            const capToKnown = arguments.length < 3 ? true : !!capAssignableToKnownWeight;
+            const assignableDamage = capToKnown ? Math.min(damageValue, knownWeight) : damageValue;
             if (!(assignableDamage > 0)) return [];
 
             if (contributors.length === 1) {
@@ -3311,7 +3636,8 @@
                         } else {
                             /** Angriff/Verteidigung: dieselben Phasen wie Heilung (Vorrunde, Regen, Initiative, Hauptrunde),
                              * damit eingehende/ausgehende Schäden mit Heilungen vergleichbar bilanzierbar sind.
-                             * Regenerations-hploss mit Opfer als action.unit wird weiter nur über hpLossEvents (synthetische Attribution) verbucht. */
+                             * Regenerations-hploss: synthetische Attribution über hpLossEvents mit **Brutto**-Basis
+                             * max(gemeldeter Verlust, nominal bekannter DoT) — wie EKS-Tooltips / buildRegenIndirectEffects. */
                             (round.actions.vorrunde || []).forEach(action => {
                                 action.type = "vorrunde";
                                 actionForStats.push(action);
@@ -3346,6 +3672,19 @@
                                     if (statQuery.type === "attack" || statQuery.type === "defense") {
                                         const isHpLossEvent = !!((action.event && action.event.kind === "hploss") || (action.skill && action.skill.event && action.skill.name === "hploss"));
                                         if (target.typ !== "Parade" && !isHpLossEvent) { // Es wurde eine Verteidigungs-Probe gewürfelt
+                                            return;
+                                        }
+                                        /** Helden-Verteidigung: Regenerations-hploss nur für **Helden als Opfer** — sonst landet
+                                         * Gegner-DoT (action.unit oft Monster-Zeile) fälschlich in der Helden-Gesamtsumme. */
+                                        if (
+                                            wantHeroes &&
+                                            wantDefense &&
+                                            isHpLossEvent &&
+                                            target &&
+                                            target.unit &&
+                                            target.unit.id &&
+                                            !target.unit.id.isHero
+                                        ) {
                                             return;
                                         }
                                     }
@@ -3484,22 +3823,16 @@
                                     }));
                                     return;
                                 }
-                                if (action.syntheticRegenBilanzZeile) {
-                                    const targetUnit = (action.targets && action.targets[0] && action.targets[0].unit) || action.unit;
-                                    if (!targetUnit || !targetUnit.id) return;
-                                    if (SearchEngine.hasRoundRegenHpLossForTarget(round, targetUnit)) return;
-                                    const lossCtx = SearchEngine.resolveHpLossContributorsAugmented(round, targetUnit, effectSourceHistory);
-                                    const grossDamage = Math.floor(Math.max(0, Number(lossCtx && lossCtx.knownWeight || 0)));
-                                    if (!(grossDamage > 0)) return;
-                                    hpLossEvents.push(Object.assign({}, action, {
-                                        event: {
-                                            kind: "hploss",
-                                            resource: "HP",
-                                            value: grossDamage,
-                                        },
-                                    }));
-                                }
                             });
+                            const supplementUnits = expectedTargetIsHero ? (round.helden || []) : (round.monster || []);
+                            SearchEngine.appendBruttoRegenHpLossEventsForTargetsWithoutParsedLoss(
+                                hpLossEvents,
+                                round,
+                                supplementUnits,
+                                effectSourceHistory,
+                                level,
+                                area,
+                            );
                             hpLossEvents.forEach(lossAction => {
                                 const targetUnit = (lossAction.targets && lossAction.targets[0] && lossAction.targets[0].unit) || lossAction.unit;
                                 const targetName = targetUnit && targetUnit.id && targetUnit.id.name;
@@ -3537,20 +3870,8 @@
                                     return;
                                 }
 
-                                const hpLossValue = Number(lossAction.event.value || lossAction.event.loss || 0);
-                                if (!(hpLossValue > 0)) {
-                                    SearchEngine.debugIndirectVerbose("TargetDecision", {
-                                        level: level.nr,
-                                        area: area.nr,
-                                        round: round.nr,
-                                        target: targetName,
-                                        targetIdx: targetIdx,
-                                        targetKey: targetKey,
-                                        decision: "SKIP",
-                                        reason: "HPLOSS_NOT_POSITIVE",
-                                    });
-                                    return;
-                                }
+                                const hpLossReported = Number(lossAction.event.value || lossAction.event.loss || 0);
+                                const floorRep = Math.floor(Math.max(0, hpLossReported));
 
                                 const contributionContext = SearchEngine.resolveHpLossContributorsAugmented(round, targetUnit, effectSourceHistory);
                                 if (!contributionContext) {
@@ -3566,9 +3887,31 @@
                                     });
                                     return;
                                 }
-                                const attributionsRaw = SearchEngine.splitHpLossDamageByContributors(hpLossValue, contributionContext);
+                                const knownWf = Math.floor(Math.max(0, Number(contributionContext.knownWeight || 0)));
+                                /** Brutto wie Tooltip / buildRegenIndirectEffects (hploss): max(gemeldeter Verlust, nominal bekannter DoT). */
+                                const damageBookingBasis = Math.max(floorRep, knownWf);
+                                if (!(damageBookingBasis > 0)) {
+                                    SearchEngine.debugIndirectVerbose("TargetDecision", {
+                                        level: level.nr,
+                                        area: area.nr,
+                                        round: round.nr,
+                                        target: targetName,
+                                        targetIdx: targetIdx,
+                                        targetKey: targetKey,
+                                        decision: "SKIP",
+                                        reason: "HPLOSS_NOT_POSITIVE",
+                                    });
+                                    return;
+                                }
+
+                                const capBrutto = SearchEngine.shouldCapIndirectBruttoDamageToKnownWeight(targetUnit);
+                                const attributionsRaw = SearchEngine.splitHpLossDamageByContributors(
+                                    damageBookingBasis,
+                                    contributionContext,
+                                    capBrutto,
+                                );
                                 const knownW = contributionContext.knownWeight || 0;
-                                const assignableDamage = Math.min(hpLossValue, knownW);
+                                const assignableDamage = capBrutto ? Math.min(damageBookingBasis, knownW) : damageBookingBasis;
                                 const assignableInt = Math.floor(assignableDamage);
                                 const attributions = assignableInt > 0
                                     ? SearchEngine.integerizeProportionalShares(assignableInt, attributionsRaw)
@@ -3578,8 +3921,9 @@
                                     area: area.nr,
                                     round: round.nr,
                                     target: targetName,
-                                    hpLoss: hpLossValue,
-                                    assignableDamage: Math.min(hpLossValue, contributionContext.knownWeight || 0),
+                                    hpLossReported: hpLossReported,
+                                    damageBookingBrutto: damageBookingBasis,
+                                    assignableDamage: assignableDamage,
                                     totalWeight: contributionContext.totalWeight,
                                     knownWeight: contributionContext.knownWeight,
                                     knownRatio: contributionContext.totalWeight > 0 ? (contributionContext.knownWeight / contributionContext.totalWeight) : 0,
@@ -3603,7 +3947,8 @@
                                             round: round.nr,
                                             target: targetName,
                                             targetIdx: targetIdx,
-                                            hpLoss: hpLossValue,
+                                            hpLossReported: hpLossReported,
+                                            damageBookingBrutto: damageBookingBasis,
                                             contributor: null,
                                             value: 0,
                                             sources: sourceList,
@@ -3654,8 +3999,9 @@
                                             round: round.nr,
                                             target: targetName,
                                             targetIdx: targetIdx,
-                                            hpLoss: hpLossValue,
-                                            assignableDamage: Math.min(hpLossValue, contributionContext.knownWeight || 0),
+                                            hpLossReported: hpLossReported,
+                                            damageBookingBrutto: damageBookingBasis,
+                                            assignableDamage: assignableDamage,
                                             contributor: contributorName,
                                             contributorKey: contributorKey,
                                             value: Number(attribution.value || 0),
@@ -3945,8 +4291,13 @@
                                 const canSynthesizeDamage = !SearchEngine.hasRoundRegenHpLossForTarget(round, targetUnit);
                                 const lossCtx = canSynthesizeDamage ? SearchEngine.resolveHpLossContributorsAugmented(round, targetUnit, effectSourceHistory) : null;
                                 const grossDamage = canSynthesizeDamage ? Math.floor(Math.max(0, Number(lossCtx && lossCtx.knownWeight || 0))) : 0;
+                                const healOffsetExtra = SearchEngine.computeRegenHpLossHealOffsetForTarget(
+                                    round,
+                                    targetUnit,
+                                    effectSourceHistory,
+                                );
                                 hpgainSeenTargetKeys.add(SearchEngine.getTargetUnitKey(targetUnit));
-                                distributeHealPool(targetUnit, hpHealValue + grossDamage);
+                                distributeHealPool(targetUnit, hpHealValue + grossDamage + healOffsetExtra);
                             });
 
                             const supplementUnits = wantHeroes ? (round.helden || []) : (round.monster || []);
@@ -3969,7 +4320,12 @@
                                 const canSynthesizeDamage = !SearchEngine.hasRoundRegenHpLossForTarget(round, supUnit);
                                 const lossCtx = canSynthesizeDamage ? SearchEngine.resolveHpLossContributorsAugmented(round, supUnit, effectSourceHistory) : null;
                                 const grossDamage = canSynthesizeDamage ? Math.floor(Math.max(0, Number(lossCtx && lossCtx.knownWeight || 0))) : 0;
-                                distributeHealPool(supUnit, grossDamage, false);
+                                const healOffsetNoGain = SearchEngine.computeRegenHpLossHealOffsetForTarget(
+                                    round,
+                                    supUnit,
+                                    effectSourceHistory,
+                                );
+                                distributeHealPool(supUnit, grossDamage + healOffsetNoGain, false);
                             });
                         }
 
@@ -4023,6 +4379,7 @@
         static attackFilterType = {
             level: "Level",
             fight: "Kampf",
+            round: "Runde",
             skillType: "AngriffsTyp",
             position: "Position",
             unit: "Einheit",
@@ -4039,6 +4396,7 @@
             "heal": {
                 level: "Level",
                 fight: "Kampf",
+                round: "Runde",
                 position: "Position",
                 unit: "Einheit",
                 skillName: "Fertigkeit",
@@ -4048,6 +4406,7 @@
             "heal_out": {
                 level: "Level",
                 fight: "Kampf",
+                round: "Runde",
                 position: "Position",
                 unit: "Einheit",
                 skillName: "Fertigkeit",
@@ -4057,6 +4416,7 @@
             "all": {
                 level: "Level",
                 fight: "Kampf",
+                round: "Runde",
                 position: "Position",
                 unit: "Einheit",
                 skillName: "Fertigkeit",
@@ -4907,8 +5267,8 @@
                             resultMap[b] = true;
                         });
                     }
-                })
-                return Object.keys(resultMap).sort();
+                });
+                return SearchEngine.sortFilterSelectionSubIds(Object.keys(resultMap));
             }
 
             createMultiSelectionFor(queryFilter, options, fnCallbackOnYes, fnCallbackOnNo) {
