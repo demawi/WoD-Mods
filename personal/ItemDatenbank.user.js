@@ -105,6 +105,21 @@
                     return false;
                 }
             });
+            // keine Neueinträge gefunden, wir schauen, ob wir alte aktualisieren können
+            if (!result) {
+                await MyStorage.getItemIndexDB().getAll({
+                    index: ["ts"],
+                    keyMatch: [_.Storages.MATCHER.NUMBER.ANY],
+                    order: "next",
+                }, function (itemIndex) {
+                    let days = Math.round((Date.now() - itemIndex.ts) / 86400000);
+                    if (days > 100 && _.WoDItemDb.couldBeValid(itemIndex, myWorldId)) {
+                        result = itemIndex;
+                        return false;
+                    }
+                });
+            }
+            console.log("ItemAutoLoader.findNext", "Tage alt: " + Math.round((Date.now() - result.ts) / 86400000), result);
             return result;
         }
 
@@ -682,7 +697,9 @@
                 if (result.length > 0) result += "<br>";
                 const bonus = AutoColumns.replaceHSFRMitBerechnung(parade.bonus);
                 console.log("GegBonus", parade.bonus, bonus);
-                result += (linkFn && linkFn(parade.type).outerHTML || parade.type) + ": " + bonus + (parade.dauer ? " (" + parade.dauer + (parade.bemerkung ? "/" + parade.bemerkung : "") + ")" : "");
+                let bemerkungAdd = (parade.dauer ? " (" + parade.dauer + (parade.bemerkung ? "/" + parade.bemerkung : "") + ")" : "");
+                if (parade.nurWirkung) bemerkungAdd += " (nur Wirkung)";
+                result += (linkFn && linkFn(parade.type).outerHTML || parade.type) + ": " + bonus + bemerkungAdd;
             });
             return result;
         }

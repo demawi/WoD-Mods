@@ -3787,18 +3787,42 @@ class demawiRepository {
         static updateSuccessInformationsInSchlachtFromBattleReport(doc, success) {
             doc = doc || document;
             success = success || {};
-            const gewonnen = doc.getElementsByClassName("rep_room_end")[0].textContent === "Die Angreifer haben gesiegt!";
-            success.rooms = [gewonnen ? 1 : 0, 1];
-            success.levels = [gewonnen ? 1 : 0, 1];
+            const roomEndElement = doc.getElementsByClassName("rep_room_end")[0];
+            if (roomEndElement && typeof roomEndElement.textContent === "string") {
+                const gewonnen = roomEndElement.textContent.trim() === "Die Angreifer haben gesiegt!";
+                success.rooms = [gewonnen ? 1 : 0, 1];
+                success.levels = [gewonnen ? 1 : 0, 1];
+            }
 
             const lastActionHeroes = this.getLastHeroTableOnKampfbericht(doc);
-            if (!lastActionHeroes) console.log("Cant find lastAction Heroes: ", doc);
+            if (!lastActionHeroes) {
+                console.log("Cant find lastAction Heroes: ", doc);
+                return success;
+            }
             const heroTags = lastActionHeroes.querySelectorAll(".rep_hero, .rep_myhero, .rep_myotherheros");
+            if (!heroTags || heroTags.length === 0) return success;
             let countHeroes = 0;
             let countHeroesSuccess = 0;
             for (const heroTag of heroTags) {
                 countHeroes++;
-                if (heroTag.parentElement.parentElement.parentElement.children[6].textContent !== "bewusstlos") {
+                const row = heroTag.closest("tr");
+                let statusText;
+
+                if (row && row.cells && row.cells.length > 0) {
+                    const statusCell = row.cells[6] || row.cells[row.cells.length - 1];
+                    if (statusCell && typeof statusCell.textContent === "string") {
+                        statusText = statusCell.textContent.trim().toLowerCase();
+                    }
+                }
+
+                if (!statusText) {
+                    const fallbackCell = heroTag.parentElement?.parentElement?.parentElement?.children?.[6];
+                    if (fallbackCell && typeof fallbackCell.textContent === "string") {
+                        statusText = fallbackCell.textContent.trim().toLowerCase();
+                    }
+                }
+
+                if (statusText !== "bewusstlos") {
                     countHeroesSuccess++;
                 }
             }
@@ -4110,11 +4134,23 @@ class demawiRepository {
                     result[2] = "[/size]" + result[2];
                 }
                 if (node.style && node.style.color && !this.hatClassName(node, "bbignoreColor")) {
-                    result[0] = result[0] + "[color=" + node.style.color + "]";
+                    result[0] = result[0] + "[color=" + this.getHexColorFromNode(node) + "]";
                     result[2] = "[/color]" + result[2];
                 }
             }
             return result.join("");
+        }
+
+        static getHexColorFromNode(node) {
+            const color = window.getComputedStyle(node).color;
+
+            // Extrahiert die Zahlen aus "rgb(r, g, b)" oder "rgba(r, g, b, a)"
+            const rgba = color.match(/\d+/g).map(Number);
+
+            // Rechnet R, G und B in Hex um (Alpha wird hier ignoriert)
+            return "#" + rgba.slice(0, 3).map(x =>
+                x.toString(16).padStart(2, '0')
+            ).join('');
         }
 
         static toBBCodeRaw(node, defaultSize) {
@@ -4123,16 +4159,26 @@ class demawiRepository {
                     return ["[table" + (node.border ? " border=" + node.border : "") + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/table]"];
                 case "TR":
                     return ["[tr]", this.toBBCodeArray(node.childNodes, defaultSize), "[/tr]"];
-                case "TD":
+                case "TD": {
+                    let attributes = "";
                     if (node.colSpan > 1) {
-                        return ["[td colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
+                        attributes += " colspan=" + node.colSpan;
                     }
-                    return ["[td]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
-                case "TH":
+                    if (node.rowSpan > 1) {
+                        attributes += " rowspan=" + node.rowSpan;
+                    }
+                    return ["[td" + attributes + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/td]"];
+                }
+                case "TH": {
+                    let attributes = "";
                     if (node.colSpan > 1) {
-                        return ["[th colspan=" + node.colSpan + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                        attributes += " colspan=" + node.colSpan;
                     }
-                    return ["[th]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                    if (node.rowSpan > 1) {
+                        attributes += " rowspan=" + node.rowSpan;
+                    }
+                    return ["[th" + attributes + "]", this.toBBCodeArray(node.childNodes, defaultSize), "[/th]"];
+                }
                 case "DIV":
                 case "SPAN":
                     return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
@@ -5143,7 +5189,7 @@ class demawiRepository {
 
     // Liest den Kampfbericht ein und erstellt die Datenstruktur auf der Anfragen gestellt werden können.
     // Grobe Struktur: Report -> Level -> Kampf -> (Vor-)Runde -> Aktion -> Ziel -> Auswirkung
-    static ReportParserDataVersion = 8;
+    static ReportParserDataVersion = 15;
     static ReportParser = function () {
 
         let warnings;
@@ -5154,6 +5200,65 @@ class demawiRepository {
         let withSources = true;
         let _container;
         let missingSkillInfos = {};
+        let companionOwnersByUnitKey = {};
+
+        const getUnitOwnerKey = function (unitOrId) {
+            const id = unitOrId && unitOrId.id ? unitOrId.id : unitOrId;
+            if (!id) return "?";
+            return (id.name || "?") + "|" + (id.idx || 1);
+        }
+
+        const cloneUnitId = function (unitOrId) {
+            const id = unitOrId && unitOrId.id ? unitOrId.id : unitOrId;
+            if (!id) return;
+            return {
+                name: id.name,
+                idx: id.idx,
+                isHero: id.isHero,
+            };
+        }
+
+        const applyCompanionOwner = function (unit) {
+            if (!unit || !unit.id) return;
+            if (unit.ownerId && unit.ownerName) return;
+            if (unit.id.ownerId && unit.id.ownerName) {
+                unit.ownerId = cloneUnitId(unit.id.ownerId);
+                unit.ownerName = unit.id.ownerName;
+                return;
+            }
+            const ownerId = companionOwnersByUnitKey[getUnitOwnerKey(unit)];
+            if (!ownerId) return;
+            unit.ownerId = cloneUnitId(ownerId);
+            unit.ownerName = ownerId.name;
+        }
+
+        const registerCompanionOwner = function (unitOrId, ownerUnitOrId) {
+            const ownerId = cloneUnitId(ownerUnitOrId);
+            if (!ownerId || !ownerId.name) return;
+            companionOwnersByUnitKey[getUnitOwnerKey(unitOrId)] = ownerId;
+        }
+
+        const parseOwnerNameFromText = function (text) {
+            const match = ("" + (text || "")).match(/geh[oö]rt\s+([^\n\r\(\)\[\],:;]+)/i);
+            if (!match) return null;
+            return match[1].trim();
+        }
+
+        const parseOwnerNameFromTooltip = function (tooltipText) {
+            const text = "" + (tooltipText || "");
+            let match = text.match(/geh[oö]rt\s*(?:<b>|&lt;b&gt;)\s*([^<>&'"\.]+?)\s*(?:<\/b>|&lt;\/b&gt;)/i);
+            if (match) return match[1].trim();
+            match = text.match(/geh[oö]rt\s+([^\n\r\(\)\[\],:;]+)/i);
+            if (match) return match[1].trim();
+            return null;
+        }
+
+        const parseOwnerNameFromElement = function (element) {
+            if (!element || !element.closest) return null;
+            const ownerContainer = element.closest("span[onmouseover]");
+            if (!ownerContainer) return null;
+            return parseOwnerNameFromTooltip(ownerContainer.getAttribute("onmouseover"));
+        }
         const requestSkillInfoFromUser = function (skillOrIdentifier, fertigkeit, actionTR) {
             const skillRequest = {
                 line: actionTR.innerHTML,
@@ -5199,7 +5304,12 @@ class demawiRepository {
             monster;
             actions; // aufgeteilt in vorrunde, regen, initiative, runde
 
-            async load(nr, roundTR) {
+            /**
+             * @param {number} nr Rundennummer innerhalb des Kampfes (1-basiert)
+             * @param {HTMLTableRowElement} roundTR Berichtszeile „Runde n“
+             * @param {number} [reportBattleAreaIx=0] Index des Kampfes im Bericht (0-basiert) — für stabile action.reportCombatRowDedupeUid
+             */
+            async load(nr, roundTR, reportBattleAreaIx = 0) {
                 let statusTables = roundTR.getElementsByClassName("rep_status_table"); // üblicherweise sollten es immer 2 sein, nur am Ende des Kampfes dann 4
                 if (statusTables.length !== 2 && statusTables.length !== 4) {
                     addWarning("Es wurden keine zwei StatusTable in einer Runde gefunden: " + statusTables.length)
@@ -5218,9 +5328,12 @@ class demawiRepository {
                 var regen = Array();
                 var runde = Array();
                 let actionsElement = roundTR.getElementsByTagName("table")[2].querySelectorAll("tr");
+                let combatTableTrIx = 0;
                 for (const currentActionTR of actionsElement) { // Round-Action-TR
                     const currentActionTRlength = currentActionTR.children.length;
                     if (currentActionTRlength === 1) continue; // nothing to do <hr>
+
+                    const reportCombatRowDedupeUidForTr = reportBattleAreaIx + "|R" + nr + "|tr" + combatTableTrIx++;
 
                     const iniTD = currentActionTR.children[0];
                     const hatInitiativeWurf = iniTD.textContent.trim() !== "";
@@ -5237,15 +5350,31 @@ class demawiRepository {
                         if (genutzterSkill) { // Initiative
 
                         } else { // Regen
-
+                            const parsedHpGain = ActionParser.parseRoundHpGainEvent(this, currentActionTR, actionTD);
+                            if (parsedHpGain) {
+                                parsedHpGain.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                regen.push(parsedHpGain);
+                            } else {
+                                const parsedLossEvent = ActionParser.parseRoundLossEvent(this, currentActionTR, actionTD);
+                                if (parsedLossEvent) {
+                                    parsedLossEvent.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                    regen.push(parsedLossEvent);
+                                }
+                            }
                         }
                     } else { // length == 3. Vorrunden- (ohne Initiative) oder Runden-Aktion (mit Initiative)
                         const actionTD = currentActionTR.children[1];
                         const targetTD = currentActionTR.children[2];
                         if (hatInitiativeWurf) { // Vorrunden-Aktion
-                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => runde.push(a));
+                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => {
+                                a.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                runde.push(a);
+                            });
                         } else { // Runden-Aktion
-                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => vorrunde.push(a));
+                            (await ActionParser.parse(this, currentActionTR, actionTD, targetTD)).forEach(a => {
+                                a.reportCombatRowDedupeUid = reportCombatRowDedupeUidForTr;
+                                vorrunde.push(a);
+                            });
                         }
                     }
                 }
@@ -5267,6 +5396,12 @@ class demawiRepository {
                     spawnArray = this.monsterSpawns = this.monsterSpawns || (this.monsterSpawns = []);
                 }
                 const unit = this.unknownUnit(newUnitId);
+                const ownerId = cloneUnitId(execUnit);
+                if (ownerId) {
+                    unit.ownerId = ownerId;
+                    unit.ownerName = ownerId.name;
+                    registerCompanionOwner(unit, ownerId);
+                }
                 if (withSources) {
                     unit.srcRef = node.innerHTML;
                     unit.typeRef = node.outerHTML;
@@ -5297,6 +5432,10 @@ class demawiRepository {
 
             //Einen Lookup ausführen, damit die Unit auch immer alle möglichen Information (z.B. Position) trägt.
             unitLookup(unitId, returnNullIfUnknown) {
+                if (!unitId || !unitId.name) {
+                    if (returnNullIfUnknown) return null;
+                    return this.unknownUnit(unitId || new UnitId("Unbekannt", undefined, true));
+                }
                 if (unitId.isEreignis) return unitId;
                 let lookupUnit = ReportParser.unitSearch(unitId, this.helden);
                 if (!lookupUnit) lookupUnit = ReportParser.unitSearch(unitId, this.monster);
@@ -5306,8 +5445,25 @@ class demawiRepository {
                     if (returnNullIfUnknown) return null;
                     // gespawnt ohne vorher angekündigt worden zu sein
                     // addWarning("Unit konnte nicht in der aktuellen Runde gefunden werden!", unitId);
-                    return this.unknownUnit(unitId);
+                    const unknown = this.unknownUnit(unitId);
+                    if (unitId.ownerName) {
+                        unknown.ownerName = unitId.ownerName;
+                        unknown.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                        unknown.id.ownerName = unitId.ownerName;
+                        unknown.id.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                        registerCompanionOwner(unknown, unknown.ownerId);
+                    }
+                    applyCompanionOwner(unknown);
+                    return unknown;
                 }
+                if (unitId.ownerName && !lookupUnit.ownerName) {
+                    lookupUnit.ownerName = unitId.ownerName;
+                    lookupUnit.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                    lookupUnit.id.ownerName = unitId.ownerName;
+                    lookupUnit.id.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                    registerCompanionOwner(lookupUnit, lookupUnit.ownerId);
+                }
+                applyCompanionOwner(lookupUnit);
                 return lookupUnit;
             }
         }
@@ -5338,12 +5494,15 @@ class demawiRepository {
                         console.log("Keine Parade", strLine);
                     }
                 } else {
-                    var matching = strLine.match(/\+(\d*) HP/)
-                    if (matching) { // Single Target Heal
+                    let matching = strLine.match(/\+(\d+(?:[\.,]\d+)?)\s*HP\b/i);
+                    if (!matching) {
+                        matching = strLine.match(/\b(\d+(?:[\.,]\d+)?)\s*HP\b/i);
+                    }
+                    if (matching) { // Single Target Heal (+6 HP oder „heilt … 3 HP“)
                         this.typ = "Heilung";
                         this.wirkung = {
                             what: "HP",
-                            value: matching[1],
+                            value: Number(matching[1].replace(",", ".")),
                         }
                     }
                 }
@@ -5556,6 +5715,18 @@ class demawiRepository {
                         mp: tds[5].innerText.trim(),
                         zustand: tds[6].innerText.trim(),
                     }
+                    applyCompanionOwner(unit);
+                    if (!unit.ownerName) {
+                        const ownerName = parseOwnerNameFromText(tds[1].textContent);
+                        if (ownerName) {
+                            unit.ownerName = ownerName;
+                            unit.ownerId = {
+                                name: ownerName,
+                                isHero: heldenJaNein ? 1 : 0,
+                            };
+                            registerCompanionOwner(unit, unit.ownerId);
+                        }
+                    }
                     if (withSources) {
                         unit.srcRef = srcRef;
                         unit.typeRef = typeRef;
@@ -5597,12 +5768,158 @@ class demawiRepository {
          */
         class ActionParser {
 
+            static parseRoundLossEvent(curRound, actionTR, actionTD) {
+                const text = actionTD.textContent.replace(/\s+/g, " ").trim();
+                const isHpLoss = /erleidet\s+\d+\s+HP\s+Schaden\.?/i.test(text);
+                const isMpLoss = /verliert\s+\d+\s+MP\.?/i.test(text);
+                if (!isHpLoss && !isMpLoss) return null;
+
+                const lossNode = actionTD.querySelector(".rep_loss");
+                const loss = Number((lossNode && lossNode.textContent) || 0);
+                if (!(loss > 0)) return null;
+
+                const unitAnchors = actionTD.querySelectorAll("a[href*=\"/hero/\"], a[href*=\"/npc/\"]");
+                if (!unitAnchors || unitAnchors.length === 0) return null;
+
+                // Bei Begleitern kann die Zeile so aussehen: "<Begleiter> : <Besitzer> verliert X MP".
+                // Dann ist der letzte Unit-Link der betroffene Charakter.
+                const affectedAnchor = unitAnchors[unitAnchors.length - 1];
+                const affectedUnitId = ReportParser.getUnitIdFromElement(affectedAnchor);
+                if (!affectedUnitId) return null;
+
+                // In Regen-Zeilen kann die Gegner-Nummer als nachfolgendes <span> stehen (z.B. Goblin #5).
+                // Diese Information brauchen wir für die zielgenaue Attribution über mehrere Runden.
+                let affectedIdx;
+                for (let curNode = affectedAnchor.nextSibling; curNode; curNode = curNode.nextSibling) {
+                    if (curNode.nodeType === Node.ELEMENT_NODE) {
+                        if (curNode.tagName === "SPAN") {
+                            const match = (curNode.textContent || "").match(/^\s*(\d+)\s*$/);
+                            if (match) {
+                                affectedIdx = Number(match[1]);
+                            }
+                            break;
+                        }
+                        if (curNode.tagName === "A") {
+                            break;
+                        }
+                    }
+                }
+                if (affectedIdx) affectedUnitId.idx = affectedIdx;
+
+                const affectedUnit = curRound.unitLookup(affectedUnitId);
+
+                const assignCompanionOwner = function (companionUnit) {
+                    if (!companionUnit || !companionUnit.id) return;
+                    const isSameUnit = companionUnit.id.name === affectedUnitId.name && ("" + (companionUnit.id.idx || "")) === ("" + (affectedUnitId.idx || ""));
+                    if (isSameUnit) return;
+                    const ownerId = cloneUnitId(affectedUnitId);
+                    companionUnit.ownerId = ownerId;
+                    companionUnit.ownerName = affectedUnitId.name;
+                    companionUnit.id.ownerId = ownerId;
+                    companionUnit.id.ownerName = affectedUnitId.name;
+                    registerCompanionOwner(companionUnit, ownerId);
+                };
+
+                // MP-Verlustzeilen koennen den Besitzer eines Begleiters transportieren:
+                // "<Begleiter> : <Besitzer> verliert X MP".
+                if (isMpLoss && unitAnchors.length >= 2) {
+                    const companionUnitId = ReportParser.getUnitIdFromElement(unitAnchors[0]);
+                    if (companionUnitId) {
+                        const companionUnit = curRound.unitLookup(companionUnitId, true) || curRound.unknownUnit(companionUnitId);
+                        assignCompanionOwner(companionUnit);
+                    }
+                }
+
+                // Fallback: in manchen Reports ist nur der Besitzer verlinkt,
+                // der Begleiter steht als reiner Text vor dem Doppelpunkt.
+                if (isMpLoss && unitAnchors.length === 1) {
+                    const prefixMatch = text.match(/^\s*([^:]+?)\s*:\s*/);
+                    if (prefixMatch) {
+                        const companionName = prefixMatch[1].replace(/\s+/g, " ").trim();
+                        const allUnits = [];
+                        (curRound.helden || []).forEach(unit => allUnits.push(unit));
+                        (curRound.monster || []).forEach(unit => allUnits.push(unit));
+                        (curRound.heldenSpawns || []).forEach(unit => allUnits.push(unit));
+                        (curRound.monsterSpawns || []).forEach(unit => allUnits.push(unit));
+                        for (const candidate of allUnits) {
+                            if (!candidate || !candidate.id) continue;
+                            if (candidate.id.name === companionName) {
+                                assignCompanionOwner(candidate);
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                const target = {
+                    unit: affectedUnit,
+                    damage: isHpLoss ? [{
+                        value: loss,
+                        ruestung: 0,
+                        resistenz: 0,
+                        type: "indirekt",
+                    }] : [],
+                };
+
+                const eventAction = new Action(affectedUnit);
+                eventAction.targets = [target];
+                eventAction.event = {
+                    kind: isHpLoss ? "hploss" : "mploss",
+                    resource: isHpLoss ? "HP" : "MP",
+                    value: loss,
+                };
+                return eventAction;
+            }
+
+            /**
+             * Zweispaltige Zeile: „&lt;Held&gt; heilt [n] HP.“ (Regeneration, ohne Fertigkeit) → Ereignis wie HP-Verlust,
+             * damit die EKS indirekte Heilung über Status-Effekte + Effekt-Historie zuordnen kann.
+             */
+            static parseRoundHpGainEvent(curRound, actionTR, actionTD) {
+                const text = (actionTD.textContent || "").replace(/\s+/g, " ").trim();
+                if (!/\bheilt\b/i.test(text) || /\bheilt\s+mittels\b/i.test(text)) return null;
+                const unitAnchors = actionTD.querySelectorAll("a[href*=\"/hero/\"], a[href*=\"/npc/\"]");
+                if (!unitAnchors || unitAnchors.length === 0) return null;
+                const affectedAnchor = unitAnchors[0];
+                const affectedUnitId = ReportParser.getUnitIdFromElement(affectedAnchor);
+                if (!affectedUnitId) return null;
+                let affectedIdx;
+                for (let curNode = affectedAnchor.nextSibling; curNode; curNode = curNode.nextSibling) {
+                    if (curNode.nodeType !== Node.ELEMENT_NODE) continue;
+                    if (curNode.tagName === "SPAN") {
+                        // Heilungs-/Schadenszahlen (.rep_gain / .rep_loss) nicht als Listenindex interpretieren.
+                        const cls = curNode.className || "";
+                        if (/\brep_gain\b|\brep_loss\b/.test(cls)) continue;
+                        const match = (curNode.textContent || "").match(/^\s*(\d+)\s*$/);
+                        if (match) affectedIdx = Number(match[1]);
+                        break;
+                    }
+                    if (curNode.tagName === "A") break;
+                }
+                if (affectedIdx) affectedUnitId.idx = affectedIdx;
+                const affectedUnit = curRound.unitLookup(affectedUnitId);
+                const amountMatch = text.match(/(\d+(?:[\.,]\d+)?)\s*HP\b/i);
+                if (!amountMatch) return null;
+                const gain = Number(amountMatch[1].replace(",", "."));
+                if (!(gain > 0)) return null;
+                const target = { unit: affectedUnit };
+                const eventAction = new Action(affectedUnit);
+                eventAction.targets = [target];
+                eventAction.event = {
+                    kind: "hpgain",
+                    resource: "HP",
+                    value: gain,
+                };
+                if (withSources) eventAction.src = actionTR.outerHTML;
+                return eventAction;
+            }
+
             /**
              * Gibt eine Liste von Actions zurück.
              */
             static async parse(curRound, actionTR, actionTD, targetTD) {
                 const [fertigkeit, actionUnit] = await this.actionParse(curRound, actionTD, targetTD);
-                const targets = this.parseTargets(curRound, actionUnit, targetTD, fertigkeit);
+                const targets = this.parseTargets(curRound, actionUnit, targetTD, fertigkeit, actionTD);
 
                 // Action
                 const myAction = new Action();
@@ -5613,7 +5930,7 @@ class demawiRepository {
                 return [myAction];
             }
 
-            static parseTargets(curRound, actionUnit, targetTD, fertigkeit) {
+            static parseTargets(curRound, actionUnit, targetTD, fertigkeit, actionTD) {
                 // Parse Targets
                 var curTargetUnit;
                 var currentTarget;
@@ -5654,8 +5971,18 @@ class demawiRepository {
                             if (curElement.tagName && (curElement.tagName === "A" || curElement.querySelector("a"))) { // Schaden an einem Gegenstand
                                 lineNr = -1; // solange ignorieren bis eine neue Entität kommt
                             } else {
-                                const damage = new Damage(curElement);
-                                currentTarget.addDamage(damage);
+                                const healLine = (curElement.textContent || "").replace(/\s+/g, " ").trim();
+                                const healMatch = healLine.match(/^[+]?\s*(\d+(?:[\.,]\d+)?)\s*HP\.?$/i);
+                                if (healMatch && currentTarget) {
+                                    const hv = Number(healMatch[1].replace(",", "."));
+                                    if (hv > 0) {
+                                        currentTarget.typ = "Heilung";
+                                        currentTarget.wirkung = {what: "HP", value: hv};
+                                    }
+                                } else {
+                                    const damage = new Damage(curElement);
+                                    currentTarget.addDamage(damage);
+                                }
                             }
                         } else {
                             currentLine.push(curElement);
@@ -5664,8 +5991,57 @@ class demawiRepository {
                 }
                 if (lineNr === 1) {
                     addTarget();
+                } else if (lineNr > 1 && currentLine.length > 0 && currentTarget) {
+                    const tail = _.util.arrayMap(currentLine, a => a.textContent).join("").replace(/\s+/g, " ").trim();
+                    const healMatch = tail.match(/^[+]?\s*(\d+(?:[\.,]\d+)?)\s*HP\.?$/i);
+                    if (healMatch) {
+                        const hv = Number(healMatch[1].replace(",", "."));
+                        if (hv > 0) {
+                            currentTarget.typ = "Heilung";
+                            currentTarget.wirkung = {what: "HP", value: hv};
+                        }
+                    }
                 }
+                ActionParser.applyHealTargetTypFallback(targets, fertigkeit, actionTD);
                 return targets;
+            }
+
+            /**
+             * Skill-Tooltip (onmouseover) enthält „Heilung Hitpoints“ mit positivem Bonus — typischer HoT wie „Fröhlicher Gesang“,
+             * ohne dass der Skillname „Heilung“ trägt oder {@link WoDSkillsDb.TYP.HEILUNG} gesetzt ist.
+             */
+            static skillTooltipIndicatesHpHealHot(actionTD) {
+                if (!actionTD) return false;
+                const skillA = actionTD.querySelector("a[href*=\"/skill/\"]");
+                if (!skillA) return false;
+                const tip = skillA.getAttribute("onmouseover") || "";
+                if (!/Heilung\s+Hitpoints/i.test(tip)) return false;
+                if (/Heilung\s+Hitpoints[\s\S]{0,160}?bonus_negative/i.test(tip)) return false;
+                return /bonus_positive/i.test(tip);
+            }
+
+            /**
+             * Ohne sofortige „+X HP“-Zeile in der Zielspalte bleibt {@link Target#typ} leer (z. B. „Vorbeugende Heilung“).
+             * Für ausgewiesene Heil-Fertigkeiten setzen wir den Typ konsistent auf „Heilung“, damit Auswertung und Statistik
+             * dieselbe Semantik wie bei klassischen Heilwürfen haben.
+             */
+            static applyHealTargetTypFallback(targets, fertigkeit, actionTD) {
+                if (!targets || !fertigkeit) {
+                    return;
+                }
+                const skillName = (fertigkeit.name || "").trim();
+                const isHealNamed = /\bheilung\b/i.test(skillName);
+                const isHealTyp = fertigkeit.typ === _.WoDSkillsDb.TYP.HEILUNG;
+                const tooltipHpHealHot = actionTD ? ActionParser.skillTooltipIndicatesHpHealHot(actionTD) : false;
+                if (!isHealNamed && !isHealTyp && !tooltipHpHealHot) {
+                    return;
+                }
+                for (let i = 0, l = targets.length; i < l; i++) {
+                    const t = targets[i];
+                    if (t && t.typ == null) {
+                        t.typ = "Heilung";
+                    }
+                }
             }
 
             /**
@@ -5707,13 +6083,13 @@ class demawiRepository {
 
                 // HP/MP-Gain/Loss bestimmen
                 for (const curNode of actionTD.querySelectorAll(".rep_gain, .rep_loss")) {
-                    let mpGain = curNode.textContent.match(/(.*) MP/);
+                    let mpGain = curNode.textContent.match(/([+-]?\d+(?:[\.,]\d+)?)\s*MP/);
                     if (mpGain) {
-                        fertigkeit.mpGain = Number(mpGain[1]);
+                        fertigkeit.mpGain = Number(mpGain[1].replace(",", "."));
                     } else {
-                        let hpGain = curNode.textContent.match(/(.d*) HP/);
+                        let hpGain = curNode.textContent.match(/([+-]?\d+(?:[\.,]\d+)?)\s*HP/);
                         if (hpGain) {
-                            fertigkeit.hpGain = Number(hpGain[1]);
+                            fertigkeit.hpGain = Number(hpGain[1].replace(",", "."));
                         } else {
                             addWarning("Rep_Gain/Rep_Loss kann nicht aufgelöst werden '" + curNode.textContent + "'", curNode);
                         }
@@ -5734,6 +6110,14 @@ class demawiRepository {
                 const actionSkillA = actionTD.querySelector("a[href*=\"/skill/\"]");
                 if (actionSkillA) {
                     fertigkeit.name = actionSkillA.textContent.trim();
+                    try {
+                        const href = actionSkillA.getAttribute("href") || "";
+                        const idMatch = href.match(/[?&]id=(\d+)/i);
+                        if (idMatch) {
+                            fertigkeit.wodSkillId = idMatch[1];
+                        }
+                    } catch (e) {
+                    }
                     const wirkungen = Wirkung.getWirkungenFromElement(actionSkillA);
                     if (wirkungen) fertigkeit.fx = wirkungen;
                     if (withSources) fertigkeit.typeRef = actionSkillA.outerHTML;
@@ -5784,8 +6168,9 @@ class demawiRepository {
             }
 
             static isHeilung(targetTD) {
-                const text = targetTD.textContent;
-                return text.match(/\+ \d* HP/) || text.match(/\+ \d* MP/);
+                const text = (targetTD.textContent || "").replace(/\s+/g, " ");
+                return /\+\s*\d+(?:[\.,]\d+)?\s*HP\b/i.test(text)
+                    || /\+\s*\d+(?:[\.,]\d+)?\s*MP\b/i.test(text);
             }
 
             static getFertigkeitTypFromTarget(targetTD, actionUnit, curRound) {
@@ -5980,6 +6365,7 @@ class demawiRepository {
                 withSources = activateSources;
                 _container = container;
                 missingSkillInfos = {};
+                companionOwnersByUnitKey = {};
 
                 const roundContentTable = this.#getContentTable(container);
                 const areas = Array();
@@ -6008,7 +6394,8 @@ class demawiRepository {
                             areas.push(curArea);
                         }
                         const round = new Round();
-                        await round.load(curArea.rounds.length + 1, roundTR);
+                        const battleAreaIx = areas.length > 0 ? areas.length - 1 : 0;
+                        await round.load(curArea.rounds.length + 1, roundTR, battleAreaIx);
                         curArea.rounds.push(round);
                     }
                     closeArea(curArea);
@@ -6025,6 +6412,7 @@ class demawiRepository {
              * Prüft nur auf gleiche Namen nicht auf Identität.
              */
             static isUnitEqual(unit1, unit2) {
+                if (!unit1 || !unit2 || !unit1.id || !unit2.id) return false;
                 return unit1.id.name === unit2.id.name;
             }
 
@@ -6036,9 +6424,11 @@ class demawiRepository {
              * Allgemeine Methode, um eine Unit in einem Array zu finden
              */
             static unitSearch(unitId, unitArray) {
+                if (!unitId || !unitId.name) return;
                 if (unitId.id) throw new Error("Hier wurde keine UnitId genutzt!", unitId);
                 if (!unitArray) return;
                 for (const curUnit of unitArray) {
+                    if (!curUnit || !curUnit.id || !curUnit.id.name) continue;
                     if (curUnit.id.name === unitId.name && curUnit.id.idx === unitId.idx) {
                         return curUnit;
                     } else {
@@ -6050,6 +6440,7 @@ class demawiRepository {
             }
 
             static unitNameOhneGestalt(unitName) {
+                if (!unitName) return unitName;
                 let matches = unitName.match(/\((.*gestalt)\)/);
                 if (matches) {
                     return unitName.replace(" (" + matches[1] + ")", "");
@@ -6085,14 +6476,25 @@ class demawiRepository {
                 if (sibling && sibling.tagName === "SPAN") {
                     unitIndex = sibling.innerText;
                 }
-                return new UnitId(element.innerText, unitIndex, isHero);
+                const parsedUnitId = new UnitId(element.innerText, unitIndex, isHero);
+                parsedUnitId.className = className;
+                const ownerContextText = (element.parentElement && element.parentElement.textContent) || element.textContent;
+                const ownerName = parseOwnerNameFromText(ownerContextText) || parseOwnerNameFromElement(element);
+                if (ownerName && ownerName !== parsedUnitId.name) {
+                    parsedUnitId.ownerName = ownerName;
+                    parsedUnitId.ownerId = {
+                        name: ownerName,
+                        isHero: isHero,
+                    };
+                }
+                return parsedUnitId;
             }
         }
 
         return ReportParser;
     }();
 
-    static ItemParserDataVersion = 5;
+    static ItemParserDataVersion = 7;
     static ItemParser = class {
 
         /**
@@ -6227,7 +6629,7 @@ class demawiRepository {
             });
             if (needRewrite.length > 0) {
                 const migration = _.Migration.start("Items werden neu geschrieben", needRewrite.length);
-                console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...");
+                console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...", needRewrite);
                 for (const curItemId of needRewrite) {
                     const sourceItem = await itemSourcesDB.getValue(curItemId);
                     if (sourceItem) {
@@ -6256,6 +6658,7 @@ class demawiRepository {
 
         // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
         static async #writeItemData(item, itemSource) {
+            if(!itemSource.src) return;
             const itemHTMLElement = document.createElement("div");
             itemHTMLElement.innerHTML = itemSource.src;
 
@@ -6270,11 +6673,11 @@ class demawiRepository {
                 item.dv = _.ItemParserDataVersion;
 
                 if (einschraenkungAnwendungen) { // Gegenstandsklasse
-                    console.log("Einschränkung Anwendungen:", einschraenkungAnwendungen);
+                    //console.log("Einschränkung Anwendungen:", einschraenkungAnwendungen);
                     item.data.anw.onlyFor = einschraenkungAnwendungen;
                 }
                 if (einschraenkungWirkungen) { // Gegenstandsklasse
-                    console.log("Einschränkung Wirkung:", einschraenkungWirkungen);
+                    //console.log("Einschränkung Wirkung:", einschraenkungWirkungen);
                     item.effects.target.onlyFor = einschraenkungWirkungen;
                 }
 
@@ -6436,6 +6839,8 @@ class demawiRepository {
             var ownerType;
 
             function getBoniContext(ctxName) {
+                // wirkung geht auch auf den Fertigkeit/Talentklasse-Kontext und trägt sich dort nur mit zusätzlichem Marker ein
+                if(ctxName === "wirkung") ctxName = "fertigkeit";
                 var result = currentOwnerContext[ctxName];
                 if (!result) {
                     result = [];
@@ -6445,6 +6850,7 @@ class demawiRepository {
             }
 
             for (var i = 0, l = div.children.length; i < l; i++) {
+                var nurWirkung = false;
                 const cur = div.children[i];
                 if (cur.tagName === "H2") {
                     ownerType = this.getOwnerType(cur.textContent.trim());
@@ -6476,7 +6882,6 @@ class demawiRepository {
                         case "eigenschaft":
                         case "angriff":
                         case "parade":
-                        case "wirkung":
                         case "beute": // 2-Spalten-Standard
                             this.addBoni(currentBoniContext, tableTRs, curTR => {
                                 const boni = {
@@ -6488,6 +6893,8 @@ class demawiRepository {
                                 return boni;
                             });
                             break;
+                        case "wirkung":
+                            nurWirkung = true;
                         case "fertigkeit":
                             for (const curTR of tableTRs) {
                                 var type = curTR.children[0].textContent.trim();
@@ -6496,11 +6903,14 @@ class demawiRepository {
                                     targetContext = getBoniContext("talentklasse");
                                     type = type.substring(29);
                                 } else {
-                                    targetContext = currentBoniContext;
+                                    targetContext = getBoniContext("fertigkeit");
                                 }
                                 const skill = {
                                     type: type,
                                     bonus: curTR.children[1].textContent.trim(),
+                                }
+                                if(nurWirkung) {
+                                    skill.nurWirkung = true;
                                 }
                                 if (curTR.children.length > 2) skill.dauer = curTR.children[2].textContent.trim();
                                 if (curTR.children.length > 3) skill.bemerkung = curTR.children[3].textContent.trim();
