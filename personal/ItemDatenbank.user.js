@@ -1360,8 +1360,11 @@
             var selectInput = this.getSuchInput(nameSchema);
             const result = Array();
             util.forEach(selectInput.options, a => {
-                const curText = a.text.trim();
-                if (curText !== "") result.push(a.text);
+                let curText = a.text.trim();
+                if (curText !== "") {
+                    curText = curText.replace("...G", " (G").replace("...", " ");
+                    result.push(curText);
+                }
             })
             return result;
         }
