@@ -1041,6 +1041,7 @@
                 if (!this.GEGENSTANDSKLASSEN) {
                     this.GEGENSTANDSKLASSEN = WoD.getAuswahlliste("item_?item_class");
                     this.GEGENSTANDSKLASSEN.push("Duellbelohnung");
+                    this.GEGENSTANDSKLASSEN.push("Mal der Geister");
                     this.GEGENSTANDSKLASSEN.push("Einzigartige Duellbelohnung");
                     this.GEGENSTANDSKLASSEN.push("Veredelungsart: Keine Waffe, keine Rüstung");
                     this.GEGENSTANDSKLASSEN.sort();
