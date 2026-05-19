@@ -119,7 +119,7 @@
                     }
                 });
             }
-            console.log("ItemAutoLoader.findNext", "Tage alt: " + Math.round((Date.now() - result.ts) / 86400000), result);
+            console.log("ItemAutoLoader.findNext", result, result ? "Tage alt: " + Math.round((Date.now() - result.ts) / 86400000): "Kein Item-Load");
             return result;
         }
 
