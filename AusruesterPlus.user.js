@@ -1326,20 +1326,25 @@
          * Bewertet die Priorität, ob noch ein weiterer Slot konsumiert werden sollte.
          */
         static #priority(slotUsage) {
-            const stackInfo = slotUsage.info;
-            const stackCount = stackInfo.stackCount;
+            const stacksInfo = slotUsage.info;
+            const stackCount = stacksInfo.stackCount;
             const alreadyConsumedSlots = slotUsage.slots;
             if (alreadyConsumedSlots >= stackCount) return 0; // Wir haben gar keinen weiteren Stack mehr
             const wantedAmount = slotUsage.wantedAmount;
             const maxAvailableStackSize = slotUsage.maxAvailable;
             if (wantedAmount > maxAvailableStackSize) return Number.MAX_VALUE; // Wir brauchen auf jeden Fall einen weiteren Slot
-            const minStackSizeFound = stackInfo.min;
-            const maxStackSizeFound = stackInfo.max;
-            const stackSize = stackInfo.stackSize; // max stacksize in general
-            const amountSum = stackInfo.sum; // Anzahl an VGs
+            const minStackSizeFound = stacksInfo.min;
+            const maxStackSizeFound = stacksInfo.max;
+            const stackSize = stacksInfo.stackSize; // max stacksize in general
+            const amountSum = stacksInfo.sum; // Anzahl an VGs
             const avgStackCountInPercent = (amountSum / stackCount) / stackSize; // in percent
             const alreadyMinConsumed = this.#getMinAmount(slotUsage.info.stacks, alreadyConsumedSlots);
-            return avgStackCountInPercent / alreadyMinConsumed;
+            // wie viel % ist bereits mit der minimalen Slot-Befüllung erfüllt?
+            const coveredWantedAmountPercentBefore = alreadyMinConsumed / wantedAmount;
+            const coveredWantedAmountPercentAfter = this.#getMinAmount(slotUsage.info.stacks, alreadyConsumedSlots + 1) / wantedAmount;
+            const priority = 1 / coveredWantedAmountPercentAfter;
+            //console.log("Priority: ", stacksInfo, slotUsage, alreadyMinConsumed, slotUsage.wantedAmount, priority);
+            return priority;
         }
 
         static #getMinAmount(stacks, stackNumber) {
