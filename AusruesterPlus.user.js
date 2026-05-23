@@ -26,6 +26,7 @@
     'use strict';
 
     const _ = demawiRepository;
+    const DEBUG = false;
 
     class Mod {
         static modname = "AusrüsterPlus";
@@ -384,6 +385,7 @@
             }
 
             const updateSelect = function (profilName, initial) {
+                //console.log("updateSelect", profilName);
                 _this.updateProfileName();
                 _this.loadOutSelect.innerHTML = "";
                 const anzahlTageFuerLastUsed = 8;
@@ -556,7 +558,6 @@
 
             this.activButton = createButton("Aktuell", async function () {
                 EquipConfig.setCurrent(_this.getCurrentSelectedLoadoutName(), true);
-                _this.updateProfileName();
                 _this.onDataChange();
             });
 
@@ -689,7 +690,7 @@
             this.hasChange_Loadout_Server = !this.hasSelectedLoadout() || await EquipConfig.differs_Loadout_Server(selectedLoadoutName);
             this.hasChange_UI_Server = await EquipConfig.differs_UI_Server();
             this.hasChange_UI_Server_Equip = await EquipConfig.differs_UI_Server_OhneVGs();
-            console.log("DIFF", selectedLoadoutName, "UI<>Loadout:" + this.hasChange_UI_Loadout, "Loadout<>Server:" + this.hasChange_Loadout_Server, "UI<>Server:" + this.hasChange_UI_Server);
+            if (DEBUG) console.log("DIFF", selectedLoadoutName, "UI<>Loadout:" + this.hasChange_UI_Loadout, "Loadout<>Server:" + this.hasChange_Loadout_Server, "UI<>Server:" + this.hasChange_UI_Server);
 
             // 3nd Row
             this.ui2XXXPanel.style.display = this.hasSelectedLoadout() && this.hasChange_UI_Loadout || this.hasChange_UI_Server ? "" : "none";
@@ -754,6 +755,7 @@
             this.activButton.style.display = (!this.hasChange_UI_Loadout && this.hasSelectedLoadout() && this.hasChangedProfile()) ? "" : "none";
             //this.deleteButton.style.display = this.hasSelectedLoadout() ? "" : "none";
             this.updateProfileName();
+            await this.revalidateAll();
         }
 
         static hasSelectedLoadout() {
@@ -771,6 +773,7 @@
         static async revalidateAll() {
             this.clearErrors();
             const loadout = await EquipConfig.getSelectedLoadout()
+            console.log("[" + Mod.modname + "] REVALIDATE ALL", loadout);
             for (const [slotName, itemOrList] of Object.entries(loadout.equip)) {
                 EquipConfig.checkValidationOnEquip(slotName, true);
             }
@@ -778,7 +781,7 @@
         }
 
         static errors = {};
-        static DEBUG_ERROR_REPORTING = true;
+        static DEBUG_ERROR_REPORTING = false;
 
         static hasErrors() {
             return Object.keys(this.errors).length > 0;
@@ -875,7 +878,6 @@
             }
             await this.initialCheckLockedItems();
 
-            await ControlBar.revalidateAll();
             await ControlBar.onDataChange(); // Initial
             FormHelper.sortInOrderInitial();
         }
@@ -950,7 +952,7 @@
             }
 
             const lockButton = _.UI.createButton("<span style='font-size:1.4em'>🔒</span>", async function () {
-                console.log("Lock Button clicked! " + getSelectedId());
+                if (DEBUG) console.log("Lock Button clicked! " + getSelectedId());
                 lockButton.style.display = "none";
                 await EquipConfig.setLocked(getSelectedId(), slotName);
                 checkIsLocked();
@@ -1249,7 +1251,7 @@
                 if (!stacksDef) return;
                 const slotResult = result[slotName] = [];
                 const freeSlots = itemsDef.slots - (additionalUsedSlots[slotName] || 0); // Anzahl verfügbarer Slots
-                console.log("FREESLOTS " + slotName + ": " + freeSlots);
+                if (debug) console.log("FREESLOTS " + slotName + ": " + freeSlots);
                 const vgsToFillCount = Object.keys(itemsDef.items).length; // Anzahl gewünschter unterschiedlicher VGs
                 const additionalSlots = freeSlots - vgsToFillCount;
                 if (additionalSlots < 0) console.error("Tasche kann nicht ausreichend gefüllt werden, da nicht genügend Slots für VGs frei sind!");
@@ -1457,7 +1459,7 @@
             this.#equipConfigs.name = this.#heroName;
             [this.#serverEquipOhneVGs, this.#serverEquipUniqueVgs] = FormHelper.getEquipUI_All_OnlyIds(1);
             this.#serverEquip = FormHelper.getEquipServer_OnlyIds();
-            console.log("Loaded Equip: ", this.#serverEquip);
+            if (DEBUG) console.log("Loaded Equip: ", this.#serverEquip);
         }
 
         static async onEquipSlotChanged(slotName, slotIdx) {
@@ -1659,7 +1661,7 @@
             const currentUiEquip = FormHelper.getEquipUI_All_OnlyIds();
             const previousEquip = this.#serverEquip;
             const result = !_.util.deepEqual(currentUiEquip, previousEquip);
-            console.log("differs_UI_Server", result, previousEquip, currentUiEquip);
+            if (DEBUG) console.log("differs_UI_Server", result, previousEquip, currentUiEquip);
             return result;
         }
 
@@ -1667,7 +1669,7 @@
             const currentUiEquip = FormHelper.getEquipUI_All_OnlyIds();
             const previousEquip = this.#serverEquipOhneVGs;
             const result = !_.util.deepEqual(currentUiEquip, previousEquip);
-            console.log("differs_UI_Server_OhneVGs", result, previousEquip, currentUiEquip);
+            if (DEBUG) console.log("differs_UI_Server_OhneVGs", result, previousEquip, currentUiEquip);
             return result;
         }
 
@@ -1711,7 +1713,7 @@
 
         static #differsEquips(equip1, equip2, debugMethod) {
             let result = !_.util.deepEqual(equip1, equip2);
-            console.log(debugMethod, result, equip1, equip2);
+            if (DEBUG) console.log(debugMethod, result, equip1, equip2);
             return result;
         }
 
@@ -1722,7 +1724,7 @@
             if (vgCfg1 || vgCfg2) {
                 result = !_.util.deepEqual(vgCfg1, vgCfg2);
             }
-            console.log(debugMethod, result, vgCfg1, vgCfg2);
+            if (DEBUG) console.log(debugMethod, result, vgCfg1, vgCfg2);
             return result;
         }
 
@@ -2467,7 +2469,7 @@
             const additionalUsedSlots = this.getLockedSlotsCount(loadout);
             const vgs = VGKonfig.getDynamicVGs(loadout.vgs, additionalUsedSlots, true);
             const lockedItems = EquipConfig.getLockedItems();
-            console.log("APPLY_EQUIP", loadout, additionalUsedSlots, lockedItems);
+            if (DEBUG) console.log("APPLY_EQUIP", loadout, additionalUsedSlots, lockedItems);
 
             for (const [slotName, items] of Object.entries(vgs)) {
                 if (!EquipConfig.useSlotWithinApplyEquip(slotName)) continue;
@@ -2569,7 +2571,7 @@
                 addFormValue("LocationEquip[go_" + cur[0] + "][" + getNextIndex(cur[0]) + "]", cur[1]);
             }
 
-            console.log("SUBMIT", removes, adds);
+            if (DEBUG) console.log("SUBMIT", removes, adds);
             return newForm;
         }
 
@@ -2618,7 +2620,7 @@
                     }
                 }
             }
-            console.log("getLockedSlotsCount", groupedLockedItems, result)
+            if (DEBUG) console.log("getLockedSlotsCount", groupedLockedItems, result);
             return result;
         }
     }
