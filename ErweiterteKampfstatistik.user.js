@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.81
+// @version        0.21.82
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -2828,6 +2828,37 @@
             return targetUnit;
         }
 
+        /** Mindestens ein buchbarer Auslöser in der Effect-Source-Historie für diese Quelle. */
+        static effectSourceHistoryHasContributors(byTarget) {
+            if (!byTarget || typeof byTarget !== "object") return false;
+            return Object.keys(byTarget).some(tk => {
+                const map = byTarget[tk];
+                return map && typeof map === "object" && Object.keys(map).length > 0;
+            });
+        }
+
+        /**
+         * Status-Effekt ohne zuordenbare Kampfaktion (z. B. Level-Vorbereitung „Wahre Köstlichkeiten“ auf allen Helden).
+         * Buchung/Zuweisung läuft über eine synthetische Helden-Entität „(Level)“, nicht über einen zufälligen Mitstreiter.
+         */
+        static getUnattributedStatusEffectContributorUnit(sourceName) {
+            const displayName = "(Level)";
+            if (!this._unattributedStatusEffectContributorUnit) {
+                this._unattributedStatusEffectContributorUnit = {
+                    id: {
+                        name: displayName,
+                        idx: 0,
+                        isHero: true,
+                        className: "rep_hero",
+                        eksAnonymousLevelEffect: true,
+                    },
+                    zustand: "bereit zum kampf",
+                    zustandClass: "rep_wounds_none",
+                };
+            }
+            return this._unattributedStatusEffectContributorUnit;
+        }
+
         static augmentHpLossContextFromStatusIfNeeded(round, targetUnit, lossCtx) {
             const base = lossCtx || {
                 contributors: [],
@@ -3074,7 +3105,7 @@
                         usedFallback = contributors.length > 0;
                     }
                 }
-                if (contributors.length === 0 && byTarget) {
+                if (contributors.length === 0 && byTarget && this.effectSourceHistoryHasContributors(byTarget)) {
                     const globalMap = {};
                     Object.keys(byTarget).forEach(tk => {
                         const map = byTarget[tk];
@@ -3094,15 +3125,26 @@
                     }
                 }
                 if (healMode && contributors.length === 0 && hpEffectValue > 0) {
-                    const fbHeal = this.pickFallbackIndirectHealContributorUnit(round, targetUnit);
-                    if (fbHeal && fbHeal.id) {
+                    if (!this.effectSourceHistoryHasContributors(byTarget)) {
+                        const anonUnit = this.getUnattributedStatusEffectContributorUnit(sourceEntry.quelle);
                         contributors = [{
-                            unit: fbHeal,
+                            unit: anonUnit,
                             skillTypeWeights: {},
                             sourceName: sourceEntry.quelle,
-                            sourceTypeRef: null,
+                            sourceTypeRef: this.ensureSkillTypeRef(sourceEntry.quelle, null),
                         }];
                         usedFallback = true;
+                    } else {
+                        const fbHeal = this.pickFallbackIndirectHealContributorUnit(round, targetUnit);
+                        if (fbHeal && fbHeal.id) {
+                            contributors = [{
+                                unit: fbHeal,
+                                skillTypeWeights: {},
+                                sourceName: sourceEntry.quelle,
+                                sourceTypeRef: null,
+                            }];
+                            usedFallback = true;
+                        }
                     }
                 }
                 const sourceDebug = {
@@ -3158,7 +3200,9 @@
                         return; // Selbstschaden nicht zurechnen
                     }
                      const unitKey = this.getUnitKey(unit);
-                     if (!allUnitKeys[unitKey]) {
+                     const isLevelAnonymous =
+                         !!(unit && unit.id && unit.id.eksAnonymousLevelEffect);
+                     if (!allUnitKeys[unitKey] && !isLevelAnonymous) {
                          sourceDebug.rejectedCount++;
                          sourceDebug.contributorDecisions.push({
                              unit: unit && unit.id && unit.id.name,
