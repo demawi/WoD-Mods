@@ -4192,10 +4192,12 @@ class demawiRepository {
                             return ["", "[npc:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
                         } else if (node.href.includes("item.php")) {
                             const urlParams = new URL(node.href).searchParams;
-                            console.log("Found URL-Params", node.href, new URL(node.href).searchParams, new URL(node.href).searchParams.get("name"), decodeURIComponent(new URL(node.href).searchParams));
                             return ["", "[item:" + decodeURIComponent(urlParams.get("name")) + "]", ""];
                         } else if (node.href.includes("/skill/")) {
                             return ["", "[skill:" + decodeURIComponent(node.href.match(/\/skill\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
+                        } else if(node.href.includes("skill.php")) {
+                            let urlParams = new URL(node.href).searchParams;
+                            return ["", "[skill:" + decodeURIComponent(urlParams.get("name")) + "]", ""];
                         } else if (node.href.includes("/item/")) {
                             return ["", "[item:" + decodeURIComponent(node.href.match(/\/item\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
                         } else {

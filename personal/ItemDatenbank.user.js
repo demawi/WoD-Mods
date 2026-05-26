@@ -544,7 +544,7 @@
                 pfad: "data.fertigkeiten",
                 when: "nutzbar mit",
                 toHTML: function (obj) {
-                    return obj.join("<br>");
+                    return obj.map(a => _.WoD.createSkillLink(a).outerHTML).join("<br>");
                 },
             }
         }
