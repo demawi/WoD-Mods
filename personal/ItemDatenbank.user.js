@@ -1038,7 +1038,7 @@
 
             // müssen vorab geholt werden bevor der eigentliche Such-Container ausgebettet wird.
             static fetchDataForAuswahllisten() {
-                if (!this.GEGENSTANDSKLASSEN) {
+                if (!this.GEGENSTANDSKLASSEN) { // nur initial
                     this.GEGENSTANDSKLASSEN = WoD.getAuswahlliste("item_?item_class");
                     this.GEGENSTANDSKLASSEN.push("Duellbelohnung");
                     this.GEGENSTANDSKLASSEN.push("Mal der Geister");
@@ -1052,7 +1052,7 @@
             }
 
             static SCHADENSBONITYP = ["Alle Trigger: (a) egal, kein (z)", "Trigger-Additiv: kein (a), kein (z)", "Trigger-Anwendung: (a), kein (z)", "Anwendung: (a), (z) egal", "Anwendung: (a), (z)", "Additiv: kein (a), (z) egal", "Additiv: (a) egal, (z)", "Additiv: kein (a), (z)"];
-            static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle entschärfen"];
+            static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Hinterhalt", "Explosion", "Falle entschärfen", "Verschrecken"];
             static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen", "Hinterhalt"];
             static BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
 
