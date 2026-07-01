@@ -4188,7 +4188,7 @@ class demawiRepository {
                     return ["", "", ""];
                 case "A":
                     if (node.href.startsWith("http")) {
-                        if (node.classList.contains("rep_monster")) {
+                        if (node.href.includes("/npc/")) {
                             return ["", "[npc:" + decodeURIComponent(node.href.match(/\/npc\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
                         } else if (node.href.includes("item.php")) {
                             const urlParams = new URL(node.href).searchParams;
