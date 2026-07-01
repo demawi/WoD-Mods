@@ -1053,7 +1053,7 @@
 
             static SCHADENSBONITYP = ["Alle Trigger: (a) egal, kein (z)", "Trigger-Additiv: kein (a), kein (z)", "Trigger-Anwendung: (a), kein (z)", "Anwendung: (a), (z) egal", "Anwendung: (a), (z)", "Additiv: kein (a), (z) egal", "Additiv: (a) egal, (z)", "Additiv: kein (a), (z)"];
             static ANGRIFFSTYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Hinterhalt", "Explosion", "Falle entschärfen", "Verschrecken"];
-            static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Explosion", "Falle auslösen", "Hinterhalt"];
+            static PARADETYPEN = ["Nahkampf", "Fernkampf", "Zauber", "Sozial", "Naturgewalt", "Krankheit", "Explosion", "Falle auslösen", "Hinterhalt"];
             static BESITZER_BETROFFENER = ["<Ziel>", "Besitzer", "Betroffener"];
 
             static TRAGEORT = ["Kopf", "Ohren", "Brille", "Halskette", "Torso", "Gürtel", "Umhang", "Schultern", "Arme", "Handschuhe", "Jegliche Hand/Hände", "Beide Hände", "Waffenhand", "Schildhand", "Einhändig", "Waffenhand/Einhändig", "Schildhand/Einhändig", "Waffenhand/Schildhand/Einhändig", "Beine", "Füße", "Orden", "Tasche", "Ring", "nicht tragbar"];
