@@ -2888,7 +2888,6 @@ class demawiRepository {
         }
 
 
-
         static getSkillUrlAlsPopup(skillName) {
             return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.encodeURIComponentFixed(skillName);
         }
@@ -4049,7 +4048,7 @@ class demawiRepository {
                             return ["", "[item:" + decodeURIComponent(urlParams.get("name")) + "]", ""];
                         } else if (node.href.includes("/skill/")) {
                             return ["", "[skill:" + decodeURIComponent(node.href.match(/\/skill\/(.*?)&/)[1].replaceAll("+", " ")) + "]", ""];
-                        } else if(node.href.includes("skill.php")) {
+                        } else if (node.href.includes("skill.php")) {
                             let urlParams = new URL(node.href).searchParams;
                             return ["", "[skill:" + decodeURIComponent(urlParams.get("name")) + "]", ""];
                         } else if (node.href.includes("/item/")) {
@@ -4186,6 +4185,7 @@ class demawiRepository {
             cfg = cfg || {};
             cfg.dropdownAutoWidth = true;
             cfg.width = "auto";
+            this.#addBetterMatcher(cfg);
             setTimeout(function () {
                 $(selectField).select2(cfg);
                 if (callback) callback();
@@ -4198,11 +4198,25 @@ class demawiRepository {
         static betterSelect2(selectField, cfg) {
             cfg = cfg || {};
             cfg.dropdownAutoWidth = true;
+            this.#addBetterMatcher(cfg);
             setTimeout(function () {
                 $(selectField).select2(cfg).parent().find(".select2-container").each(function () {
                     $(this).width($(this).width() * 1.05 + 10);
                 });
             }, 0);
+        }
+
+
+        /**
+         * Es soll auch "*" innerhalb des Ausdrucks als Wildcard akzeptiert werden
+         */
+        static #addBetterMatcher(cfg) {
+            cfg.matcher = function (params, data) {
+                if (!params.term) return data;
+                const term = params.term.trim().toLowerCase();
+                const regEx = new RegExp(term.replaceAll("*", ".*"));
+                return regEx.test(data.text.toLowerCase()) ? data : null;
+            }
         }
 
         static addCSS(url) {
@@ -5310,9 +5324,15 @@ class demawiRepository {
                     const unknown = this.unknownUnit(unitId);
                     if (unitId.ownerName) {
                         unknown.ownerName = unitId.ownerName;
-                        unknown.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                        unknown.ownerId = cloneUnitId(unitId.ownerId) || {
+                            name: unitId.ownerName,
+                            isHero: unitId.isHero
+                        };
                         unknown.id.ownerName = unitId.ownerName;
-                        unknown.id.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                        unknown.id.ownerId = cloneUnitId(unitId.ownerId) || {
+                            name: unitId.ownerName,
+                            isHero: unitId.isHero
+                        };
                         registerCompanionOwner(unknown, unknown.ownerId);
                     }
                     applyCompanionOwner(unknown);
@@ -5322,7 +5342,10 @@ class demawiRepository {
                     lookupUnit.ownerName = unitId.ownerName;
                     lookupUnit.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
                     lookupUnit.id.ownerName = unitId.ownerName;
-                    lookupUnit.id.ownerId = cloneUnitId(unitId.ownerId) || {name: unitId.ownerName, isHero: unitId.isHero};
+                    lookupUnit.id.ownerId = cloneUnitId(unitId.ownerId) || {
+                        name: unitId.ownerName,
+                        isHero: unitId.isHero
+                    };
                     registerCompanionOwner(lookupUnit, lookupUnit.ownerId);
                 }
                 applyCompanionOwner(lookupUnit);
@@ -5764,7 +5787,7 @@ class demawiRepository {
                 if (!amountMatch) return null;
                 const gain = Number(amountMatch[1].replace(",", "."));
                 if (!(gain > 0)) return null;
-                const target = { unit: affectedUnit };
+                const target = {unit: affectedUnit};
                 const eventAction = new Action(affectedUnit);
                 eventAction.targets = [target];
                 eventAction.event = {
@@ -6411,7 +6434,7 @@ class demawiRepository {
                         const parade = (value === "als Parade");
                         if (parade) verwendung.p = 1;
                         const initiative = (value.includes("Initiative"));
-                        if(initiative) verwendung.i = 1;
+                        if (initiative) verwendung.i = 1;
                         break;
                     case "Angriffstyp": // bei typ = Angriff, Parade, Verschlechterung
                         // Nahkampf, Fernkampf, Zauber, Sozial, Falle entschärfen, Verschrecken, Falle auslösen, Naturgewalt, Krankheit
@@ -6678,7 +6701,7 @@ class demawiRepository {
 
         // nimmt die Rohdaten (.details/.link) aus dem Objekt und schreibt die abgeleiteten Daten
         static async #writeItemData(item, itemSource) {
-            if(!itemSource.src) return;
+            if (!itemSource.src) return;
             const itemHTMLElement = document.createElement("div");
             itemHTMLElement.innerHTML = itemSource.src;
 
@@ -6896,7 +6919,7 @@ class demawiRepository {
 
             function getBoniContext(ctxName) {
                 // wirkung geht auch auf den Fertigkeit/Talentklasse-Kontext und trägt sich dort nur mit zusätzlichem Marker ein
-                if(ctxName === "wirkung") ctxName = "fertigkeit";
+                if (ctxName === "wirkung") ctxName = "fertigkeit";
                 var result = currentOwnerContext[ctxName];
                 if (!result) {
                     result = [];
@@ -6965,7 +6988,7 @@ class demawiRepository {
                                     type: type,
                                     bonus: curTR.children[1].textContent.trim(),
                                 }
-                                if(nurWirkung) {
+                                if (nurWirkung) {
                                     skill.nurWirkung = true;
                                 }
                                 if (curTR.children.length > 2) skill.dauer = curTR.children[2].textContent.trim();
