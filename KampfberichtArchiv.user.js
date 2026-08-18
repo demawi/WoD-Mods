@@ -2254,14 +2254,15 @@
             if (settings.get(MySettings.SETTING.AUTO_LOESCHEN)) {
                 // Täglich einmal
                 if (!settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK) || new Date(settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK)) < new Date().setDate(new Date().getDate() - 1)) {
-                    console.log("[Löschautomatik] wird ausgeführt...");
                     const settings = await MySettings.get();
                     const anzahlTage = settings.get(MySettings.SETTING.AUTO_LOESCHEN_TAGE);
                     let date = new Date();
                     date.setDate(date.getDate() - anzahlTage);
+                    console.log("[Löschautomatik] wird ausgeführt...", date);
                     await MyStorage.reportArchive.getAll({
                         index: ["ts", "fav.none"],
-                        keyMatchBefore: [date.getTime() / 60000, Number.MAX_VALUE],
+                        // debug: 2,
+                        keyMatchBefore: [Math.round(date.getTime() / 60000), Number.MAX_VALUE],
                     }, async function (report) {
                         if (!_.Mod.isLocalTest()) {
                             console.log("[Löschautomatik] Lösche Quell-Dateien für:", report.reportId);
@@ -2269,7 +2270,7 @@
                             delete report.srcs;
                             await MyStorage.reportArchive.setValue(report);
                         } else {
-                            console.log("[Löschautomatik-Fake] Lösche Quell-Dateien für:", report.ts, report.reportId);
+                            console.log("[Löschautomatik-Test] Lösche Quell-Dateien für:", report.ts, report.reportId);
                         }
                     });
                     console.log("[Löschautomatik] beendet!");
