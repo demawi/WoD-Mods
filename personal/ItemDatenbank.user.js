@@ -76,6 +76,10 @@
                 await ItemAutoLoader.start();
             }
 
+            if (page === "skills.php" && _.util.urlHasAttribute("class")) {
+                await SkillsPageExtended.start();
+            }
+
         }
     }
 
@@ -84,11 +88,19 @@
             if (window.opener) return;
             const item = await this.findNext();
             if (item) {
-                const iframe = document.createElement("iframe");
-                iframe.src = _.WoD.getItemUrl(item.name) + "&silent=true";
-                iframe.style.display = "none";
-                document.body.append(iframe);
+                this.autoLoad(_.WoD.getItemUrl(item.name) + "&silent=true");
             }
+        }
+
+        static autoLoadSkill(skillName) {
+            this.autoLoad(_.WoD.getSkillUrl(skillName) + "&silent=true");
+        }
+
+        static autoLoad(url) {
+            const iframe = document.createElement("iframe");
+            iframe.src = url;
+            iframe.style.display = "none";
+            document.body.append(iframe);
         }
 
         static async findNext() {
@@ -119,7 +131,7 @@
                     }
                 });
             }
-            console.log("ItemAutoLoader.findNext", result, result ? "Tage alt: " + Math.round((Date.now() - result.ts) / 86400000): "Kein Item-Load");
+            console.log("ItemAutoLoader.findNext", result, result ? "Tage alt: " + Math.round((Date.now() - result.ts) / 86400000) : "Kein Item-Load");
             return result;
         }
 
@@ -236,7 +248,7 @@
 
                 updateMissingButton(); // kein await benötigt
 
-                const mySearchTable = ItemSearch.QueryTable.create();
+                const mySearchTable = Searcher.QueryTable.create();
                 const theirSearchTable = searchContainer.children[1];
 
                 const mySearchButton = document.createElement("a");
@@ -268,7 +280,7 @@
                 };
 
                 function changeContainer() {
-                    ItemSearch.SearchDomains.fetchDataForAuswahllisten();
+                    Searcher.SearchDomains.fetchDataForAuswahllisten();
                     if (itemDBSearch.checked || missingSearch.checked) {
                         buttonContainer.removeChild(buttonContainer.children[0]);
                         buttonContainer.append(mySearchButton);
@@ -299,15 +311,26 @@
                     changeContainer();
                 };
 
-                function getItemValue(obj, columnDef, pfadArray) {
+                function getItemValue(obj, columnDef) {
+                    if (columnDef.instantToHtml) {
+                        const result = columnDef.instantToHtml(obj);
+                        if (result !== undefined) return result;
+                    }
+                    return getItemValueIntern(obj, columnDef);
+                }
+
+                function getItemValueIntern(obj, columnDef, pfadArray) {
                     if (!pfadArray) pfadArray = columnDef.pfadArray;
                     if (!obj) return "";
                     if (pfadArray.length === 0) {
-                        if (columnDef.toHTML) return columnDef.toHTML(obj);
+                        if (columnDef.toHTML) {
+                            const result = columnDef.toHTML(obj);
+                            if (result !== undefined) return result;
+                        }
                         if (typeof obj === "string") return obj;
                         return JSON.stringify(obj);
                     }
-                    return getItemValue(obj[pfadArray[0]], columnDef, pfadArray.slice(1));
+                    return getItemValueIntern(obj[pfadArray[0]], columnDef, pfadArray.slice(1));
                 }
 
                 var sortOrderColumnDef;
@@ -316,7 +339,7 @@
                 async function getItemResult() {
                     var items;
                     const search4Items = itemDBSearch.checked;
-                    if (search4Items) {
+                    if (search4Items) { // wenn ja nach Items suche, wenn nein nach fehlenden Items suchen
                         items = await MyStorage.getItemDB().getAll();
                     } else {
                         items = await MyStorage.getItemIndexDB().getAll();
@@ -324,8 +347,16 @@
                     const itemResult = Array();
                     for (const item of items) {
                         if (!search4Items && !_.WoDItemDb.couldBeValid(item, myWorld)) continue;
-                        if (missingSearch.checked && !item.data || search4Items && item.data && ItemSearch.matches(item)) {
+                        if (missingSearch.checked && !item.data || search4Items && item.data && Searcher.matches(item, true)) {
                             itemResult.push(item);
+                        }
+                    }
+                    if (search4Items) {
+                        const skills = await _.WoDStorages.getSkillsDb().getAll();
+                        for (const skill of skills) {
+                            if (Searcher.matches(skill, false)) {
+                                itemResult.push(skill);
+                            }
                         }
                     }
                     if (sortOrderColumnDef) {
@@ -341,7 +372,7 @@
                     if (resultContainer.children.length > 0) {
                         resultContainer.removeChild(resultContainer.children[0]);
                     }
-                    const itemResults = await getItemResult()
+                    const itemOrSkillResults = await getItemResult()
 
                     updateMissingButton();
                     const table = document.createElement("table");
@@ -354,7 +385,7 @@
                     const tbody = document.createElement("tbody");
                     table.append(tbody);
                     resultContainer.append(table);
-                    headTR.innerHTML += "<th></th><th>Gegenstand (" + itemResults.length + ")</th>";
+                    headTR.innerHTML += "<th></th><th>Gegenstand (" + itemOrSkillResults.length + ")</th>";
 
                     var columns;
                     if (itemDBSearch.checked) {
@@ -376,7 +407,7 @@
                     var i = 1;
                     var switcher = false;
 
-                    for (const item of itemResults) {
+                    for (const itemOrSkill of itemOrSkillResults) {
                         switcher = !switcher;
                         const tr = document.createElement("tr");
                         tr.className = "row" + (switcher ? "0" : "1");
@@ -389,28 +420,33 @@
 
                         for (const [title, columnDef] of Object.entries(columns)) {
                             const td = document.createElement("td");
-                            td.innerHTML = getItemValue(item, columnDef);
+                            td.innerHTML = getItemValue(itemOrSkill, columnDef);
                             tr.append(td);
                         }
 
                         const itemSpan = document.createElement("span");
-                        const href = _.WoD.createItemLink(item.name);
+                        const isItemAndNotSkill = _.EffectsParser.isItem(itemOrSkill);
+                        const href = isItemAndNotSkill ? _.WoD.createItemLink(itemOrSkill.name) : _.WoD.createSkillLink(itemOrSkill.name);
                         itemSpan.append(href);
                         href.target = "ItemView";
 
                         if (itemDBSearch.checked) {
-                            for (let i = 0, l = item.data.slots; i < l; i++) {
-                                if (itemSpan.children.length < 2) {
-                                    const abstand = document.createElement("span");
-                                    abstand.innerHTML = "&nbsp;";
-                                    itemSpan.append(abstand);
+                            if (itemOrSkill?.data?.slots) {
+                                for (let i = 0, l = itemOrSkill.data.slots; i < l; i++) {
+                                    if (itemSpan.children.length < 2) {
+                                        const abstand = document.createElement("span");
+                                        abstand.innerHTML = "&nbsp;";
+                                        itemSpan.append(abstand);
+                                    }
+                                    const img = document.createElement("img");
+                                    img.src = "/wod/css/icons/WOD/gems/gem_0.png";
+                                    itemSpan.append(img);
                                 }
-                                const img = document.createElement("img");
-                                img.src = "/wod/css/icons/WOD/gems/gem_0.png";
-                                itemSpan.append(img);
+                            } else {
+                                // nix
                             }
-                            // href.onclick = function () {return wo(url + "&IS_POPUP=1");}
-                        } else {
+
+                        } else { // Fehlende Items
                             href.onclick = function () {
                                 itemSpan.parentElement.removeChild(itemSpan);
                                 //return wo(url + "&IS_POPUP=1");
@@ -435,6 +471,9 @@
             static "Trageort" = {
                 pfad: "data.trageort",
                 notWhen: "Trageort",
+                instantToHtml: function (obj) {
+                    if (!_.EffectsParser.isItem(obj)) return "Fertigkeit";
+                }
             }
             static "Klasse" = {
                 pfad: "data.klasse",
@@ -444,13 +483,53 @@
                     if (obj.typ === "nur") {
                         return obj.def.map(a => _.WoD.KLASSEN[a]).join(", ");
                     }
-                    return Object.keys(_.WoD.KLASSEN).filter(a => !obj.def.includes(a)).map(a => _.WoD.KLASSEN[a]).join(", ");
+                    return Object.keys(_.WoD.KLASSEN).filter(className => !obj.def.includes(className)).map(a => _.WoD.KLASSEN[a]).join(", ");
+                },
+                instantToHtml: function (obj) {
+                    if (!_.EffectsParser.isItem(obj)) { // Skill
+                        const _this = this;
+                        return Object.entries(obj.classInfo).filter(([className, def]) => _.WoD.KLASSEN[_this.toSkillType(className)]).map(([className, def]) => _.WoD.KLASSEN[_this.toSkillType(className)] + "<sup>(" + def.type + def.lvl + ")</sup>").join(", ");
+                    }
+                },
+                toSkillType: function (obj) {
+                    if (obj.indexOf("/")) {
+                        return obj.split("/")[0];
+                    }
+                    return obj;
+                }
+            }
+            static "Volk" = {
+                pfad: "data.volk",
+                notWhen: "Volk",
+                toHTML: function (obj) {
+                    if (obj.typ === "alle") return "alle";
+                    if (obj.typ === "nur") {
+                        return obj.def.map(a => _.WoD.VOELKER[a]).join(", ");
+                    }
+                    return Object.keys(_.WoD.VOELKER).filter(className => !obj.def.includes(className)).map(a => _.WoD.VOELKER[a]).join(", ");
+                },
+                instantToHtml: function (obj) {
+                    if (!_.EffectsParser.isItem(obj)) { // Skill
+                        const _this = this;
+                        return Object.entries(obj.classInfo).filter(([className, def]) => _.WoD.VOELKER[_this.toSkillType(className)]).map(([className, def]) => _.WoD.VOELKER[_this.toSkillType(className)] + "<sup>(" + def.type + def.lvl + ")</sup>").join(", ");
+                    }
+                },
+                toSkillType: function (obj) {
+                    if (obj.indexOf("/")) {
+                        return obj.split("/")[0];
+                    }
+                    return obj;
                 }
             }
             static "Stufe" = {
                 pfad: "data.bedingungen.Stufe",
                 toHTML: function (obj) {
                     return obj.comp + " " + obj.value;
+                },
+                instantToHtml: function (obj) {
+                    if (!_.EffectsParser.isItem(obj)) { // Skill
+                        return "ab " + Math.min(...Object.values(obj.classInfo).map(def => def.lvl));
+                    }
                 }
             }
             static "Schaden (Besitzer)" = {
@@ -539,6 +618,37 @@
                 toHTML: function (obj) {
                     return obj.join("<br>");
                 },
+                instantToHtml: function (obj) {
+                    if (!_.EffectsParser.isItem(obj)) {
+                        return obj.klasse;
+                    }
+                }
+            }
+            static "Fertigkeitklasse" = {
+                pfad: "...",
+                when: "Fertigkeit:Klasse",
+                toHTML: function (obj) {
+                },
+                instantToHtml: function (obj) {
+                    if (_.EffectsParser.isItem(obj)) {
+                        return "";
+                    } else {
+                        return obj.klasse;
+                    }
+                }
+            }
+            static "Angriffstyp" = {
+                pfad: "...",
+                when: "Fertigkeit:Angriffstyp",
+                toHTML: function (obj) {
+                },
+                instantToHtml: function (obj) {
+                    if (_.EffectsParser.isItem(obj)) {
+                        return "";
+                    } else {
+                        return obj.angriffstyp;
+                    }
+                }
             }
             static "nutzbar mit" = {
                 pfad: "data.fertigkeiten",
@@ -550,8 +660,8 @@
         }
 
         static whenBedingung(when) {
-            var validatorIndex = ItemSearch.QueryTable.validatorTypes.indexOf(when);
-            var negator = ItemSearch.QueryTable.negators[validatorIndex] || false;
+            var validatorIndex = Searcher.QueryTable.validatorTypes.indexOf(when);
+            var negator = Searcher.QueryTable.negators[validatorIndex] || false;
             var validator = validatorIndex > -1;
             return negator !== validator;
         }
@@ -562,10 +672,8 @@
                 const notWhen = def.notWhen;
                 const when = def.when;
                 if (!notWhen && !when || notWhen && !this.whenBedingung(notWhen) || when && this.whenBedingung(when)) {
-                    result[title] = {
-                        pfadArray: def.pfad.split("."),
-                        toHTML: def.toHTML,
-                    };
+                    def.pfadArray = def.pfad.split(".")
+                    result[title] = def;
                 }
             }
             console.log("AutoColumns", result);
@@ -578,10 +686,10 @@
 
         static replaceHSFRMitBerechnung(bonusText) {
             var result = bonusText.replaceAll("der Heldenstufe", "HS").replaceAll("des Fertigkeitenrangs", "FR").replaceAll("Fertigkeitenrang", "FR").replaceAll("Heldenstufe", "HS");
-            var hsInput = ItemSearch.QueryTable.getHsInput();
+            var hsInput = Searcher.QueryTable.getHsInput();
             if (hsInput === "") hsInput = null;
             else hsInput = Number(hsInput);
-            var frInput = ItemSearch.QueryTable.getFrInput();
+            var frInput = Searcher.QueryTable.getFrInput();
             if (frInput === "") frInput = null;
             else frInput = Number(frInput);
 
@@ -723,15 +831,17 @@
     }
 
 
-    class ItemSearch {
+    class Searcher {
 
-
+        /**
+         * aka Validators um einzelne Items zu verfizieren
+         */
         static SuchKriterien = class SuchKriterien {
             static "Klasse" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Klasse>", ...Object.keys(_.WoD.KLASSEN)]);
+                const select1 = Searcher.UI.createSelect(["<Klasse>", ...Object.keys(_.WoD.KLASSEN)]);
                 container.append(select1);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (select1.value === "") return true;
                         const klasse = item?.data?.klasse;
                         if (!klasse || klasse.typ === "alle") return true;
@@ -740,33 +850,38 @@
                         }
                         return !klasse.def.includes(select1.value);
                     },
+                    matchesSkill: function (skill) {
+                        if (select1.value === "") return true;
+                        const classInfo = skill?.classInfo;
+                        return !classInfo || !!classInfo[select1.value];
+                    }
                 }
             }
 
             static "Trageort" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Trageort>", ...ItemSearch.SearchDomains.TRAGEORT]);
+                const select1 = Searcher.UI.createSelect(["<Trageort>", ...Searcher.SearchDomains.TRAGEORT]);
                 container.append(select1);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (select1.value === "") return true;
                         const trageort = item?.data?.trageort
                         if (select1.value === "Jegliche Hand/Hände") {
-                            for (const curTrageort of ItemSearch.SearchDomains.JEGLICHE_HAND) {
+                            for (const curTrageort of Searcher.SearchDomains.JEGLICHE_HAND) {
                                 if (trageort === curTrageort) return true;
                             }
                             return false;
                         } else if (select1.value === "Waffenhand/Einhändig") {
-                            for (const curTrageort of ItemSearch.SearchDomains.WAFFENHAND_EINHAENDIG) {
+                            for (const curTrageort of Searcher.SearchDomains.WAFFENHAND_EINHAENDIG) {
                                 if (trageort === curTrageort) return true;
                             }
                             return false;
                         } else if (select1.value === "Schildhand/Einhändig") {
-                            for (const curTrageort of ItemSearch.SearchDomains.SCHILDHAND_EINHAENDIG) {
+                            for (const curTrageort of Searcher.SearchDomains.SCHILDHAND_EINHAENDIG) {
                                 if (trageort === curTrageort) return true;
                             }
                             return false;
                         } else if (select1.value === "Waffenhand/Schildhand/Einhändig") {
-                            for (const curTrageort of ItemSearch.SearchDomains.WAFFENHAND_SCHILDHAND_EINHAENDIG) {
+                            for (const curTrageort of Searcher.SearchDomains.WAFFENHAND_SCHILDHAND_EINHAENDIG) {
                                 if (trageort === curTrageort) return true;
                             }
                             return false;
@@ -774,14 +889,17 @@
 
                         return trageort === select1.value;
                     },
+                    matchesSkill: function (skill) {
+                        return true;
+                    },
                 }
             }
 
             static "Verbrauchsgut" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Verbrauchsgut>", "JA", "nein"]);
+                const select1 = Searcher.UI.createSelect(["<Verbrauchsgut>", "JA", "nein"]);
                 container.append(select1);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (select1.value === "") return true;
                         if (select1.value === "JA") {
                             return item.data?.isVG;
@@ -789,32 +907,68 @@
                             return !item.data?.isVG;
                         }
                     },
+                    matchesSkill: function (skill) {
+                        return true;
+                    },
                 }
             }
 
             static "Gegenstandsklasse" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Gegenstandsklasse>", ...ItemSearch.SearchDomains.GEGENSTANDSKLASSEN]);
+                const select1 = Searcher.UI.createSelect(["<Gegenstandsklasse>", ...Searcher.SearchDomains.GEGENSTANDSKLASSEN]);
                 container.append(select1);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (select1.value === "") return true;
                         const klassen = item.data?.gegenstandsklassen;
                         if (klassen) {
                             if (select1.value === "Veredelungsart: Keine Waffe, keine Rüstung") {
-                                return util.twoListMatch(klassen, ItemSearch.SearchDomains.VEREDELUNGSART_SCHADEN_OHNE_WAFFE);
+                                return util.twoListMatch(klassen, Searcher.SearchDomains.VEREDELUNGSART_SCHADEN_OHNE_WAFFE);
                             }
                             return klassen.includes(select1.value);
                         }
                         return false;
                     },
+                    matchesSkill: function (skill) {
+                        return false;
+                    },
+                }
+            }
+
+            static "Fertigkeit:Klasse" = (container) => {
+                const select1 = Searcher.UI.createSelect(["<Talentklasse>", ...Searcher.SearchDomains.TALENTKLASSEN]);
+                container.append(select1);
+                return {
+                    matchesItem: function (item) {
+                        return false;
+                    },
+                    matchesSkill: function (skill) {
+                        if (select1.value === "") return true;
+                        if (!skill.klasse) return false;
+                        return skill.klasse === select1.value;
+                    },
+                }
+            }
+
+            static "Fertigkeit:Angriffstyp" = (container) => {
+                const select1 = Searcher.UI.createSelect(["<Angriffstyp>", ...Searcher.SearchDomains.ANGRIFFSTYPEN]);
+                container.append(select1);
+                return {
+                    matchesItem: function (item) {
+                        return false;
+                    },
+                    matchesSkill: function (skill) {
+                        if (select1.value === "") return true;
+                        if (!(skill.typ === "Angriff" || skill.typ === "Verschlechterung") || !skill.angriffstyp) return false;
+                        return skill.angriffstyp === select1.value;
+                    },
                 }
             }
 
             static "nutzbar mit" = (container) => {
-                const select1 = ItemSearch.UI.createSelect(["<Fertigkeit>", ...ItemSearch.SearchDomains.FERTIGKEITEN]);
+                const select1 = Searcher.UI.createSelect(["<Fertigkeit>", ...Searcher.SearchDomains.FERTIGKEITEN]);
                 container.append(select1);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (select1.value === "") return true;
                         const fertigkeiten = item.data?.fertigkeiten;
                         if (fertigkeiten) {
@@ -822,20 +976,26 @@
                         }
                         return false;
                     },
+                    matchesSkill: function (skill) {
+                        return select1.value === "";
+                    },
                 }
             }
 
             static "Besitzer/Betroffener" = (container) => {
-                const selectBesitzerBetroffener = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
+                const selectBesitzerBetroffener = Searcher.UI.createSelect(Searcher.SearchDomains.BESITZER_BETROFFENER);
                 container.append(selectBesitzerBetroffener);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (selectBesitzerBetroffener.value === "Besitzer") {
                             return item.effects.owner;
                         } else if (selectBesitzerBetroffener.value === "Betroffener") {
                             console.log(item.effects.target);
                             return item.effects.target;
                         }
+                    },
+                    matchesSkill: function (skill) {
+                        return this.matchesItem(skill);
                     },
                 }
             }
@@ -847,7 +1007,7 @@
                 container.append(util.span(" - "));
                 container.append(textTo);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         var from = textFrom.value.trim();
                         var to = textTo.value.trim();
                         if (from === "") from = null;
@@ -865,6 +1025,9 @@
                             return Number(value) >= Number(to);
                         }
                     },
+                    matchesSkill: function (skill) {
+                        return true;
+                    },
                 }
             }
 
@@ -876,7 +1039,7 @@
                 container.append(util.span(" - "));
                 container.append(textTo);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (textFrom.value === "") textFrom.value = 1;
                         var from = textFrom.value.trim();
                         var to = textTo.value.trim();
@@ -889,31 +1052,34 @@
                         if (to !== null && Number(to) < anzahlEdelslots) return false;
                         return true;
                     },
+                    matchesSkill: function (skill) {
+                        return false;
+                    },
                 }
             }
 
-            static "Bonus - Eigenschaft" = (container) => this.effects2Kriterium(container, "eigenschaft", ["<Eigenschaft>", ...Object.values(ItemSearch.SearchDomains.EIGENSCHAFTEN)])
-            static "Bonus - Fertigkeit" = (container) => this.effects2Kriterium(container, "fertigkeit", ["<Fertigkeit>", ...Object.values(ItemSearch.SearchDomains.FERTIGKEITEN)])
-            static "Bonus - Talentklasse" = (container) => this.effects2Kriterium(container, "talentklasse", ["<Talentklasse>", ...ItemSearch.SearchDomains.TALENTKLASSEN])
+            static "Bonus - Eigenschaft" = (container) => this.effects2Kriterium(container, "eigenschaft", ["<Eigenschaft>", ...Object.values(Searcher.SearchDomains.EIGENSCHAFTEN)])
+            static "Bonus - Fertigkeit" = (container) => this.effects2Kriterium(container, "fertigkeit", ["<Fertigkeit>", ...Object.values(Searcher.SearchDomains.FERTIGKEITEN)])
+            static "Bonus - Talentklasse" = (container) => this.effects2Kriterium(container, "talentklasse", ["<Talentklasse>", ...Searcher.SearchDomains.TALENTKLASSEN])
 
-            static "Bonus - Angriff" = (container) => this.effects2Kriterium(container, "angriff", ["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN])
-            static "Bonus - Parade" = (container) => this.effects2Kriterium(container, "parade", ["<Parade>", ...ItemSearch.SearchDomains.PARADETYPEN])
+            static "Bonus - Angriff" = (container) => this.effects2Kriterium(container, "angriff", ["<Angriffstyp>", ...Searcher.SearchDomains.ANGRIFFSTYPEN])
+            static "Bonus - Parade" = (container) => this.effects2Kriterium(container, "parade", ["<Parade>", ...Searcher.SearchDomains.PARADETYPEN])
             static "Bonus - Schaden" = (container) => this.schadenRuestungAnfaelligkeit(container, "schaden");
             static "Bonus - Rüstung" = (container) => this.schadenRuestungAnfaelligkeit(container, "ruestung");
             static "Bonus - Anfälligkeit" = (container) => this.schadenRuestungAnfaelligkeit(container, "anfaelligkeit");
 
             static schadenRuestungAnfaelligkeit(container, boniType) {
-                const selectSchadensart = ItemSearch.UI.createSelect(["<Schadensart>", ...ItemSearch.SearchDomains.SCHADENSARTEN]);
+                const selectSchadensart = Searcher.UI.createSelect(["<Schadensart>", ...Searcher.SearchDomains.SCHADENSARTEN]);
                 container.append(selectSchadensart);
-                const selectBesitzerBetroffener = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
+                const selectBesitzerBetroffener = Searcher.UI.createSelect(Searcher.SearchDomains.BESITZER_BETROFFENER);
                 container.append(selectBesitzerBetroffener);
-                const selectAngriffstyp = ItemSearch.UI.createSelect(["<Angriffstyp>", ...ItemSearch.SearchDomains.ANGRIFFSTYPEN]);
+                const selectAngriffstyp = Searcher.UI.createSelect(["<Angriffstyp>", ...Searcher.SearchDomains.ANGRIFFSTYPEN]);
                 container.append(selectAngriffstyp);
-                const selectAZ = ItemSearch.UI.createSelect(["<a/z>", ...ItemSearch.SearchDomains.SCHADENSBONITYP]);
+                const selectAZ = Searcher.UI.createSelect(["<a/z>", ...Searcher.SearchDomains.SCHADENSBONITYP]);
                 if (boniType === "schaden") container.append(selectAZ);
 
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (selectSchadensart.value === "" && selectBesitzerBetroffener.value === "" && selectAngriffstyp.value === "" && selectAZ.value === "") return true;
 
                         var result = Array();
@@ -953,28 +1119,28 @@
                             if (boniType === "schaden" && selectAZ.value !== "") {
                                 var matches = false;
                                 switch (selectAZ.value) {
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[0]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[0]:
                                         matches = !enthaelt("(z)");
                                         break;
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[1]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[1]:
                                         matches = !enthaelt("(a)") && !enthaelt("(z)");
                                         break;
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[2]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[2]:
                                         matches = enthaelt("(a)") && !enthaelt("(z)");
                                         break;
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[3]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[3]:
                                         matches = enthaelt("(a)");
                                         break;
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[4]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[4]:
                                         matches = enthaelt("(z)") && enthaelt("(a)");
                                         break;
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[5]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[5]:
                                         matches = !enthaelt("(a)");
                                         break;
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[6]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[6]:
                                         matches = enthaelt("(z)");
                                         break;
-                                    case ItemSearch.SearchDomains.SCHADENSBONITYP[7]:
+                                    case Searcher.SearchDomains.SCHADENSBONITYP[7]:
                                         matches = enthaelt("(z)") && !enthaelt("(a)");
                                         break;
                                 }
@@ -984,18 +1150,21 @@
                         });
                         return result.length > 0;
                     },
+                    matchesSkill: function (skill) {
+                        return this.matchesItem(skill);
+                    },
                 }
             }
 
             static effects2Kriterium(container, id, selectArray) {
-                const select1 = ItemSearch.UI.createIntelligentMultiSelect(selectArray);
+                const select1 = Searcher.UI.createIntelligentMultiSelect(selectArray);
                 container.append(select1);
-                const select2 = ItemSearch.UI.createSelect(ItemSearch.SearchDomains.BESITZER_BETROFFENER);
+                const select2 = Searcher.UI.createSelect(Searcher.SearchDomains.BESITZER_BETROFFENER);
                 container.append(select2);
                 const [checkBox, label, span] = util.createCheckBoxInSpan("debuff_" + id, "Debuff");
                 container.append(span);
                 return {
-                    matches: function (item) {
+                    matchesItem: function (item) {
                         if (select1.value === "" && select2.value === "") return true;
                         var result = Array();
                         if (select2.value === "Besitzer" || select2.value === "") {
@@ -1007,7 +1176,7 @@
                             if (cur) result.push(...cur);
                         }
                         var next = Array();
-                        const selectedOptions = ItemSearch.SuchKriterien.getSelectedOptions(select1);
+                        const selectedOptions = Searcher.SuchKriterien.getSelectedOptions(select1);
                         if (selectedOptions) {
                             result.forEach(cur => {
                                 if (selectedOptions.includes(cur.type) && (!checkBox.checked && cur.bonus.includes("+") || checkBox.checked && cur.bonus.includes("-"))) {
@@ -1018,6 +1187,9 @@
                             next = Array();
                         }
                         return result.length > 0;
+                    },
+                    matchesSkill: function (skill) {
+                        return this.matchesItem(skill);
                     },
                 }
             }
@@ -1123,7 +1295,7 @@
                 tbody.append(tr);
                 const mainSelectTD = document.createElement("td");
                 mainSelectTD.style.verticalAlign = "top";
-                const select = ItemSearch.UI.createSelect(["<Auswahl>"].concat(Object.keys(ItemSearch.SuchKriterien)));
+                const select = Searcher.UI.createSelect(["<Auswahl>"].concat(Object.keys(Searcher.SuchKriterien)));
                 const searchFieldsTD = document.createElement("td");
                 searchFieldsTD.style.verticalAlign = "top";
                 mainSelectTD.append(select);
@@ -1148,7 +1320,7 @@
                         thisObject.checkRemove(myCurIndex);
                     } else {
                         searchFieldsTD.innerHTML = "";
-                        const suche = ItemSearch.SuchKriterien[select.value](searchFieldsTD);
+                        const suche = Searcher.SuchKriterien[select.value](searchFieldsTD);
                         checkbox.parentElement.hidden = false;
                         suche.name = select.value;
                         thisObject.validators[myCurIndex] = suche;
@@ -1197,18 +1369,18 @@
             }
         }
 
-        static matches(item) {
-            const result = this.#matches(item);
+        static matches(itemOrSkill) {
+            const result = this.#matches(itemOrSkill);
             if (false) {
-                for (var i = 0, l = item.data.bedingungen2.length; i < l; i++) {
-                    const bedingung = item.data.bedingungen2[i];
+                for (var i = 0, l = itemOrSkill.data.bedingungen2.length; i < l; i++) {
+                    const bedingung = itemOrSkill.data.bedingungen2[i];
                     if (bedingung.includes("Geister")) return true;
                 }
                 return false;
             }
-            if (false && item.data && item.data.bedingungen) {
-                console.log(item);
-                for (const [name, comp] of Object.entries(item.data.bedingungen)) {
+            if (false && itemOrSkill.data && itemOrSkill.data.bedingungen) {
+                console.log(itemOrSkill);
+                for (const [name, comp] of Object.entries(itemOrSkill.data.bedingungen)) {
                     if (comp.comp === "bis") return true;
                 }
                 return false;
@@ -1217,18 +1389,18 @@
             return result;
         }
 
-        static #matches(item) {
-            this.debug = item.name.includes("Thanat");
-            if (this.debug) console.log(item);
+        static #matches(itemOrSkill, isItem) {
+            this.debug = itemOrSkill.name.includes("Thanat");
+            if (this.debug) console.log(itemOrSkill);
             const suchfeldWert = WoD.getSuchfeld().value.trim();
             if (suchfeldWert !== "") {
                 const matching = "^(" + suchfeldWert.replaceAll("*", ".*") + ")$";
-                if (!item.name.match(matching)) return false;
+                if (!itemOrSkill.name.match(matching)) return false;
             }
             for (var i = 0, l = this.QueryTable.validators.length; i < l; i++) {
                 const currentValidator = this.QueryTable.validators[i];
                 if (!currentValidator) continue;
-                const currentValidatorResult = currentValidator.matches(item) || false;
+                const currentValidatorResult = (_.EffectsParser.isItem(itemOrSkill) ? currentValidator.matchesItem(itemOrSkill) : (Object.keys(itemOrSkill.classInfo).length > 0 && currentValidator.matchesSkill(itemOrSkill))) || false;
                 const negatorWish = this.QueryTable.negators[i] || false;
                 if (this.debug) console.log("Matches2", currentValidatorResult, negatorWish);
                 if (currentValidatorResult === negatorWish) return false;
@@ -1236,6 +1408,134 @@
             return true;
         }
 
+    }
+
+    class SkillsPageExtended {
+        static async start() {
+            const contentTableBody = document.querySelector(".content_table tbody");
+
+            for (const tr of contentTableBody.children) {
+                const add = function (name, isHeader) {
+                    const th = isHeader ? document.createElement("th") : document.createElement("td");
+                    th.innerHTML = name;
+                    tr.append(th);
+                }
+                if (tr.className === "header") {
+                    add("Fertigkeitenklasse", true);
+                    add("Typ", true);
+                    add("Verwendbarkeit", true);
+                    add("Häufigkeit", true);
+                } else {
+                    const skillName = tr.children[1].textContent.trim();
+                    const skill = await _.WoDSkillsDb.getSkill(skillName);
+                    if(!skill) {
+                        ItemAutoLoader.autoLoadSkill(skillName);
+                    }
+                    add(skill ? this.getText(skill.klasse) : "???");
+                    add(this.getTypText(skill));
+                    add(this.getVerwendungText(skill))
+                    add(this.getHauefigkeitText(skill))
+                }
+            }
+        }
+
+        static getText(obj) {
+            if (obj) return obj;
+            return "-";
+        }
+
+        static getTargetText(skill) {
+            if (!skill) return "???";
+            const target = skill.target;
+            if (!target) return "";
+            const range = this.getRangeText(skill);
+            if (target === "Alle Mitstreiter auf einer Position" || target === "Alle Gegner einer Position") return "Position, " + range;
+            if (target === "Alle Gegner" && range === "Alle") return "Alle";
+            if (target === "Alle Gegner" && range === "1" || target === "Ein Gegner") return "1";
+            if (target === "Eigene Gruppe" || target === "Alle Gegner") return "Gruppe, " + range;
+            // TODO: "Alle Gegner" muss geprüft werden, ob es wirklich alle Gegner ist. Es kann "Position" oder "Alle" sein.
+            return target;
+        }
+
+        static getTypText(skill) {
+            if (!skill) return "???";
+            let result = skill.typ;
+            if (result === "Angriff" || result === "Verschlechterung") {
+                result += ": " + skill.angriffstyp;
+            }
+            const range = this.getTargetText(skill);
+            if (range) result += " (" + range + ")";
+            return result;
+        }
+
+        static getRangeText(skill) {
+            if (!skill.range) return "";
+            return skill.range.replaceAll("der Heldenstufe", "HS").replaceAll("der Fertigkeitenstufe", "FR");
+        }
+
+        static getVerwendungText(skill) {
+            if (!skill || !skill.verwendung) return "???";
+            let result = [];
+            if (skill.verwendung.vr) result.push("VR");
+            if (skill.verwendung.hr) result.push("HR");
+            if (skill.verwendung.p) result.push("Parade");
+            if (skill.verwendung.i) result.push("Initiative");
+            if (skill.verwendung.h) result.push("Heilung");
+            if (result.length === 0) return "-";
+            return result.join(" / ");
+        }
+
+        static getHauefigkeitText(skill) {
+            if(!skill) return "???";
+            let prio = Number.MAX_VALUE;
+            let result = "";
+            let setResult = function (prioNr, resultText) {
+                if (prioNr < prio) {
+                    result = resultText;
+                }
+            }
+            const effects = skill?.effects?.target;
+            if(effects) {
+                for (const [type, typeDef] of Object.entries(effects)) {
+                    for (const effect of typeDef) {
+                        const dauer = effect.dauer;
+                        if (!dauer) continue;
+                        if (dauer === "unbegrenzt") {
+                            return "Einmalig";
+                        }
+                        if (dauer.endsWith("Kampfende")) {
+                            setResult(1, "pro Kampf");
+                        } else if (dauer.endsWith("Runde") || dauer.endsWith("Runden")) {
+                            let anzahlRunden;
+                            if (dauer === "eine Runde") {
+                                anzahlRunden = 1;
+                            } else {
+                                anzahlRunden = dauer.match(/(\d+) Runde/)[1];
+                            }
+                            setResult(2, anzahlRunden + " " + (anzahlRunden === 1 ? "Runde" : "Runden"));
+                        } else if (dauer.endsWith("Rundenende")) {
+                            setResult(3, "pro Runde");
+                        } else {
+                            setResult(10, "-");
+                        }
+
+                    }
+                }
+            } else {
+                if(skill.typ==="Angriff" || skill.typ === "Parade" || skill.typ === "Heilung" || skill.typ === "Initiative") {
+                    return "immer";
+                } else if(Object.keys(skill.verwendung).length === 0) {
+                    return "";
+                } else if(skill.item) {
+                    return "Gegenstand";
+                } else if(skill.typ === "Verschlechterung") { // z.B. Hinterhalt mit 0 aufliegenden "Effekten"
+                    return "immer";
+                } else {
+                    return "???";
+                }
+            }
+            return result;
+        }
     }
 
     class MyStorage {
