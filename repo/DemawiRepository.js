@@ -2837,7 +2837,6 @@ class demawiRepository {
     }
 
     static WoDSkillsDb = class {
-        static #skillDataVersion = 3;
 
         static TYP = {
             ANGRIFF: "Angriff",
@@ -2864,17 +2863,17 @@ class demawiRepository {
 
         static async getSkill(skillName) {
             const skill = await _.WoDStorages.getSkillsDb().getValue(skillName.toLowerCase());
-            if (skill && skill.dv === this.#skillDataVersion) return skill;
+            if (skill && skill.dv === _.skillDataVersion) return skill;
             return null;
         }
 
         static async getSkillWithDirectLoad(skillName) {
             let skill = await _.WoDStorages.getSkillsDb().getValue(skillName.toLowerCase());
-            if (skill && skill.dv === this.#skillDataVersion) return skill;
+            if (skill && skill.dv === _.skillDataVersion) return skill;
             // ad-hoc load
             const content = await _.util.loadViaXMLRequest(this.getSkillUrlAlsPopup(skillName));
             const doc = await _.util.getDocumentFor(content);
-            return this.onSkillPageDirect(doc);
+            return _.SkillParser.onSkillPageDirect(doc);
         }
 
         static isAngriff(skillTyp) {
@@ -2884,163 +2883,14 @@ class demawiRepository {
         static async onSkillPage(doc) {
             const _this = this;
             return _.WindowManager.onlyOnce("onSkillPage", async function () {
-                return await _this.onSkillPageDirect(doc);
+                return await _.SkillParser.onSkillPageDirect(doc);
             });
         }
 
-        static async onSkillPageDirect(doc, content) {
-            doc = doc || document;
-            const skillName = doc.getElementsByTagName("h1")[0].textContent.trim().substring(11).trim();
-            const now = new Date().getTime();
-            const skill = {
-                id: skillName.toLowerCase(),
-                name: skillName,
-                dv: this.#skillDataVersion,
-                world: _.WoD.getMyWorld(doc),
-                ts: now
-            };
-            this.#parseSkillBeschreibung(doc, skill);
-            if (!skill.typ) {
-                console.warn("Skill '" + skillName + "' kann nicht bestimmt werden", doc);
-                return;
-            }
-            content = doc.getElementsByClassName("main_content")[0].outerHTML;
-            const skillSource = {
-                id: skillName.toLowerCase(),
-                src: content,
-                world: _.WoD.getMyWorld(doc),
-                ts: now
-            };
-            console.log("Skill wurde der Datenbank hinzugefügt", skillSource, skill);
-            await _.WoDStorages.getSkillsSourceDb().setValue(skillSource);
-            await _.WoDStorages.getSkillsDb().setValue(skill);
-            return skill;
-        }
+
 
         static getSkillUrlAlsPopup(skillName) {
             return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.encodeURIComponentFixed(skillName);
-        }
-
-        /**
-         * TODO: Auswirkungen werden noch nicht erfasst
-         */
-        static #parseSkillBeschreibung(doc, skill) {
-            for (const entryTR of doc.querySelectorAll(".content_table tr:nth-child(2) > td:nth-child(2) tr")) {
-                const key = entryTR.children[0].textContent.trim();
-                let value = entryTR.children[1].textContent.trim();
-                switch (key) {
-                    case "Typ":
-                        // Aktive Angriffe: Angriff, Verschlechterung
-                        // Aktive Sonstiges: Heilung, Verbesserung, Ruft Helfer, Initiative
-                        // Passiv: Parade
-                        skill.typ = value;
-                        break;
-                    case "Verwendbar":
-                        const verwendung = (skill.verwendung = {});
-                        const vr = value.includes("in Vorrunde");
-                        if (vr) verwendung.vr = 1;
-                        const hr = value.includes("in Runde");
-                        if (hr) verwendung.hr = 1;
-                        const heilung = (value === "zur Heilung");
-                        if (heilung) verwendung.h = 1;
-                        const parade = (value === "als Parade");
-                        if (parade) verwendung.p = 1;
-                        break;
-                    case "Angriffstyp": // bei typ = Angriff, Parade, Verschlechterung
-                        // Nahkampf, Fernkampf, Zauber, Sozial, Falle entschärfen, Verschrecken, Falle auslösen, Naturgewalt, Krankheit
-                        skill.angriffstyp = value;
-                        break;
-                    case "Fertigkeitenklasse":
-                        if (value !== "-") skill.klasse = value;
-                        break;
-                    case "Gegenstand":
-                        if (value !== "-") skill.item = value;
-                        break;
-                    case "Initiative": // Initiativewurf
-                        skill.iw = value;
-                        break;
-                    case "Angriff": // Angriffswurf
-                        skill.aw = value;
-                        break;
-                    case "Parade": // Paradewurf
-                        skill.pw = value;
-                        break;
-                    case "Schaden": // Schadenswurf
-                        skill.dmgw = value;
-                        break;
-                    case "Heilung": // Heilungswurf
-                        skill.hw = value;
-                        break;
-                    case "Mana-Kosten":
-                        if (value !== "-") {
-                            skill.manabasis = Number(value.match(/\((\d*)\)/)[1]);
-                        }
-                        break;
-                    case "Gewinn an HP":
-                        skill.gainHP = value;
-                        break;
-                    case "Gewinn an MP":
-                        skill.gainMP = value;
-                        break;
-                    case "Finaler Wirkbonus":
-                    case "Finaler Wirkbonus:":
-                        skill.wirkbonus = value;
-                        break;
-                    case "Ziel":
-                        skill.target = value;
-                        break;
-                    case "Max. betroffene Helden":
-                    case "Max. betroffene Gegner":
-                        skill.range = value;
-                        break;
-                    case "Verlust an HP": // z.B. "Zellteilung"
-                        skill.hpLoss = value;
-                        break;
-                    case "Designed by":
-                        // ignorieren
-                        break;
-                    default:
-                        console.warn("Unbekannte Fertigkeitkategorie gefunden, welche aktuell nicht verarbeitet wird: '" + key + "'", skill);
-                        alert("Unbekannte Fertigkeitkategorie gefunden, welche aktuell nicht verarbeitet wird: '" + key + "' (" + skill.name + ")");
-                        break;
-                }
-            }
-            const classInfo = doc.getElementById("classinfo");
-            if (classInfo) {
-                skill.classInfo = {};
-                const tds = classInfo.querySelectorAll("td");
-                for (const td of tds) {
-                    let fertigkeitType;
-                    let klasse;
-                    for (const cur of td.childNodes) {
-                        switch (cur.tagName) {
-                            case "H3":
-                                switch (cur.textContent.trim().replace(" für:", "")) {
-                                    case "Basisfertigkeit":
-                                        fertigkeitType = "bf";
-                                        break;
-                                    case "Nebenfertigkeit":
-                                        fertigkeitType = "nf";
-                                        break;
-                                    case "Klassenfremde Fertigkeit":
-                                        fertigkeitType = "kf";
-                                        break;
-                                }
-                                break;
-                            case undefined:
-                                klasse = cur.textContent.trim();
-                                break;
-                            case "SPAN":
-                                const lvl = Number(cur.textContent.match(/ (\d*)\)/)[1]);
-                                skill.classInfo[klasse] = {
-                                    type: fertigkeitType,
-                                    lvl: lvl,
-                                }
-                                break;
-                        }
-                    }
-                }
-            }
         }
 
     }
@@ -3085,13 +2935,13 @@ class demawiRepository {
         }
 
         static VOELKER = {
-            "Bergzwerg": "BZ",
+            "Bergzwerg": "Bz",
             "Dinturan": "Di",
             "Gnerk": "Gne",
             "Gnom": "Gno",
-            "Grenzländer": "GL",
-            "Halbling": "HL",
-            "Hügelzwerg": "HZ",
+            "Grenzländer": "Gl",
+            "Halbling": "Hl",
+            "Hügelzwerg": "Hz",
             "Kerasi": "Ke",
             "Mag-Mor-Elf": "MME",
             "Nebelwicht": "Ne",
@@ -3484,6 +3334,10 @@ class demawiRepository {
 
         static getItemUrl(itemName) {
             return "/wod/spiel/hero/item.php?IS_POPUP=1&name=" + _.util.encodeURIComponentFixed(itemName);
+        }
+
+        static getSkillUrl(skillName) {
+            return "/wod/spiel/hero/skill.php?IS_POPUP=1&name=" + _.util.encodeURIComponentFixed(skillName);
         }
 
         static createSkillLink(skillName, onclickPromise, fixId) {
@@ -4212,6 +4066,8 @@ class demawiRepository {
                     return ["", "\n", ""];
                 case "B":
                     return ["[b]", this.toBBCodeArray(node.childNodes, defaultSize), "[/b]"];
+                case "SUP":
+                    return ["", this.toBBCodeArray(node.childNodes, defaultSize), ""];
                 default:
                     if (typeof node.tagName === 'undefined') {
                         return ["", node.textContent.replaceAll("\n", ""), ""];
@@ -5003,6 +4859,10 @@ class demawiRepository {
 
         static fromBytesToMB(count) {
             return Math.ceil(10 * count / 1024 / 1024) / 10 + " MB";
+        }
+
+        static urlHasAttribute(name) {
+            return !!new URL(window.location.href).searchParams.get(name);
         }
 
         static fromBytesToDynamic(count) {
@@ -6496,7 +6356,165 @@ class demawiRepository {
         return ReportParser;
     }();
 
-    static ItemParserDataVersion = 7;
+    static skillDataVersion = 4;
+    static SkillParser = class {
+
+        static async onSkillPageDirect(doc, content) {
+            doc = doc || document;
+            const skillName = doc.getElementsByTagName("h1")[0].textContent.trim().substring(11).trim();
+            const now = new Date().getTime();
+            const skill = {
+                id: skillName.toLowerCase(),
+                name: skillName,
+                dv: _.skillDataVersion,
+                world: _.WoD.getMyWorld(doc),
+                ts: now
+            };
+            this.#parseSkillBeschreibung(doc, skill);
+            if (!skill.typ) {
+                console.warn("Skill '" + skillName + "' kann nicht bestimmt werden", doc);
+                return;
+            }
+            content = doc.getElementsByClassName("main_content")[0].outerHTML;
+            const skillSource = {
+                id: skillName.toLowerCase(),
+                src: content,
+                world: _.WoD.getMyWorld(doc),
+                ts: now
+            };
+            console.log("Skill wurde der Datenbank hinzugefügt", skillSource, skill);
+            await _.WoDStorages.getSkillsSourceDb().setValue(skillSource);
+            await _.WoDStorages.getSkillsDb().setValue(skill);
+            return skill;
+        }
+
+        static #parseSkillBeschreibung(doc, skill) {
+            _.EffectsParser.writeItemDataEffects(skill, doc);
+            for (const entryTR of doc.querySelectorAll(".content_table tr:nth-child(2) > td:nth-child(2) tr")) {
+                const key = entryTR.children[0].textContent.trim();
+                let value = entryTR.children[1].textContent.trim();
+                switch (key) {
+                    case "Typ":
+                        // Aktive Angriffe: Angriff, Verschlechterung
+                        // Aktive Sonstiges: Heilung, Verbesserung, Ruft Helfer, Initiative
+                        // Passiv: Parade
+                        skill.typ = value;
+                        break;
+                    case "Verwendbar":
+                        const verwendung = (skill.verwendung = {});
+                        const vr = value.includes("Vorrunde"); // direkt davor &nbsp;
+                        if (vr) verwendung.vr = 1;
+                        const hr = value.includes("Runde"); // direkt davor &nbsp;
+                        if (hr) verwendung.hr = 1;
+                        const heilung = (value === "zur Heilung");
+                        if (heilung) verwendung.h = 1;
+                        const parade = (value === "als Parade");
+                        if (parade) verwendung.p = 1;
+                        const initiative = (value.includes("Initiative"));
+                        if(initiative) verwendung.i = 1;
+                        break;
+                    case "Angriffstyp": // bei typ = Angriff, Parade, Verschlechterung
+                        // Nahkampf, Fernkampf, Zauber, Sozial, Falle entschärfen, Verschrecken, Falle auslösen, Naturgewalt, Krankheit
+                        skill.angriffstyp = value;
+                        break;
+                    case "Fertigkeitenklasse":
+                        if (value !== "-") skill.klasse = value;
+                        break;
+                    case "Gegenstand":
+                        if (value !== "-") skill.item = value;
+                        break;
+                    case "Initiative": // Initiativewurf
+                        skill.iw = value;
+                        break;
+                    case "Angriff": // Angriffswurf
+                        skill.aw = value;
+                        break;
+                    case "Parade": // Paradewurf
+                        skill.pw = value;
+                        break;
+                    case "Schaden": // Schadenswurf
+                        skill.dmgw = value;
+                        break;
+                    case "Heilung": // Heilungswurf
+                        skill.hw = value;
+                        break;
+                    case "Mana-Kosten":
+                        if (value !== "-") {
+                            skill.manabasis = Number(value.match(/\((\d*)\)/)[1]);
+                        }
+                        break;
+                    case "Gewinn an HP":
+                        skill.gainHP = value;
+                        break;
+                    case "Gewinn an MP":
+                        skill.gainMP = value;
+                        break;
+                    case "Finaler Wirkbonus":
+                    case "Finaler Wirkbonus:":
+                        skill.wirkbonus = value;
+                        break;
+                    case "Ziel":
+                        skill.target = value;
+                        break;
+                    case "Max. betroffene Helden":
+                    case "Max. betroffene Gegner":
+                        skill.range = value;
+                        break;
+                    case "Verlust an HP": // z.B. "Zellteilung"
+                        skill.hpLoss = value;
+                        break;
+                    case "Verlust an MP":
+                        skill.mpLoss = value;
+                        break;
+                    case "Designed by":
+                        // ignorieren
+                        break;
+                    default:
+                        console.warn("Unbekannte Fertigkeitkategorie gefunden, welche aktuell nicht verarbeitet wird: '" + key + "'", skill);
+                        alert("Unbekannte Fertigkeitkategorie gefunden, welche aktuell nicht verarbeitet wird: '" + key + "' (" + skill.name + ")");
+                        break;
+                }
+            }
+            const classInfo = doc.getElementById("classinfo");
+            if (classInfo) {
+                skill.classInfo = {};
+                const tds = classInfo.querySelectorAll("td");
+                for (const td of tds) {
+                    let fertigkeitType;
+                    let klasse;
+                    for (const cur of td.childNodes) {
+                        switch (cur.tagName) {
+                            case "H3":
+                                switch (cur.textContent.trim().replace(" für:", "")) {
+                                    case "Basisfertigkeit":
+                                        fertigkeitType = "bf";
+                                        break;
+                                    case "Nebenfertigkeit":
+                                        fertigkeitType = "nf";
+                                        break;
+                                    case "Klassenfremde Fertigkeit":
+                                        fertigkeitType = "kf";
+                                        break;
+                                }
+                                break;
+                            case undefined:
+                                klasse = cur.textContent.trim();
+                                break;
+                            case "SPAN":
+                                const lvl = Number(cur.textContent.match(/ (\d*)\)/)[1]);
+                                skill.classInfo[klasse] = {
+                                    type: fertigkeitType,
+                                    lvl: lvl,
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    static ItemParserDataVersion = 8;
     static ItemParser = class {
 
         /**
@@ -6671,7 +6689,12 @@ class demawiRepository {
 
             try {
                 this.writeItemData(item, itemHTMLElement);
-                this.writeItemDataEffects(item, itemHTMLElement);
+                if (this.hasSetOrGemBonus(itemHTMLElement)) {
+                    item.irregular = true;
+                } else {
+                    delete item.irregular;
+                }
+                _.EffectsParser.writeItemDataEffects(item, itemHTMLElement);
                 item.dv = _.ItemParserDataVersion;
 
                 if (einschraenkungAnwendungen) { // Gegenstandsklasse
@@ -6739,6 +6762,30 @@ class demawiRepository {
                             typ = "alle";
                         }
                         data.klasse = {
+                            typ: typ,
+                            def: def,
+                        }
+                        break;
+                    case "Völker":
+                        var klassen = tr.children[1].textContent.trim();
+                        var typ;
+                        var def;
+                        if (klassen.startsWith("ausschließlich für")) {
+                            typ = "nur";
+                            def = Array();
+                            for (const klasse of tr.children[1].getElementsByTagName("span")) {
+                                def.push(klasse.textContent.trim());
+                            }
+                        } else if (klassen.startsWith("nicht für")) {
+                            typ = "nicht";
+                            def = Array();
+                            for (const klasse of tr.children[1].getElementsByTagName("span")) {
+                                def.push(klasse.textContent.trim());
+                            }
+                        } else if (klassen.startsWith("für alle")) {
+                            typ = "alle";
+                        }
+                        data.volk = {
                             typ: typ,
                             def: def,
                         }
@@ -6827,13 +6874,20 @@ class demawiRepository {
             }
         }
 
+    }
+
+    /**
+     * Wird für Item sowie auch Skill-Effekte genutzt
+     */
+    static EffectsParser = class {
+
+        static isItem(item) { // im Gegensatz zu einem Skill
+            return item?.data !== undefined;
+        }
+
         static writeItemDataEffects(item, itemHTMLElement) {
-            const div = itemHTMLElement.querySelector("#link");
-            if (this.hasSetOrGemBonus(div)) {
-                item.irregular = true;
-            } else {
-                delete item.irregular;
-            }
+            const div = itemHTMLElement.querySelector("#link") || itemHTMLElement.querySelector("form"); // item or skill-detail
+            console.log("Item-Effekte:", div);
             item.effects = {};
             var currentOwnerContext;
             var currentBoniContext;
@@ -6855,7 +6909,7 @@ class demawiRepository {
                 var nurWirkung = false;
                 const cur = div.children[i];
                 if (cur.tagName === "H2") {
-                    ownerType = this.getOwnerType(cur.textContent.trim());
+                    ownerType = this.getOwnerType(cur.textContent.trim()); // Besitzer oder Betroffener
                     currentOwnerContext = item.effects[ownerType];
                     if (!currentOwnerContext) {
                         currentOwnerContext = {};
@@ -6864,7 +6918,7 @@ class demawiRepository {
                 } else if (cur.tagName === "H3") {
                     tableType = this.getType(cur.textContent.trim());
                     currentBoniContext = getBoniContext(tableType);
-                } else if (cur.className === "content_table") {
+                } else if (ownerType && cur.className === "content_table") {
                     const tableTRs = cur.querySelectorAll('tr.row0, tr.row1');
                     switch (tableType) {
                         case "schaden":
@@ -6982,7 +7036,6 @@ class demawiRepository {
                     alert("Unbekannte H2-Item Überschrift: '" + text + "'");
             }
         }
-
     }
 
     static import(type) {
