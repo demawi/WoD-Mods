@@ -336,19 +336,26 @@
                 var sortOrderColumnDef;
                 const myWorld = _.WoD.getMyWorld();
 
-                async function getItemResult() {
-                    var items;
+                async function search() {
+                    const startTime = new Date();
                     const search4Items = itemDBSearch.checked;
-                    if (search4Items) { // wenn ja nach Items suche, wenn nein nach fehlenden Items suchen
+                    console.log("search4Items", search4Items);
+                    let items = null;
+                    if(search4Items) {
                         items = await MyStorage.getItemDB().getAll();
                     } else {
                         items = await MyStorage.getItemIndexDB().getAll();
                     }
+
                     const itemResult = Array();
                     for (const item of items) {
-                        if (!search4Items && !_.WoDItemDb.couldBeValid(item, myWorld)) continue;
-                        if (missingSearch.checked && !item.data || search4Items && item.data && Searcher.matches(item, true)) {
+                        if (!_.WoDItemDb.couldBeValid(item, myWorld)) continue;
+                        if (missingSearch.checked && !item.data) {
                             itemResult.push(item);
+                        } else if(search4Items) {
+                            if (item.data && Searcher.matches(item, true)) {
+                                itemResult.push(item);
+                            }
                         }
                     }
                     if (search4Items) {
@@ -364,6 +371,7 @@
                             return getItemValue(a, sortOrderColumnDef).localeCompare(getItemValue(b, sortOrderColumnDef));
                         })
                     }
+                    console.log("ItemSearchTime: ", itemResult.length, "in", Math.round((new Date() - startTime)/10)/100, "ms");
                     return itemResult;
                 }
 
@@ -372,7 +380,7 @@
                     if (resultContainer.children.length > 0) {
                         resultContainer.removeChild(resultContainer.children[0]);
                     }
-                    const itemOrSkillResults = await getItemResult()
+                    const itemOrSkillResults = await search()
 
                     updateMissingButton();
                     const table = document.createElement("table");
