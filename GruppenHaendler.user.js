@@ -51,7 +51,7 @@
             niedrigsterPreisButtonMinus1.addEventListener("click", () => this.loop(this.niedrigsterPreisNonVGsMinus1));
             container.append(niedrigsterPreisButtonMinus1);
 
-            const constPreisButton = _.UI.createWodButton("Alles: Konstante Reduktion (-1% pro Tag noch ohne Schwelle)");
+            const constPreisButton = _.UI.createWodButton("Alles: Konstante Reduktion (-1% pro Tag, Schwellwert 12h)");
             constPreisButton.addEventListener("click", () => this.loop(this.constantReduction.bind(this)));
             container.append(constPreisButton);
 
@@ -109,7 +109,7 @@
         static constantReduction(sellEntry) {
             const lagerdauerH = sellEntry.lagerdauer;
             console.log("Lagerdauer: ", lagerdauerH);
-            if(lagerdauerH > 1) {
+            if(lagerdauerH > 12) {
                 const reduktion = 1 - (lagerdauerH/24 * this.reduktionProTag);
                 return Math.floor(sellEntry.bisherigerPreis * reduktion);
             }
