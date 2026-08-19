@@ -47,7 +47,11 @@
             niedrigsterPreisButton.addEventListener("click", () => this.loop(this.niedrigsterPreisNonVGs));
             container.append(niedrigsterPreisButton);
 
-            const constPreisButton = _.UI.createWodButton("Alles: Konstante Reduktion (-1% pro Tag)");
+            const niedrigsterPreisButtonMinus1 = _.UI.createWodButton("NonVGs: Setze auf Tiefstpreis - 1");
+            niedrigsterPreisButtonMinus1.addEventListener("click", () => this.loop(this.niedrigsterPreisNonVGsMinus1));
+            container.append(niedrigsterPreisButtonMinus1);
+
+            const constPreisButton = _.UI.createWodButton("Alles: Konstante Reduktion (-1% pro Tag noch ohne Schwelle)");
             constPreisButton.addEventListener("click", () => this.loop(this.constantReduction.bind(this)));
             container.append(constPreisButton);
 
@@ -91,6 +95,14 @@
                 return; //  sellEntry.vorschlag; // Riskant durch Scheinverkäufe
             } else {
                 return sellEntry.tiefspreis;
+            }
+        }
+
+        static niedrigsterPreisNonVGsMinus1(sellEntry) {
+            if(sellEntry.isVG) {
+                return; //  sellEntry.vorschlag; // Riskant durch Scheinverkäufe
+            } else {
+                return sellEntry.tiefspreis - 1;
             }
         }
 
