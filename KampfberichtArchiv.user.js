@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.15.6
+// @version        0.15.7
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -2252,7 +2252,7 @@
             }
 
             if (settings.get(MySettings.SETTING.AUTO_LOESCHEN)) {
-                // Täglich einmal
+                // Täglich nur einmal
                 if (!settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK) || new Date(settings.get(MySettings.SETTING.AUTO_LOESCHEN_CHECK)) < new Date().setDate(new Date().getDate() - 1)) {
                     const settings = await MySettings.get();
                     const anzahlTage = settings.get(MySettings.SETTING.AUTO_LOESCHEN_TAGE);
