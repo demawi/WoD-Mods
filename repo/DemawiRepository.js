@@ -2968,6 +2968,7 @@ class demawiRepository {
             EVENTLIST: "eventlist",
             PLAY: "play",
             HERO_CLASS: "heroClass",
+            MARKET: "market",
         }
 
         static #viewCache;
@@ -4433,6 +4434,13 @@ class demawiRepository {
             if (!button.style.fontSize) button.style.fontSize = "12px";
             button.style.cursor = "pointer";
             button.onclick = callback;
+            return button;
+        }
+
+        static createWodButton(htmlContent, callback) {
+            const button = this.createRealButton(htmlContent, callback);
+            button.classList.add("button");
+            button.classList.add("clickable");
             return button;
         }
 
@@ -6537,7 +6545,7 @@ class demawiRepository {
         }
     }
 
-    static ItemParserDataVersion = 8;
+    static ItemParserDataVersion = 9;
     static ItemParser = class {
 
         /**
@@ -6592,17 +6600,19 @@ class demawiRepository {
             const now = new Date().getTime();
             itemIndex.ts = now;
             const myWorld = _.WoD.getMyWorld();
+            if(!myWorld) {
+                console.error("Kann keine Welt bestimmen auf der gespielt wird!!!");
+                return;
+            }
             if (myWorld) {
                 const worldInfos = itemIndex.world[myWorld] || (itemIndex.world[myWorld] = {});
                 worldInfos.ts = now;
                 worldInfos.valid = 0;
             }
-            let foundValid = false;
-            for (const curWorldInfo of Object.values(itemIndex.world)) {
-                if (curWorldInfo.valid) {
-                    foundValid = true;
-                    break;
-                }
+            const realItem = await this.getItemDB().getValue(itemIndex.id);
+            if(realItem) {
+                realItem.world = itemIndex.world;
+                await this.getItemDB().setValue(realItem);
             }
             await this.getItemIndexDB().setValue(itemIndex);
         }
@@ -6660,7 +6670,7 @@ class demawiRepository {
             await itemIndexDB.setValue(itemIndex);
 
             // Daten-Übernahme
-            const item = await this.parseSourceItem(itemSource, itemName);
+            const item = await this.parseSourceItem(itemSource, itemIndex, itemName);
             await itemDB.setValue(item);
             console.log("[" + _.getModName() + "]: Gegenstand der ItemDB hinzugefügt: ", itemSource, item);
 
@@ -6675,9 +6685,9 @@ class demawiRepository {
                 console.log("Migrate to itemdataversion " + _.ItemParserDataVersion + " for " + needRewrite.length + " entries...", needRewrite);
                 for (const curItemId of needRewrite) {
                     const sourceItem = await itemSourcesDB.getValue(curItemId);
+                    const indexItem = await itemIndexDB.getValue(curItemId);
                     if (sourceItem) {
-                        //const curItem = await this.getItemDB().getValue(curItemId);
-                        const item = await this.parseSourceItem(sourceItem);
+                        const item = await this.parseSourceItem(sourceItem, indexItem);
                         await itemDB.setValue(item);
                     }
                 }
@@ -6691,10 +6701,10 @@ class demawiRepository {
             return linkElement.getElementsByClassName("gem_bonus_also_by_gem").length > 0 || linkElement.getElementsByClassName("gem_bonus_only_by_gem").length > 0;
         }
 
-        static async parseSourceItem(itemSource, itemName) {
+        static async parseSourceItem(itemSource, itemIndex, itemName) {
             const item = await this.getItemDB().getValue(itemSource.id) || _.WoDItemDb.createItem(itemName);
             item.ts = itemSource.ts;
-            item.world = itemSource.world;
+            item.world = itemIndex.world;
             await this.#writeItemData(item, itemSource);
             return item;
         }
