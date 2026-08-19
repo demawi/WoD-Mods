@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Erweiterte Kampfstatistik
-// @version        0.21.23
+// @version        0.21.24
 // @author         demawi
 // @namespace      demawi
 // @description    Erweitert die World of Dungeons Kampfstatistiken
@@ -1220,16 +1220,16 @@
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).fromMe);
 
-                    let heal = util.arrayFilter(actions, action => action.skill.typ === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer").length;
+                    let heal = util.arrayFilter(actions, action => action.skill && action.skill.typ === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.skill && (action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer")).length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
                 this.columns.push(new Column("Aktionsarten", center("Passiva<br>(Parade / Geheilt / Gebufft)"), stat => {
                     let actions = stat.actions;
                     actions = util.arrayFilter(actions, action => action.type !== "init");
                     actions = util.arrayFilter(actions, action => stat.actionClassification(action).atMe);
-                    let heal = util.arrayFilter(actions, action => action.skill.typ === "Heilung").length;
-                    let wirkung = util.arrayFilter(actions, action => action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer").length;
+                    let heal = util.arrayFilter(actions, action => action.skill && action.skill.typ === "Heilung").length;
+                    let wirkung = util.arrayFilter(actions, action => action.skill && (action.skill.typ === "Verbesserung" || action.skill.typ === "Ruft Helfer")).length;
                     return center((actions.length - heal - wirkung) + " / " + heal + " / " + wirkung);
                 }));
             }
