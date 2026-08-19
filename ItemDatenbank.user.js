@@ -3,7 +3,7 @@
 // @version        0.13.0
 // @author         demawi
 // @namespace      demawi
-// @description    Datenbank der Items und Suche
+// @description    Datenbank für die Suche von Items und Fertigkeiten
 //
 // @match          *://*.world-of-dungeons.de/wod/spiel/*
 // @match          *://*.world-of-dungeons.de/
