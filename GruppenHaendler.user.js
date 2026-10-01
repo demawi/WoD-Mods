@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] GruppenHaendler
-// @version        0.2.0
+// @version        0.2.1
 // @author         demawi
 // @namespace      demawi
 // @description    Evtl. hilfreiche Funktionailtäten für den Gruppen-Händler
@@ -103,7 +103,9 @@
                 if (result) {
                     console.log("Neuer Preis: ", entry, result);
                     preisInput.value = result;
-                    preisInput.style.backgroundColor = "darkblue";
+                    let color = "darkblue";
+                    if (result - entry.bisherigerPreis < -100) color = "darkred";
+                    preisInput.style.backgroundColor = color;
                     preisInput.title = entry.bisherigerPreis + " => " + result + " (" + (result - entry.bisherigerPreis) + ")";
                 }
             }
