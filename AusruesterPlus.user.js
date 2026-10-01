@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Ausrüster Plus
-// @version        0.10.2
+// @version        0.10.3
 // @author         demawi
 // @namespace      demawi
 // @description    Erweiterungen für die Ausrüstung.
@@ -1240,15 +1240,17 @@
         }
 
         /**
-         * Primäres Ziel: möglichst kleine Stacks aufbrauchen
+         * Primäres Ziel: So viel wie nötig, so wenig wie möglich. (Möglichst kleine Stacks aufbrauchen)
          */
         static getDynamicVGs(vgsDef, additionalUsedSlots, debug) {
             if (!vgsDef) return [];
             const result = {};
+            if(debug) console.log("vgsDef", vgsDef);
             for (const [slotName, itemsDef] of Object.entries(vgsDef)) {
                 // 1. Auswählbare VG-Statistiken zusammenzählen
                 const stacksDef = FormHelper.getSelectableVGStatistics(slotName);
-                if (!stacksDef) return;
+                if (debug) console.log("stacksDef", stacksDef);
+                if (!stacksDef) continue;
                 const slotResult = result[slotName] = [];
                 const freeSlots = itemsDef.slots - (additionalUsedSlots[slotName] || 0); // Anzahl verfügbarer Slots
                 if (debug) console.log("FREESLOTS " + slotName + ": " + freeSlots);
@@ -1288,7 +1290,7 @@
                 if (debug) console.log("Initial SlotUsage: ", _.util.cloneObject(slotUsages));
 
                 // 3. Slot-Priorisierung: Die noch freien Slots vergeben
-                if (slotUsages.length === 0) return result; // nix zu nix vergeben
+                if (slotUsages.length === 0) continue; // nix zu nix vergeben
                 for (let i = 0, l = freeSlots - realUsedSlots; i < l; i++) {
                     const best = slotUsages.reduce(function (prev, current) {
                         return (prev && prev.prio > current.prio) ? prev : current

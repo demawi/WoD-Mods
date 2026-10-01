@@ -171,9 +171,12 @@
                 const allHrefs = document.querySelectorAll("a");
                 var missingItemsFound = 0;
                 const myWorldId = _.WoD.getMyWorld();
+                const debug = false;
+                if(debug) console.log("ItemTracking.start", allHrefs);
                 await _.util.forEachSafe(allHrefs, async itemLinkElement => {
                     const [itemName] = _.ItemParser.getItemNameFromElement(itemLinkElement);
                     if (!itemName) return;
+                    if(debug) console.log("Found Item on page: ", itemName);
                     const itemIndex = await MyStorage.getItemIndexDB().getValue(itemName);
                     if (itemIndex && !_.WoDItemDb.couldBeValid(itemIndex, myWorldId)) return;
                     if (!itemIndex || !itemIndex.data) missingItemsFound++;
@@ -189,7 +192,7 @@
                         document.body.append(missingSpanOverall);
                     }
                 }
-                console.log("ItemDB.checkSiteForItems...finished!");
+                if(debug) console.log("ItemDB.checkSiteForItems...finished!");
                 observer.observe(document.body, {
                     attributes: false, // manchmal werden zwar Elemente eingeblendet, die waren dann aber vorher auch schon so da
                     childList: true,
@@ -339,20 +342,20 @@
                 async function search() {
                     const startTime = new Date();
                     const search4Items = itemDBSearch.checked;
-                    console.log("search4Items", search4Items);
                     let items = null;
-                    if(search4Items) {
+                    if (search4Items) {
                         items = await MyStorage.getItemDB().getAll();
                     } else {
                         items = await MyStorage.getItemIndexDB().getAll();
                     }
 
+                    Searcher.dumpCurrentState();
                     const itemResult = Array();
                     for (const item of items) {
                         if (!_.WoDItemDb.couldBeValid(item, myWorld)) continue;
                         if (missingSearch.checked && !item.data) {
                             itemResult.push(item);
-                        } else if(search4Items) {
+                        } else if (search4Items) {
                             if (item.data && Searcher.matches(item, true)) {
                                 itemResult.push(item);
                             }
@@ -371,7 +374,7 @@
                             return getItemValue(a, sortOrderColumnDef).localeCompare(getItemValue(b, sortOrderColumnDef));
                         })
                     }
-                    console.log("ItemSearchTime: ", itemResult.length, "in", Math.round((new Date() - startTime)/10)/100, "ms");
+                    console.log("ItemSearchTime: ", itemResult.length, "in", Math.round((new Date() - startTime) / 10) / 100, "ms");
                     return itemResult;
                 }
 
@@ -812,7 +815,7 @@
             obj.forEach(parade => {
                 if (result.length > 0) result += "<br>";
                 const bonus = AutoColumns.replaceHSFRMitBerechnung(parade.bonus);
-                console.log("GegBonus", parade.bonus, bonus);
+                //console.log("GegBonus", parade.bonus, bonus);
                 let bemerkungAdd = (parade.dauer ? " (" + parade.dauer + (parade.bemerkung ? "/" + parade.bemerkung : "") + ")" : "");
                 if (parade.nurWirkung) bemerkungAdd += " (nur Wirkung)";
                 result += (linkFn && linkFn(parade.type).outerHTML || parade.type) + ": " + bonus + bemerkungAdd;
@@ -862,6 +865,9 @@
                         if (select1.value === "") return true;
                         const classInfo = skill?.classInfo;
                         return !classInfo || !!classInfo[select1.value];
+                    },
+                    dump: function () {
+                        return this.name + "=" + select1.value;
                     }
                 }
             }
@@ -900,6 +906,9 @@
                     matchesSkill: function (skill) {
                         return true;
                     },
+                    dump: function () {
+                        return this.name + "=" + select1.value;
+                    }
                 }
             }
 
@@ -918,6 +927,9 @@
                     matchesSkill: function (skill) {
                         return true;
                     },
+                    dump: function () {
+                        return this.name + "=" + select1.value;
+                    }
                 }
             }
 
@@ -939,6 +951,9 @@
                     matchesSkill: function (skill) {
                         return false;
                     },
+                    dump: function () {
+                        return this.name + "=" + select1.value;
+                    }
                 }
             }
 
@@ -954,6 +969,9 @@
                         if (!skill.klasse) return false;
                         return skill.klasse === select1.value;
                     },
+                    dump: function () {
+                        return this.name + "=" + select1.value;
+                    }
                 }
             }
 
@@ -969,6 +987,9 @@
                         if (!(skill.typ === "Angriff" || skill.typ === "Verschlechterung") || !skill.angriffstyp) return false;
                         return skill.angriffstyp === select1.value;
                     },
+                    dump: function () {
+                        return this.name + "=" + select1.value;
+                    }
                 }
             }
 
@@ -987,6 +1008,9 @@
                     matchesSkill: function (skill) {
                         return select1.value === "";
                     },
+                    dump: function () {
+                        return this.name + "=" + select1.value;
+                    }
                 }
             }
 
@@ -1005,6 +1029,9 @@
                     matchesSkill: function (skill) {
                         return this.matchesItem(skill);
                     },
+                    dump: function () {
+                        return this.name + "=" + selectBesitzerBetroffener.value;
+                    }
                 }
             }
 
@@ -1036,6 +1063,9 @@
                     matchesSkill: function (skill) {
                         return true;
                     },
+                    dump: function () {
+                        return this.name + "=" + textFrom.value.trim()+" bis "+textTo.value.trim();
+                    }
                 }
             }
 
@@ -1063,6 +1093,9 @@
                     matchesSkill: function (skill) {
                         return false;
                     },
+                    dump: function () {
+                        return this.name + "=" + textFrom.value.trim()+" bis "+textTo.value.trim();
+                    }
                 }
             }
 
@@ -1161,6 +1194,9 @@
                     matchesSkill: function (skill) {
                         return this.matchesItem(skill);
                     },
+                    dump: function () {
+                        return this.name + ":Schadensart=" + selectSchadensart.value+",Besitzer/Betroffener="+selectBesitzerBetroffener.value+",Angriffsart="+selectAngriffstyp.value+(boniType === "schaden" ? ",Trigger="+selectAZ.value : "");
+                    }
                 }
             }
 
@@ -1199,6 +1235,9 @@
                     matchesSkill: function (skill) {
                         return this.matchesItem(skill);
                     },
+                    dump: function () {
+                        return this.name + ":Schadensart=" + select1.value+",Besiter/Betroffener="+select2.value+",debuff="+checkBox.checked;
+                    }
                 }
             }
 
@@ -1377,6 +1416,16 @@
             }
         }
 
+        static dumpCurrentState() {
+            console.log("Suchfeld-String: '" + WoD.getSuchfeld().value.trim() + "'");
+            for (var i = 0, l = this.QueryTable.validators.length; i < l; i++) {
+                const currentValidator = this.QueryTable.validators[i];
+                const negatorWish = this.QueryTable.negators[i] || false;
+                if (!currentValidator) continue;
+                console.log("Validator("+(i+1)+"): " + currentValidator.dump() + " Negiert:" + negatorWish);
+            }
+        }
+
         static matches(itemOrSkill) {
             const result = this.#matches(itemOrSkill);
             if (false) {
@@ -1398,7 +1447,7 @@
         }
 
         static #matches(itemOrSkill, isItem) {
-            this.debug = itemOrSkill.name.includes("Thanat");
+            this.debug = false; // || itemOrSkill.name.includes("Thanat");
             if (this.debug) console.log(itemOrSkill);
             const suchfeldWert = WoD.getSuchfeld().value.trim();
             if (suchfeldWert !== "") {
@@ -1436,7 +1485,7 @@
                 } else {
                     const skillName = tr.children[1].textContent.trim();
                     const skill = await _.WoDSkillsDb.getSkill(skillName);
-                    if(!skill) {
+                    if (!skill) {
                         ItemAutoLoader.autoLoadSkill(skillName);
                     }
                     add(skill ? this.getText(skill.klasse) : "???");
@@ -1494,7 +1543,7 @@
         }
 
         static getHauefigkeitText(skill) {
-            if(!skill) return "???";
+            if (!skill) return "???";
             let prio = Number.MAX_VALUE;
             let result = "";
             let setResult = function (prioNr, resultText) {
@@ -1503,7 +1552,7 @@
                 }
             }
             const effects = skill?.effects?.target;
-            if(effects) {
+            if (effects) {
                 for (const [type, typeDef] of Object.entries(effects)) {
                     for (const effect of typeDef) {
                         const dauer = effect.dauer;
@@ -1530,13 +1579,13 @@
                     }
                 }
             } else {
-                if(skill.typ==="Angriff" || skill.typ === "Parade" || skill.typ === "Heilung" || skill.typ === "Initiative") {
+                if (skill.typ === "Angriff" || skill.typ === "Parade" || skill.typ === "Heilung" || skill.typ === "Initiative") {
                     return "immer";
-                } else if(Object.keys(skill.verwendung).length === 0) {
+                } else if (Object.keys(skill.verwendung).length === 0) {
                     return "";
-                } else if(skill.item) {
+                } else if (skill.item) {
                     return "Gegenstand";
-                } else if(skill.typ === "Verschlechterung") { // z.B. Hinterhalt mit 0 aufliegenden "Effekten"
+                } else if (skill.typ === "Verschlechterung") { // z.B. Hinterhalt mit 0 aufliegenden "Effekten"
                     return "immer";
                 } else {
                     return "???";
