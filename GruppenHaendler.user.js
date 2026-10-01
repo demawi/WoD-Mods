@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] GruppenHaendler
-// @version        0.1.0
+// @version        0.2.0
 // @author         demawi
 // @namespace      demawi
 // @description    Evtl. hilfreiche Funktionailtäten für den Gruppen-Händler
@@ -43,6 +43,23 @@
             container.classList.add("layout_clear");
             searchContainer.parentElement.insertBefore(container, searchContainer.nextSibling);
 
+            const bestandAktualisieren = _.UI.createWodButton("Verkäufe aktualisieren");
+            bestandAktualisieren.title = "NonVGs (erster Treffer zählt): \nWenn Tiefstpreis < Altpreis: Neupreis=Tiefstpreis-1\nWenn Lagerdauer > 20 Tage: Neupreis = Altpreis - 1%";
+            bestandAktualisieren.title += "\n\nVGs (erster Treffer zählt): \nPreisreduktion alle 20 Tage um 1%. Schwellwert 24h.";
+            bestandAktualisieren.addEventListener("click", () =>
+                this.loop(sellEntry => {
+                    if (!sellEntry.isVG) {
+                        if (sellEntry.tiefspreis < sellEntry.bisherigerPreis) {
+                            return sellEntry.tiefspreis - 1;
+                        } else {
+                            return Mod.constantReduction(sellEntry, 24, 0.0005); // 1% pro 20 Tage
+                        }
+                    } else {
+                        return Mod.constantReduction(sellEntry, 24, 0.0005); // 1% pro 20 Tage
+                    }
+                }));
+            container.append(bestandAktualisieren);
+
             const niedrigsterPreisButton = _.UI.createWodButton("NonVGs: Setze auf Tiefstpreis");
             niedrigsterPreisButton.addEventListener("click", () => this.loop(this.niedrigsterPreisNonVGs));
             container.append(niedrigsterPreisButton);
@@ -51,8 +68,8 @@
             niedrigsterPreisButtonMinus1.addEventListener("click", () => this.loop(this.niedrigsterPreisNonVGsMinus1));
             container.append(niedrigsterPreisButtonMinus1);
 
-            const constPreisButton = _.UI.createWodButton("Alles: Konstante Reduktion (-1% pro Tag, Schwellwert 12h)");
-            constPreisButton.addEventListener("click", () => this.loop(this.constantReduction.bind(this)));
+            const constPreisButton = _.UI.createWodButton("Alles: Konstante Reduktion (-1% pro 20 Tage, Schwellwert 24h)");
+            constPreisButton.addEventListener("click", () => this.loop(Mod.constantReduction));
             container.append(constPreisButton);
 
             console.log("GruppenHaendler geladen2", document.querySelectorAll(".content_table tbody tr"));
@@ -83,15 +100,17 @@
                 }
                 const entry = new SellEntry(name, festpreis, aktuellerTiefstpreis, meinBisherigerPreis, vorschlag, isVG, lagerdauer);
                 const result = fn(entry);
-                console.log("Entry: ", entry, result);
                 if (result) {
+                    console.log("Neuer Preis: ", entry, result);
                     preisInput.value = result;
+                    preisInput.style.backgroundColor = "darkblue";
+                    preisInput.title = entry.bisherigerPreis + " => " + result + " (" + (result - entry.bisherigerPreis) + ")";
                 }
             }
         }
 
         static niedrigsterPreisNonVGs(sellEntry) {
-            if(sellEntry.isVG) {
+            if (sellEntry.isVG) {
                 return; //  sellEntry.vorschlag; // Riskant durch Scheinverkäufe
             } else {
                 return sellEntry.tiefspreis;
@@ -99,19 +118,22 @@
         }
 
         static niedrigsterPreisNonVGsMinus1(sellEntry) {
-            if(sellEntry.isVG) {
+            if (sellEntry.isVG) {
                 return; //  sellEntry.vorschlag; // Riskant durch Scheinverkäufe
             } else {
                 return sellEntry.tiefspreis - 1;
             }
         }
 
-        static constantReduction(sellEntry) {
+        static constantReduction(sellEntry, schwellwertInH = 12, reduktionProTag = 0.0005) { // 1% pro 20 Tage
             const lagerdauerH = sellEntry.lagerdauer;
-            console.log("Lagerdauer: ", lagerdauerH);
-            if(lagerdauerH > 12) {
-                const reduktion = 1 - (lagerdauerH/24 * this.reduktionProTag);
-                return Math.floor(sellEntry.bisherigerPreis * reduktion);
+            if (lagerdauerH > schwellwertInH) {
+                const reduktion = 1 - (lagerdauerH / 24 * reduktionProTag); // 1% auf 20 Tage
+                const result = Math.ceil(sellEntry.bisherigerPreis * reduktion);
+                if (result === sellEntry.bisherigerPreis) {
+                    return;
+                }
+                return result;
             }
         }
     }
