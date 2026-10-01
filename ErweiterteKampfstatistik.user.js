@@ -740,9 +740,9 @@
             if (!keys || keys.length === 0) return keys;
             const parseLKR = id => {
                 const m = /^L(\d+)\.K(\d+)\.R(\d+)$/.exec(id);
-                if (m) return { l: +m[1], k: +m[2], r: +m[3], mode: "round" };
+                if (m) return {l: +m[1], k: +m[2], r: +m[3], mode: "round"};
                 const m2 = /^L(\d+)\.K(\d+)$/.exec(id);
-                if (m2) return { l: +m2[1], k: +m2[2], r: 0, mode: "fight" };
+                if (m2) return {l: +m2[1], k: +m2[2], r: 0, mode: "fight"};
                 return null;
             };
             return keys.slice().sort((a, b) => {
@@ -756,7 +756,7 @@
                 }
                 if (pa && !pb) return -1;
                 if (!pa && pb) return 1;
-                return ("" + a).localeCompare("" + b, undefined, { numeric: true, sensitivity: "base" });
+                return ("" + a).localeCompare("" + b, undefined, {numeric: true, sensitivity: "base"});
             });
         }
 
@@ -790,7 +790,7 @@
             const assignableInt = Math.floor(healIntTotal);
             let attributions = assignableInt > 0
                 ? this.integerizeProportionalShares(assignableInt, attributionsRaw)
-                : attributionsRaw.map(a => Object.assign({}, a, { value: 0 }));
+                : attributionsRaw.map(a => Object.assign({}, a, {value: 0}));
             if (!skipNominalCap) {
                 attributions = this.capIndirectHealAttributionsByNominalWeight(attributions, contributionContext);
             }
@@ -846,7 +846,7 @@
             const assignableInt = Math.floor(assignableDamage);
             const attributions = assignableInt > 0
                 ? this.integerizeProportionalShares(assignableInt, attributionsRaw)
-                : attributionsRaw.map(a => Object.assign({}, a, { value: 0 }));
+                : attributionsRaw.map(a => Object.assign({}, a, {value: 0}));
             let sumA = 0;
             attributions.forEach(a => {
                 const v = Math.floor(Number(a.value || 0));
@@ -888,7 +888,7 @@
                 const v = Math.floor(Number(arr[i].value || 0));
                 const nv = i === arr.length - 1 ? nt - acc : Math.floor((v * nt) / old);
                 acc += nv;
-                if (nv > 0) out.push(Object.assign({}, arr[i], { value: nv }));
+                if (nv > 0) out.push(Object.assign({}, arr[i], {value: nv}));
             }
             return out;
         }
@@ -916,7 +916,7 @@
                     for (let i = 0; i < outH.length; i++) {
                         if (outH[i].role === "remainder_auto") {
                             const v = Math.floor(Number(outH[i].value || 0));
-                            outH[i] = Object.assign({}, outH[i], { value: v + gap });
+                            outH[i] = Object.assign({}, outH[i], {value: v + gap});
                             merged = true;
                             break;
                         }
@@ -1071,7 +1071,7 @@
                         const w = Math.max(0, Number(c.weight || 0));
                         const srcName = (c.sourceName ? String(c.sourceName) : "Persistenter Effekt").trim();
                         const key = this.normalizeEffectSourceName(srcName) || srcName.toLowerCase();
-                        const g = groups.get(key) || { sourceName: srcName, w: 0, bestC: c };
+                        const g = groups.get(key) || {sourceName: srcName, w: 0, bestC: c};
                         g.w += w;
                         if (w > Math.max(0, Number(g.bestC && g.bestC.weight || 0))) g.bestC = c;
                         groups.set(key, g);
@@ -1455,17 +1455,17 @@
                             const afterNode = getRowBlockEnd(sameSideRows[sameSideRows.length - 1].tr);
                             hostTbody.insertBefore(tr, afterNode ? afterNode.nextSibling : null);
                             hostTbody.insertBefore(hr, tr.nextSibling);
-                            mappedRegenRows.push({ tr: tr, isHero: isHero });
+                            mappedRegenRows.push({tr: tr, isHero: isHero});
                         } else if (firstOtherSide && firstOtherSide.tr && firstOtherSide.tr.parentNode === hostTbody) {
                             hostTbody.insertBefore(tr, firstOtherSide.tr);
                             hostTbody.insertBefore(hr, tr.nextSibling);
                             const idx = mappedRegenRows.indexOf(firstOtherSide);
-                            if (idx >= 0) mappedRegenRows.splice(idx, 0, { tr: tr, isHero: isHero });
-                            else mappedRegenRows.push({ tr: tr, isHero: isHero });
+                            if (idx >= 0) mappedRegenRows.splice(idx, 0, {tr: tr, isHero: isHero});
+                            else mappedRegenRows.push({tr: tr, isHero: isHero});
                         } else {
                             hostTbody.appendChild(tr);
                             hostTbody.appendChild(hr);
-                            mappedRegenRows.push({ tr: tr, isHero: isHero });
+                            mappedRegenRows.push({tr: tr, isHero: isHero});
                         }
                         attachMarkerToRow(tr, act);
                     });
@@ -1517,7 +1517,7 @@
         static collectHeroStatNodes(stat, depth, out) {
             if (!stat) return;
             if (stat.unit && stat.unit.id && stat.unit.id.isHero) {
-                out.push({ depth: depth, key: this.getTargetUnitKey(stat.unit), stat: stat });
+                out.push({depth: depth, key: this.getTargetUnitKey(stat.unit), stat: stat});
             }
             if (stat.sub) {
                 for (const child of Object.values(stat.sub)) this.collectHeroStatNodes(child, depth + 1, out);
@@ -1679,14 +1679,14 @@
                     targets: [{
                         unit: u,
                         typ: "Heilung",
-                        wirkung: { value: 0 },
+                        wirkung: {value: 0},
                     }],
                     type: "regen",
                     level: level,
                     area: area,
                     round: round,
                     syntheticRegenBilanzZeile: true,
-                    skill: { name: "(Regenerationsphase — Bilanzzeile)", typ: "Heilung" },
+                    skill: {name: "(Regenerationsphase — Bilanzzeile)", typ: "Heilung"},
                     src: "<tr><td></td><td colspan=\"2\">Regenerationsphase: keine eigene HP-Zeile (synthetische Bilanzzeile, 0 HP).</td></tr>",
                     reportCombatRowDedupeUid:
                         battleAreaIx + "|R" + rk + "|synthetic|" + encodeURIComponent(k).replace(/%/g, "_"),
@@ -2346,12 +2346,12 @@
                 if (!(gross > 0)) continue;
                 hpLossEvents.push({
                     unit: unit,
-                    targets: [{ unit: unit, typ: "Hitpoints" }],
+                    targets: [{unit: unit, typ: "Hitpoints"}],
                     level: level,
                     area: area,
                     round: round,
                     type: "regen",
-                    event: { kind: "hploss", resource: "HP", value: gross },
+                    event: {kind: "hploss", resource: "HP", value: gross},
                     syntheticBruttoRegenHploss: true,
                     src: "<tr><td></td><td>" + this.getDisplayUnitName(unit) + " - indirekter Brutto-DoT (Status) " + gross + " HP (Regeneration)</td></tr>",
                 });
@@ -2709,55 +2709,55 @@
         }
 
         static getRoundStatusUnit(round, targetUnit) {
-             const units = [];
-             (round.helden || []).forEach(unit => units.push(unit));
-             (round.monster || []).forEach(unit => units.push(unit));
-             const targetIdx = targetUnit && targetUnit.id && targetUnit.id.idx;
-             const targetName = targetUnit && targetUnit.id && targetUnit.id.name;
-             const targetOwnerName = this.getUnitOwnerName(targetUnit);
-             const targetSide = targetUnit && targetUnit.id && targetUnit.id.isHero;
-             const matchesOwner = unit => {
-                 if (!targetOwnerName) return false;
-                 if (!unit || !unit.id) return false;
-                 const unitOwnerName = this.getUnitOwnerName(unit);
-                 if (unitOwnerName && unitOwnerName === targetOwnerName) return true;
-                 if (unit.id.ownerId && unit.id.ownerId.name && unit.id.ownerId.name === targetOwnerName) return true;
-                 return false;
-             };
-             if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
-                 const exact = util.arraySearch(units, unit => {
-                     return unit && unit.id && unit.id.name === targetName && ("" + unit.id.idx) === ("" + targetIdx);
-                 });
-                 if (exact) return exact;
-             }
-             if (targetOwnerName) {
-                 const ownerExact = util.arraySearch(units, unit => {
-                     if (!unit || !unit.id || unit.id.name !== targetName) return false;
-                     if (targetSide !== undefined && !!unit.id.isHero !== !!targetSide) return false;
-                     if (!matchesOwner(unit)) return false;
-                     if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
-                         return ("" + unit.id.idx) === ("" + targetIdx);
-                     }
-                     return true;
-                 });
-                 if (ownerExact) return ownerExact;
-             }
-             const unitEqual = util.arraySearch(units, unit => _.ReportParser.isUnitEqual(unit, targetUnit));
-             if (unitEqual) return unitEqual;
+            const units = [];
+            (round.helden || []).forEach(unit => units.push(unit));
+            (round.monster || []).forEach(unit => units.push(unit));
+            const targetIdx = targetUnit && targetUnit.id && targetUnit.id.idx;
+            const targetName = targetUnit && targetUnit.id && targetUnit.id.name;
+            const targetOwnerName = this.getUnitOwnerName(targetUnit);
+            const targetSide = targetUnit && targetUnit.id && targetUnit.id.isHero;
+            const matchesOwner = unit => {
+                if (!targetOwnerName) return false;
+                if (!unit || !unit.id) return false;
+                const unitOwnerName = this.getUnitOwnerName(unit);
+                if (unitOwnerName && unitOwnerName === targetOwnerName) return true;
+                if (unit.id.ownerId && unit.id.ownerId.name && unit.id.ownerId.name === targetOwnerName) return true;
+                return false;
+            };
+            if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
+                const exact = util.arraySearch(units, unit => {
+                    return unit && unit.id && unit.id.name === targetName && ("" + unit.id.idx) === ("" + targetIdx);
+                });
+                if (exact) return exact;
+            }
+            if (targetOwnerName) {
+                const ownerExact = util.arraySearch(units, unit => {
+                    if (!unit || !unit.id || unit.id.name !== targetName) return false;
+                    if (targetSide !== undefined && !!unit.id.isHero !== !!targetSide) return false;
+                    if (!matchesOwner(unit)) return false;
+                    if (targetIdx !== undefined && targetIdx !== null && targetIdx !== "") {
+                        return ("" + unit.id.idx) === ("" + targetIdx);
+                    }
+                    return true;
+                });
+                if (ownerExact) return ownerExact;
+            }
+            const unitEqual = util.arraySearch(units, unit => _.ReportParser.isUnitEqual(unit, targetUnit));
+            if (unitEqual) return unitEqual;
 
-             // Fallback: auch nach einer toten/abwesenden Unit mit gleichen Namen suchen (für persistente Effekte)
-             // Dies ist wichtig, wenn eine Unit gestorben ist, aber ihre Effekte noch wirken
-             if (targetName && !targetUnit.id.ownerId) {
-                 const deadUnit = util.arraySearch(units, unit => {
-                     if (!unit || !unit.id) return false;
-                     if (unit.id.name !== targetName) return false;
-                     if (targetSide !== undefined && !!unit.id.isHero !== !!targetSide) return false;
-                     return true;
-                 });
-                 if (deadUnit) return deadUnit;
-             }
-             return null;
-         }
+            // Fallback: auch nach einer toten/abwesenden Unit mit gleichen Namen suchen (für persistente Effekte)
+            // Dies ist wichtig, wenn eine Unit gestorben ist, aber ihre Effekte noch wirken
+            if (targetName && !targetUnit.id.ownerId) {
+                const deadUnit = util.arraySearch(units, unit => {
+                    if (!unit || !unit.id) return false;
+                    if (unit.id.name !== targetName) return false;
+                    if (targetSide !== undefined && !!unit.id.isHero !== !!targetSide) return false;
+                    return true;
+                });
+                if (deadUnit) return deadUnit;
+            }
+            return null;
+        }
 
         static isWhiteStatusActive(unit) {
             if (!unit) return false;
@@ -2980,7 +2980,7 @@
                 if (!e || !e.quelle) continue;
                 const k = this.normalizeEffectSourceName(e.quelle) || ("" + e.quelle).trim() || "_";
                 if (!byNorm[k]) {
-                    byNorm[k] = { quelle: e.quelle, fx: (e.fx || []).slice() };
+                    byNorm[k] = {quelle: e.quelle, fx: (e.fx || []).slice()};
                 } else {
                     const seen = new Set((byNorm[k].fx || []).map(sig));
                     (e.fx || []).forEach(fx => {
@@ -2999,60 +2999,60 @@
          * @param healMode false: HP-Verlust (DoT) aus negativen „Heilung Hitpoints“-Effekten; true: Regenerations-HoT aus positiven „Heilung Hitpoints“ auf der Statuszeile.
          */
         static resolveHpEffectContributors(round, targetUnit, effectSourceHistory, healMode) {
-             const statusUnit = this.getRoundStatusUnit(round, targetUnit);
-             let sourceList = [];
+            const statusUnit = this.getRoundStatusUnit(round, targetUnit);
+            let sourceList = [];
 
-             if (statusUnit && statusUnit.fx && statusUnit.fx.length > 0) {
-                 // Normal case: Unit hat aktive Effekte in der aktuellen Runde
-                 sourceList = statusUnit.fx.slice();
-             } else if (effectSourceHistory && Object.keys(effectSourceHistory).length > 0) {
-                 // Fallback: Unit ist tot oder nicht in der Runde,aber hat noch Effekte von vorherigen Runden
-                 const targetKey = this.getTargetUnitKey(targetUnit);
-                 for (const sourceKey of Object.keys(effectSourceHistory)) {
-                     const byTarget = effectSourceHistory[sourceKey];
-                     if (byTarget && byTarget[targetKey] && Object.keys(byTarget[targetKey]).length > 0) {
-                         // Es gibt bereits registrierte Contributors für diese Quelle und dieses Ziel
-                         // Das bedeutet, dieser Effekt war in vorherigen Runden aktiv und sollte weiterwirken
-                         sourceList.push({
-                             quelle: sourceKey,
-                             fx: [{name: "Persistent", wirkung: healMode ? "+1" : "-1"}],
-                         });
-                     }
-                 }
-             }
+            if (statusUnit && statusUnit.fx && statusUnit.fx.length > 0) {
+                // Normal case: Unit hat aktive Effekte in der aktuellen Runde
+                sourceList = statusUnit.fx.slice();
+            } else if (effectSourceHistory && Object.keys(effectSourceHistory).length > 0) {
+                // Fallback: Unit ist tot oder nicht in der Runde,aber hat noch Effekte von vorherigen Runden
+                const targetKey = this.getTargetUnitKey(targetUnit);
+                for (const sourceKey of Object.keys(effectSourceHistory)) {
+                    const byTarget = effectSourceHistory[sourceKey];
+                    if (byTarget && byTarget[targetKey] && Object.keys(byTarget[targetKey]).length > 0) {
+                        // Es gibt bereits registrierte Contributors für diese Quelle und dieses Ziel
+                        // Das bedeutet, dieser Effekt war in vorherigen Runden aktiv und sollte weiterwirken
+                        sourceList.push({
+                            quelle: sourceKey,
+                            fx: [{name: "Persistent", wirkung: healMode ? "+1" : "-1"}],
+                        });
+                    }
+                }
+            }
 
-             if (healMode) {
-                 this.mergeVorrundeHealHotSources(round, targetUnit, sourceList);
-             }
-             sourceList = this.dedupeEffectSourceListByQuelle(sourceList);
+            if (healMode) {
+                this.mergeVorrundeHealHotSources(round, targetUnit, sourceList);
+            }
+            sourceList = this.dedupeEffectSourceListByQuelle(sourceList);
 
-             if (!sourceList || sourceList.length === 0) {
-                 return {
-                     contributors: [],
-                     knownWeight: 0,
-                     totalWeight: 0,
-                     debugSources: [],
-                     sourceRejectSummary: {},
-                     contributorRejectSummary: {},
-                 };
-             }
-             const allUnits = [];
-             (round.helden || []).forEach(unit => allUnits.push(unit));
-             (round.monster || []).forEach(unit => allUnits.push(unit));
-             const allUnitKeys = {};
-             allUnits.forEach(unit => {
-                 allUnitKeys[this.getUnitKey(unit)] = unit;
-             });
-             const weights = {};
+            if (!sourceList || sourceList.length === 0) {
+                return {
+                    contributors: [],
+                    knownWeight: 0,
+                    totalWeight: 0,
+                    debugSources: [],
+                    sourceRejectSummary: {},
+                    contributorRejectSummary: {},
+                };
+            }
+            const allUnits = [];
+            (round.helden || []).forEach(unit => allUnits.push(unit));
+            (round.monster || []).forEach(unit => allUnits.push(unit));
+            const allUnitKeys = {};
+            allUnits.forEach(unit => {
+                allUnitKeys[this.getUnitKey(unit)] = unit;
+            });
+            const weights = {};
             let totalWeight = 0;
             const debugSources = [];
             const sourceRejectSummary = {};
             const contributorRejectSummary = {};
-             const addReason = (summary, reason) => {
-                 if (!reason) return;
-                 summary[reason] = (summary[reason] || 0) + 1;
-             };
-             for (const sourceEntry of sourceList) {
+            const addReason = (summary, reason) => {
+                if (!reason) return;
+                summary[reason] = (summary[reason] || 0) + 1;
+            };
+            for (const sourceEntry of sourceList) {
                 if (!sourceEntry || !sourceEntry.quelle || !sourceEntry.fx) {
                     addReason(sourceRejectSummary, "SOURCE_ENTRY_INVALID");
                     continue;
@@ -3199,20 +3199,20 @@
                         addReason(contributorRejectSummary, "REJECT_SELF_DAMAGE");
                         return; // Selbstschaden nicht zurechnen
                     }
-                     const unitKey = this.getUnitKey(unit);
-                     const isLevelAnonymous =
-                         !!(unit && unit.id && unit.id.eksAnonymousLevelEffect);
-                     if (!allUnitKeys[unitKey] && !isLevelAnonymous) {
-                         sourceDebug.rejectedCount++;
-                         sourceDebug.contributorDecisions.push({
-                             unit: unit && unit.id && unit.id.name,
-                             unitKey: unitKey,
-                             accepted: false,
-                             reason: "REJECT_NOT_IN_ROUND",
-                         });
-                         addReason(contributorRejectSummary, "REJECT_NOT_IN_ROUND");
-                         return; // Nur Einheiten aus dieser Runde (auch tote)
-                     }
+                    const unitKey = this.getUnitKey(unit);
+                    const isLevelAnonymous =
+                        !!(unit && unit.id && unit.id.eksAnonymousLevelEffect);
+                    if (!allUnitKeys[unitKey] && !isLevelAnonymous) {
+                        sourceDebug.rejectedCount++;
+                        sourceDebug.contributorDecisions.push({
+                            unit: unit && unit.id && unit.id.name,
+                            unitKey: unitKey,
+                            accepted: false,
+                            reason: "REJECT_NOT_IN_ROUND",
+                        });
+                        addReason(contributorRejectSummary, "REJECT_NOT_IN_ROUND");
+                        return; // Nur Einheiten aus dieser Runde (auch tote)
+                    }
                     acceptedContributors.push({
                         unit: unit,
                         skillType: this.pickDominantSkillType(meta.skillTypeWeights),
@@ -3276,18 +3276,18 @@
             if (!attributions || attributions.length === 0) return attributions;
             const rawSum = attributions.reduce((s, a) => s + Math.max(0, Number(a.value || 0)), 0);
             if (!(ti > 0) || !(rawSum > 0)) {
-                return attributions.map(a => Object.assign({}, a, { value: 0 }));
+                return attributions.map(a => Object.assign({}, a, {value: 0}));
             }
             const n = attributions.length;
             const exact = attributions.map(a => ti * (Math.max(0, Number(a.value || 0)) / rawSum));
             const out = exact.map(x => Math.floor(x));
             let sumOut = out.reduce((s, v) => s + v, 0);
             const missing = ti - sumOut;
-            const order = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => (b.r - a.r) || (a.i - b.i));
+            const order = exact.map((x, i) => ({i, r: x - Math.floor(x)})).sort((a, b) => (b.r - a.r) || (a.i - b.i));
             for (let k = 0; k < missing; k++) {
                 out[order[k % n].i]++;
             }
-            return attributions.map((a, i) => Object.assign({}, a, { value: out[i] }));
+            return attributions.map((a, i) => Object.assign({}, a, {value: out[i]}));
         }
 
         /**
@@ -3302,7 +3302,7 @@
             if (!(knownW > 0) || healIntTotal <= knownW) return contributionContext;
             const scale = healIntTotal / knownW;
             const contributors = (contributionContext.contributors || []).map(c =>
-                Object.assign({}, c, { weight: Math.max(0, Number(c.weight || 0)) * scale }),
+                Object.assign({}, c, {weight: Math.max(0, Number(c.weight || 0)) * scale}),
             );
             return Object.assign({}, contributionContext, {
                 contributors,
@@ -3337,7 +3337,7 @@
                 let cap = Math.floor(capFloat);
                 if (cap === 0 && capFloat > 0) cap = 1;
                 const v = Math.floor(Number(a.value || 0));
-                return Object.assign({}, a, { value: Math.min(v, cap) });
+                return Object.assign({}, a, {value: Math.min(v, cap)});
             });
         }
 
@@ -3583,19 +3583,19 @@
                     const finalAreaNr = areaNr;
                     const effectSourceHistory = {};
 
-                        const observeUnitHp = unit => {
-                            if (!unit || !unit.id) return;
-                            const key = this.getUnitKey(unit);
-                            const snapshot = this.parseHpSnapshotValue(unit.hp);
-                            const current = snapshot.current > 0 ? snapshot.current : 0;
-                            const max = snapshot.max > 0 ? snapshot.max : current;
-                            if (current > 0) {
-                                observedMaxHpByUnitKey[key] = Math.max(observedMaxHpByUnitKey[key] || 0, current);
-                            }
-                            if (max > 0) {
-                                observedMaxHpByUnitKey[key] = Math.max(observedMaxHpByUnitKey[key] || 0, max);
-                            }
-                        };
+                    const observeUnitHp = unit => {
+                        if (!unit || !unit.id) return;
+                        const key = this.getUnitKey(unit);
+                        const snapshot = this.parseHpSnapshotValue(unit.hp);
+                        const current = snapshot.current > 0 ? snapshot.current : 0;
+                        const max = snapshot.max > 0 ? snapshot.max : current;
+                        if (current > 0) {
+                            observedMaxHpByUnitKey[key] = Math.max(observedMaxHpByUnitKey[key] || 0, current);
+                        }
+                        if (max > 0) {
+                            observedMaxHpByUnitKey[key] = Math.max(observedMaxHpByUnitKey[key] || 0, max);
+                        }
+                    };
 
                     const rounds = area.rounds || [];
                     /** Statuslisten vollständig einlesen (Rundenanfänge, Kampfende, optional nächster Listenkopf
@@ -3820,7 +3820,7 @@
                                     }
                                 });
                                 if (wantHeal && !action.event && action.type !== "regen"
-                                        && (action.targets || []).some(t => t && t.typ === "Heilung")) {
+                                    && (action.targets || []).some(t => t && t.typ === "Heilung")) {
                                     const listTarget = (action.targets || []).find(t => t && t.typ === "Heilung") || (action.targets || [])[0];
                                     if (listTarget && listTarget.unit) {
                                         stats.actionClassification = function (curAction) {
@@ -3959,7 +3959,7 @@
                                 const assignableInt = Math.floor(assignableDamage);
                                 const attributions = assignableInt > 0
                                     ? SearchEngine.integerizeProportionalShares(assignableInt, attributionsRaw)
-                                    : attributionsRaw.map(a => Object.assign({}, a, { value: 0 }));
+                                    : attributionsRaw.map(a => Object.assign({}, a, {value: 0}));
                                 SearchEngine.debugIndirect("Event", {
                                     level: level.nr,
                                     area: area.nr,
@@ -4141,9 +4141,9 @@
                                 const assignableInt = Math.floor(healIntTotal);
                                 let attributions = assignableInt > 0
                                     ? SearchEngine.integerizeProportionalShares(assignableInt, attributionsRaw)
-                                    : attributionsRaw.map(a => Object.assign({}, a, { value: 0 }));
+                                    : attributionsRaw.map(a => Object.assign({}, a, {value: 0}));
                                 attributions = SearchEngine.capIndirectHealAttributionsByNominalWeight(attributions, contributionContext);
-                                const syntheticHealTarget = { unit: targetUnit };
+                                const syntheticHealTarget = {unit: targetUnit};
                                 const attributedSum = attributions.reduce((s, a) => s + Number(a.value || 0), 0);
                                 if (attributions.length === 0 || !(attributedSum > 0)) {
                                     const healInt = healIntTotal;
@@ -4160,7 +4160,7 @@
                                     });
                                     const regenAction = {
                                         unit: targetUnit,
-                                        skill: { name: "(Regeneration)", typ: "Heilung", items: [] },
+                                        skill: {name: "(Regeneration)", typ: "Heilung", items: []},
                                         targets: [syntheticHealTarget],
                                         level: level,
                                         area: area,
@@ -4263,7 +4263,7 @@
                                     const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, virtualAction, round);
                                     const companionHealValue = Math.floor(this.getCompanionDamageValue(healOnly));
                                     if (companionOwnerUnit && companionHealValue > 0) {
-                                        const ownerAction = Object.assign({}, virtualAction, { unit: companionOwnerUnit });
+                                        const ownerAction = Object.assign({}, virtualAction, {unit: companionOwnerUnit});
                                         ownerAction.syntheticCompanionOwnerAction = true;
                                         doAnalysis(stats, filter, ownerAction, syntheticHealTarget, true, attributionIdx, companionHealValue);
                                     }
@@ -4282,7 +4282,7 @@
                                     });
                                     const regenAction = {
                                         unit: targetUnit,
-                                        skill: { name: "(Regeneration)", typ: "Heilung", items: [] },
+                                        skill: {name: "(Regeneration)", typ: "Heilung", items: []},
                                         targets: [syntheticHealTarget],
                                         level: level,
                                         area: area,
@@ -4318,7 +4318,7 @@
                                     const companionOwnerUnit = this.resolveCompanionOwner(companionOwnerByUnitKey, regenAction, round);
                                     const companionHealValue = Math.floor(this.getCompanionDamageValue(healOnly));
                                     if (companionOwnerUnit && companionHealValue > 0) {
-                                        const ownerAction = Object.assign({}, regenAction, { unit: companionOwnerUnit });
+                                        const ownerAction = Object.assign({}, regenAction, {unit: companionOwnerUnit});
                                         ownerAction.syntheticCompanionOwnerAction = true;
                                         doAnalysis(stats, filter, ownerAction, syntheticHealTarget, true, 0, companionHealValue);
                                     }
@@ -4898,7 +4898,8 @@
                 if (!thead) {
                     throw _.util.error("Kein thead für die Statistiktabelle gefunden!", tableElement);
                 }
-
+                thead.style.position = "sticky";
+                thead.style.top = "0";
                 var switcher = true;
                 const hasHeaderGroups = util.arraySearch(tableView.columns, column => !!column.headerGroup);
 
@@ -5063,9 +5064,9 @@
                         statResult.title = SearchEngine.getDisplayUnitTitle(statResult.unit);
                     }
                     if (statResult.actions.length > 0
-                            || (Number(statResult.companionValue || 0) > 0)
-                            || (Number(statResult.autoRegenHealValue || 0) > 0)
-                            || (Number(statResult.healRoundBilanzKorrektur || 0) !== 0)) {
+                        || (Number(statResult.companionValue || 0) > 0)
+                        || (Number(statResult.autoRegenHealValue || 0) > 0)
+                        || (Number(statResult.healRoundBilanzKorrektur || 0) !== 0)) {
                         addLine(statView, id === "" ? "" : (id + ""), statResult, statResult.byDmgType);
                     }
                 }
@@ -5183,6 +5184,7 @@
                 const table = document.createElement("table");
                 table.style.minWidth = "600px";
                 table.className = "content_table";
+                table.style.borderCollapse = "collapse";
                 table.border = 1;
                 const thead = document.createElement("thead");
                 table.append(thead);
