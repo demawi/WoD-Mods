@@ -171,11 +171,12 @@
                 const allHrefs = document.querySelectorAll("a");
                 var missingItemsFound = 0;
                 const myWorldId = _.WoD.getMyWorld();
-                console.log("ItemTracking.start", allHrefs);
+                const debug = false;
+                if(debug) console.log("ItemTracking.start", allHrefs);
                 await _.util.forEachSafe(allHrefs, async itemLinkElement => {
                     const [itemName] = _.ItemParser.getItemNameFromElement(itemLinkElement);
                     if (!itemName) return;
-                    console.log("Found Item on page: ", itemName);
+                    if(debug) console.log("Found Item on page: ", itemName);
                     const itemIndex = await MyStorage.getItemIndexDB().getValue(itemName);
                     if (itemIndex && !_.WoDItemDb.couldBeValid(itemIndex, myWorldId)) return;
                     if (!itemIndex || !itemIndex.data) missingItemsFound++;
@@ -191,7 +192,7 @@
                         document.body.append(missingSpanOverall);
                     }
                 }
-                console.log("ItemDB.checkSiteForItems...finished!");
+                if(debug) console.log("ItemDB.checkSiteForItems...finished!");
                 observer.observe(document.body, {
                     attributes: false, // manchmal werden zwar Elemente eingeblendet, die waren dann aber vorher auch schon so da
                     childList: true,
