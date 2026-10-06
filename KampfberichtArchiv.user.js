@@ -45,7 +45,7 @@
             await MySettings.getFresh();
             this.isAdmin = _.WoD.isInAdminViewMode();
 
-            Maintenance.continousCheck();
+            await Maintenance.continousCheck();
 
             switch (view) {
                 case _.WoD.VIEW.TOMBOLA:
@@ -2259,11 +2259,12 @@
                     let date = new Date();
                     date.setDate(date.getDate() - anzahlTage);
                     console.log("[Löschautomatik] wird ausgeführt...", date);
-                    await MyStorage.reportArchive.getAll({
+                    const deleteQuery = {
                         index: ["ts", "fav.none"],
                         // debug: 2,
                         keyMatchBefore: [Math.round(date.getTime() / 60000), Number.MAX_VALUE],
-                    }, async function (report) {
+                    };
+                    await MyStorage.reportArchive.getAll(deleteQuery, async function (report) {
                         if (!_.Mod.isLocalTest()) {
                             console.log("[Löschautomatik] Lösche Quell-Dateien für:", report.reportId);
                             await MyStorage.reportArchiveSources.deleteValue(report.reportId);
@@ -2288,7 +2289,7 @@
             const start = new Date().getTime();
             const _this = this;
             await MyStorage.reportArchive.getAll(false, async function (cur) {
-                _this.reportFavFix(cur);
+                await _this.reportFavFix(cur);
             });
             console.log("Maintenance.all: " + (new Date().getTime() - start) / 1000);
         }
@@ -2304,7 +2305,7 @@
             if (allCount !== noneCount) {
                 const _this = this;
                 await MyStorage.reportArchive.getAll(false, async function (cur) {
-                    _this.reportFavFix(cur);
+                    await _this.reportFavFix(cur);
                 });
             }
         }

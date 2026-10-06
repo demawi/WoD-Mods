@@ -135,7 +135,7 @@ class demawiRepository {
                 else {
                     const _this = this;
                     return this.csProxyResolver.then(() => {
-                        _this.csProxy.exec(...args);
+                        return _this.csProxy.exec(...args);
                     });
                 }
             }
@@ -145,7 +145,7 @@ class demawiRepository {
                 else {
                     const _this = this;
                     return this.csProxyResolver.then(() => {
-                        _this.csProxy.execIteration(iterationFn, ...args);
+                        return _this.csProxy.execIteration(iterationFn, ...args);
                     });
                 }
             }
@@ -222,9 +222,21 @@ class demawiRepository {
                     }, storageId, dbName, query);
                 }
                 return this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, query) {
+                    const batch = [];
+                    const sendBatch = async function () {
+                        if (batch.length === 0) return true;
+                        const values = batch.splice(0, batch.length);
+                        return await respondIteration(data, {
+                            __iterationBatch: true,
+                            values: values,
+                        });
+                    };
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query, async function (a) {
-                        return await respondIteration(data, a);
+                        batch.push(a);
+                        if (batch.length >= 20) return await sendBatch();
+                        return true;
                     });
+                    await sendBatch();
                     respondFinished(data);
                 }, storageId, dbName, query);
             }
@@ -238,9 +250,21 @@ class demawiRepository {
                     }, storageId, dbName, query);
                 }
                 return await this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
+                    const batch = [];
+                    const sendBatch = async function () {
+                        if (batch.length === 0) return true;
+                        const values = batch.splice(0, batch.length);
+                        return await respondIteration(data, {
+                            __iterationBatch: true,
+                            values: values,
+                        });
+                    };
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt, async function (a) {
-                        return await respondIteration(data, a);
+                        batch.push(a);
+                        if (batch.length >= 20) return await sendBatch();
+                        return true;
                     });
+                    await sendBatch();
                     respondFinished(data);
                 }, storageId, dbName, query);
             }
@@ -1666,18 +1690,27 @@ class demawiRepository {
                 return;
             }
             if (data.type !== "iteration") {
-                this.comLink[id](data.result);
+                const resolver = this.comLink[id];
+                if (!resolver) return;
+                resolver(data.result);
                 delete this.comLink[id];
             } else { // type === "iteration"
+                if (!this.iterations[id] || !this.comLink[id]) return;
                 let stop = false;
                 if (data.result === undefined) stop = true; // wenn der Datenlieferant abbricht
-                else if (await this.iterations[id](data.result) === false) { // wenn wir selbst abbrechen
-                    stop = true;
-                    this.postMessage({
-                        id: id,
-                        type: "iteration",
-                        idx: -1, // Abbruch
-                    })
+                else {
+                    const values = data.result && data.result.__iterationBatch ? data.result.values : [data.result];
+                    for (const value of values) {
+                        if (await this.iterations[id](value) === false) { // wenn wir selbst abbrechen
+                            stop = true;
+                            this.postMessage({
+                                id: id,
+                                type: "iteration",
+                                idx: -1, // Abbruch
+                            });
+                            break;
+                        }
+                    }
                 }
                 if (stop) {
                     if (this.debug) console.log("Sender beendet die Iteration: " + id);
