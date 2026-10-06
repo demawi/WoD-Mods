@@ -1508,6 +1508,7 @@ class demawiRepository {
 
             const respond = function (data, result) {
                 delete data.exec;
+                delete data.vars;
                 if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
                 data = cloneInto(data, {});
                 data.result = result;
@@ -1709,9 +1710,8 @@ class demawiRepository {
             const data = dataOpt || {
                 id: this.#createId(),
             }
-            let args = JSON.stringify(vars);
-            args = args.substring(1, args.length - 1);
-            data.exec = "(" + execFn.toString() + ")(" + args + ")";
+            data.vars = vars;
+            data.exec = "(" + execFn.toString() + ")(...data.vars)";
 
             let promiseResolver;
             const promise = new Promise((resolve, reject) => {
