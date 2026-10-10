@@ -81,12 +81,16 @@
             }
             const profileName = ueberschrift.textContent.substring(8);
 
-            ueberschrift.append(_.UI.createButton(" 💾", () => {
+            const speichern = _.UI.createButton(" 💾", () => {
                 _this.exportKonfig(profileName);
-            }));
-            ueberschrift.append(_.UI.createButton(" 📂", () => {
+            })
+            speichern.title = "Speichern unter...";
+            ueberschrift.append(speichern);
+            const laden = _.UI.createButton(" 📂", () => {
                 _this.importKonfig(profileName);
-            }));
+            })
+            laden.title = "Laden...";
+            ueberschrift.append(laden);
         }
 
         static async importKonfig() {
