@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] GruppenHaendler
-// @version        0.2.1
+// @version        0.2.2
 // @author         demawi
 // @namespace      demawi
 // @description    Evtl. hilfreiche Funktionailtäten für den Gruppen-Händler

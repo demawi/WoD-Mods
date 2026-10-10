@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Item-Datenbank
-// @version        0.13.0
+// @version        0.13.1
 // @author         demawi
 // @namespace      demawi
 // @description    Datenbank für die Suche von Items und Fertigkeiten
