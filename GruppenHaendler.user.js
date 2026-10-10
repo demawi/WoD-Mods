@@ -34,6 +34,15 @@
             const view = _.WoD.getView(window);
             if (view === _.WoD.VIEW.MARKET) {
                 await this.onMarketPage();
+            } else if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER) {
+                /**
+                 * TODO: Hier die Gruppenkommunikation (repoType="group") prüfen. Und eine entsprechende UI darstellen (dies sollte im connect_firebase.js Skript definiert sein.
+                 * Das UI-Element sollte im DOM vor einem potenziell vorhandenen document.querySelector(".content_table") kommen
+                 * Wenn noch keine repoId hinterlegt ist, anbieten eine neue anzulegen.
+                 * Wenn eine vorhanden ist anzeigen, welche Charaktere (namentlich nicht per ID) damit verbunden sind und auch deren letzte Zugriffszeit.
+                 * _.WoD.getMyHeroId(); // so bekommt man die Helden-ID heraus
+                 * _.WoD.getMyHeroName(); // so bekommt man den Helden-Namen heraus
+                 */
             }
         }
 

@@ -2997,7 +2997,10 @@ class demawiRepository {
             REPORT_STATS: "report_stats", // subsite from REPORT
             REPORT_COMBAT: "report_combat", // subsite from REPORT
             SKILL: "skill",
-            ITEMS_STORE: "storage",
+            ITEMS_STORE: "storage", // Lager
+            KELLER: "cellar",
+            SCHATZKAMMER: "groupcellar",
+            GRUPPENLAGER: "groupcellar_2",
             EVENTLIST: "eventlist",
             PLAY: "play",
             HERO_CLASS: "heroClass",
