@@ -4340,17 +4340,15 @@ class demawiRepository {
             const wodTitle = document.getElementsByTagName("h1")[0];
             const buttonBar = document.createElement("sup");
 
-            const wodOriginalContent = document.createElement("div");
             const titleParent = wodTitle.parentElement;
-            const titleIdx = Array.prototype.indexOf.call(titleParent.childNodes, wodTitle);
-            for (let i = titleIdx + 1, l = titleParent.childNodes.length; i < l; i++) {
-                wodOriginalContent.append(titleParent.childNodes[i]);
-                i--;
-                l--;
+            const titleIdx = Array.prototype.indexOf.call(titleParent.children, wodTitle);
+
+            const wodContentNodes = [];
+            for (let i = titleIdx + 1, l = titleParent.children.length; i < l; i++) {
+                wodContentNodes.push(titleParent.children[i]);
             }
             const contentAnchor = document.createElement("div");
             titleParent.append(contentAnchor);
-            contentAnchor.append(wodOriginalContent);
             wodTitle.append(buttonBar);
 
             let currentButton = buttonContentArray[0].button;
@@ -4365,16 +4363,17 @@ class demawiRepository {
                     button.style.display = "none";
                     currentButton = button;
                     if (content) {
+                        wodContentNodes.forEach(node => node.style.display = "none");
                         contentAnchor.append(await content());
                     } else {
-                        contentAnchor.append(wodOriginalContent);
+                        wodContentNodes.forEach(node => node.style.display = "");
                     }
                     if (buttonDef.title) wodTitle.childNodes[0].nodeValue = buttonDef.title;
                 });
                 buttonBar.append(button);
             }
 
-            return [wodOriginalContent, contentAnchor];
+            return contentAnchor;
         }
     }
 
@@ -6633,7 +6632,7 @@ class demawiRepository {
             const now = new Date().getTime();
             itemIndex.ts = now;
             const myWorld = _.WoD.getMyWorld();
-            if(!myWorld) {
+            if (!myWorld) {
                 console.error("Kann keine Welt bestimmen auf der gespielt wird!!!");
                 return;
             }
@@ -6643,7 +6642,7 @@ class demawiRepository {
                 worldInfos.valid = 0;
             }
             const realItem = await this.getItemDB().getValue(itemIndex.id);
-            if(realItem) {
+            if (realItem) {
                 realItem.world = itemIndex.world;
                 await this.getItemDB().setValue(realItem);
             }
