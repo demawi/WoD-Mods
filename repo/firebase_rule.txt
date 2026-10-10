@@ -1,0 +1,17 @@
+{
+  "rules": {
+    "$repoId": {
+      ".read": "$repoId.matches(/^[A-Za-z0-9_-]{24}$/)",
+      ".write": "$repoId.matches(/^[A-Za-z0-9_-]{24}$/) && newData.exists()",
+      ".validate": "newData.exists()",
+      "repoType": {
+        ".validate": "newData.isString() && newData.val().length > 0"
+      },
+      "meta": {
+        "accessAt": {
+          ".validate": "newData.isNumber()"
+        }
+      }
+    }
+  }
+}
