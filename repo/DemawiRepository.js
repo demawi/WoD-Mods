@@ -135,7 +135,7 @@ class demawiRepository {
                 else {
                     const _this = this;
                     return this.csProxyResolver.then(() => {
-                        _this.csProxy.exec(...args);
+                        return _this.csProxy.exec(...args);
                     });
                 }
             }
@@ -145,7 +145,7 @@ class demawiRepository {
                 else {
                     const _this = this;
                     return this.csProxyResolver.then(() => {
-                        _this.csProxy.execIteration(iterationFn, ...args);
+                        return _this.csProxy.execIteration(iterationFn, ...args);
                     });
                 }
             }
@@ -222,9 +222,21 @@ class demawiRepository {
                     }, storageId, dbName, query);
                 }
                 return this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, query) {
+                    const batch = [];
+                    const sendBatch = async function () {
+                        if (batch.length === 0) return true;
+                        const values = batch.splice(0, batch.length);
+                        return await respondIteration(data, {
+                            __iterationBatch: true,
+                            values: values,
+                        });
+                    };
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAll(query, async function (a) {
-                        return await respondIteration(data, a);
+                        batch.push(a);
+                        if (batch.length >= 20) return await sendBatch();
+                        return true;
                     });
+                    await sendBatch();
                     respondFinished(data);
                 }, storageId, dbName, query);
             }
@@ -238,9 +250,21 @@ class demawiRepository {
                     }, storageId, dbName, query);
                 }
                 return await this.indexedDb.executeProxyIteration(iterationFnOpt, async function (storageId, dbname, queryOpt) {
+                    const batch = [];
+                    const sendBatch = async function () {
+                        if (batch.length === 0) return true;
+                        const values = batch.splice(0, batch.length);
+                        return await respondIteration(data, {
+                            __iterationBatch: true,
+                            values: values,
+                        });
+                    };
                     await _.Storages.IndexedDb.getDb(dbname).getObjectStorage(storageId).getAllKeys(queryOpt, async function (a) {
-                        return await respondIteration(data, a);
+                        batch.push(a);
+                        if (batch.length >= 20) return await sendBatch();
+                        return true;
                     });
+                    await sendBatch();
                     respondFinished(data);
                 }, storageId, dbName, query);
             }
@@ -1508,6 +1532,7 @@ class demawiRepository {
 
             const respond = function (data, result) {
                 delete data.exec;
+                delete data.vars;
                 if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
                 data = cloneInto(data, {});
                 data.result = result;
@@ -1665,18 +1690,27 @@ class demawiRepository {
                 return;
             }
             if (data.type !== "iteration") {
-                this.comLink[id](data.result);
+                const resolver = this.comLink[id];
+                if (!resolver) return;
+                resolver(data.result);
                 delete this.comLink[id];
             } else { // type === "iteration"
+                if (!this.iterations[id] || !this.comLink[id]) return;
                 let stop = false;
                 if (data.result === undefined) stop = true; // wenn der Datenlieferant abbricht
-                else if (await this.iterations[id](data.result) === false) { // wenn wir selbst abbrechen
-                    stop = true;
-                    this.postMessage({
-                        id: id,
-                        type: "iteration",
-                        idx: -1, // Abbruch
-                    })
+                else {
+                    const values = data.result && data.result.__iterationBatch ? data.result.values : [data.result];
+                    for (const value of values) {
+                        if (await this.iterations[id](value) === false) { // wenn wir selbst abbrechen
+                            stop = true;
+                            this.postMessage({
+                                id: id,
+                                type: "iteration",
+                                idx: -1, // Abbruch
+                            });
+                            break;
+                        }
+                    }
                 }
                 if (stop) {
                     if (this.debug) console.log("Sender beendet die Iteration: " + id);
@@ -1709,9 +1743,8 @@ class demawiRepository {
             const data = dataOpt || {
                 id: this.#createId(),
             }
-            let args = JSON.stringify(vars);
-            args = args.substring(1, args.length - 1);
-            data.exec = "(" + execFn.toString() + ")(" + args + ")";
+            data.vars = vars;
+            data.exec = "(" + execFn.toString() + ")(...data.vars)";
 
             let promiseResolver;
             const promise = new Promise((resolve, reject) => {
@@ -4307,17 +4340,15 @@ class demawiRepository {
             const wodTitle = document.getElementsByTagName("h1")[0];
             const buttonBar = document.createElement("sup");
 
-            const wodOriginalContent = document.createElement("div");
             const titleParent = wodTitle.parentElement;
-            const titleIdx = Array.prototype.indexOf.call(titleParent.childNodes, wodTitle);
-            for (let i = titleIdx + 1, l = titleParent.childNodes.length; i < l; i++) {
-                wodOriginalContent.append(titleParent.childNodes[i]);
-                i--;
-                l--;
+            const titleIdx = Array.prototype.indexOf.call(titleParent.children, wodTitle);
+
+            const wodContentNodes = [];
+            for (let i = titleIdx + 1, l = titleParent.children.length; i < l; i++) {
+                wodContentNodes.push(titleParent.children[i]);
             }
             const contentAnchor = document.createElement("div");
             titleParent.append(contentAnchor);
-            contentAnchor.append(wodOriginalContent);
             wodTitle.append(buttonBar);
 
             let currentButton = buttonContentArray[0].button;
@@ -4332,16 +4363,17 @@ class demawiRepository {
                     button.style.display = "none";
                     currentButton = button;
                     if (content) {
+                        wodContentNodes.forEach(node => node.style.display = "none");
                         contentAnchor.append(await content());
                     } else {
-                        contentAnchor.append(wodOriginalContent);
+                        wodContentNodes.forEach(node => node.style.display = "");
                     }
                     if (buttonDef.title) wodTitle.childNodes[0].nodeValue = buttonDef.title;
                 });
                 buttonBar.append(button);
             }
 
-            return [wodOriginalContent, contentAnchor];
+            return contentAnchor;
         }
     }
 
@@ -6600,7 +6632,7 @@ class demawiRepository {
             const now = new Date().getTime();
             itemIndex.ts = now;
             const myWorld = _.WoD.getMyWorld();
-            if(!myWorld) {
+            if (!myWorld) {
                 console.error("Kann keine Welt bestimmen auf der gespielt wird!!!");
                 return;
             }
@@ -6610,7 +6642,7 @@ class demawiRepository {
                 worldInfos.valid = 0;
             }
             const realItem = await this.getItemDB().getValue(itemIndex.id);
-            if(realItem) {
+            if (realItem) {
                 realItem.world = itemIndex.world;
                 await this.getItemDB().setValue(realItem);
             }
