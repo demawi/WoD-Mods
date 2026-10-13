@@ -58,10 +58,11 @@
                 console.error("Die Schatzkammer-Tabelle für die Gruppenabstimmung wurde nicht gefunden.");
                 return;
             }
+            table._wodFilterStorageKey = this.getFilterStorageKey(table);
+            this.resetFilterStateForLinkedPage(table);
             const rows = Array.from(tbody.rows);
             if (rows.length === 0) return;
             table._wodVoteRows = rows;
-            table._wodFilterStorageKey = this.getFilterStorageKey(table);
             const filter = this.createVoteFilter(table);
             const itemTables = Array.from(document.querySelectorAll("table.content_table"))
                 .filter(itemTable =>
@@ -154,18 +155,18 @@
                 if (!itemBaseName) continue;
                 const itemKey = this.getItemKey(itemBaseName);
                 itemNames.set(itemKey, itemBaseName);
-                const itemData = items[itemKey] || { name: itemBaseName };
+                const itemData = items[itemKey] || {name: itemBaseName};
                 const isUnusable = itemLink.classList.contains("item_unusable");
                 if (isUnusable && (!itemData.votes || itemData.votes[characterId] !== "no")) {
                     await repository.set(`items/${itemKey}/name`, itemBaseName);
                     await repository.set(`items/${itemKey}/votes/${characterId}`, "no");
-                    itemData.votes = Object.assign({}, itemData.votes, { [characterId]: "no" });
+                    itemData.votes = Object.assign({}, itemData.votes, {[characterId]: "no"});
                     items[itemKey] = itemData;
                 }
                 row.dataset.wodVoteResult = this.getVoteResult(itemData.groupDecision || itemData.votes, memberIds);
                 row.dataset.wodIndividualVoteOpen = !itemData.groupDecision
-                    && !isUnusable
-                    && !(itemData.votes && itemData.votes[characterId])
+                && !isUnusable
+                && !(itemData.votes && itemData.votes[characterId])
                     ? "true"
                     : "false";
                 row.dataset.wodGroupDecisionOpen = itemData.groupDecision ? "false" : "true";
@@ -279,8 +280,8 @@
                             updatedMemberIds
                         );
                         row.dataset.wodIndividualVoteOpen = !decision
-                            && row.dataset.wodVoteUnusable !== "true"
-                            && !(votes && votes[characterId])
+                        && row.dataset.wodVoteUnusable !== "true"
+                        && !(votes && votes[characterId])
                             ? "true"
                             : "false";
                         row.dataset.wodGroupDecisionOpen = decision ? "false" : "true";
@@ -600,6 +601,7 @@
             }
             try {
                 if (!this.shouldRestoreFilterState()) {
+                    console.log("Delete Values");
                     GM_deleteValue(table._wodFilterStorageKey);
                     table._wodLoadedFilterState = null;
                     return null;
@@ -630,6 +632,15 @@
 
         static shouldRestoreFilterState() {
             return !new URL(window.location.href).searchParams.has("view");
+        }
+
+        static resetFilterStateForLinkedPage(table) {
+            if (this.shouldRestoreFilterState()) return;
+            try {
+                GM_deleteValue(table._wodFilterStorageKey);
+            } catch (error) {
+                console.warn("Filter konnten für die verlinkte Seite nicht zurückgesetzt werden.", error);
+            }
         }
 
         static createSaleColumnControls(tables, container) {
@@ -756,9 +767,9 @@
                 if (!row.dataset.wodVoteResult) continue;
                 const matchesFilter = filterValue === "all"
                     || filterValue === "me-open"
-                        && row.dataset.wodIndividualVoteOpen === "true"
+                    && row.dataset.wodIndividualVoteOpen === "true"
                     || filterValue === "group-open"
-                        && row.dataset.wodGroupDecisionOpen === "true"
+                    && row.dataset.wodGroupDecisionOpen === "true"
                     || filterValue === "group-keep" && row.dataset.wodVoteResult === "Behalten"
                     || filterValue === "group-sell" && row.dataset.wodVoteResult === "Verkaufen";
                 const isDuplicate = groupFilter
