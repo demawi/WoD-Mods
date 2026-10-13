@@ -79,7 +79,28 @@
                 voteHeader.style.textAlign = "right";
                 voteHeader.style.verticalAlign = "top";
                 voteHeader.dataset.wodVoteHeaderCell = "true";
-                header.appendChild(voteHeader);
+                // Find the "Lager-dauer" column in this header row and insert the vote header before it
+                const normalizeHeader = t => t.replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-').trim().toLowerCase();
+                const getHeaderLabelSimple = cell => {
+                    const inputs = Array.from(cell.querySelectorAll('input'))
+                        .map(i => i.value || i.getAttribute('value') || '')
+                        .join(' ');
+                    return (cell.textContent + ' ' + inputs).trim();
+                };
+                let inserted = false;
+                let colStart = 0;
+                for (const cell of header.cells) {
+                    const colSpan = cell.colSpan || 1;
+                    const label = normalizeHeader(getHeaderLabelSimple(cell));
+                    if (label.includes('lager') && label.includes('dauer') || label.includes('lager-') || label.includes('lager')) {
+                        // insert voteHeader before this cell
+                        header.insertBefore(voteHeader, cell);
+                        inserted = true;
+                        break;
+                    }
+                    colStart += colSpan;
+                }
+                if (!inserted) header.appendChild(voteHeader);
                 header.dataset.wodVoteHeader = "true";
             }
 
@@ -122,10 +143,28 @@
                 row.dataset.wodGroupDecisionOpen = itemData.groupDecision ? "false" : "true";
                 row.dataset.wodItemKey = itemKey;
                 row.dataset.wodVoteUnusable = isUnusable ? "true" : "false";
-                const voteCell = row.insertCell(-1);
+                // Create vote cell and insert it before the "Lager-dauer" cell when possible
+                const voteCell = document.createElement('td');
                 voteCell.align = "center";
                 voteCell.style.position = "relative";
                 voteCell.style.backgroundColor = "transparent";
+                // determine reference cell in this row for insertion
+                let refCell = null;
+                let curIndex = 0;
+                for (const cell of Array.from(row.cells)) {
+                    const span = cell.colSpan || 1;
+                    const label = (cell.textContent || '').toLowerCase();
+                    if (label.includes('lager') && label.includes('dauer') || label.includes('lager-') || label.includes('lager')) {
+                        refCell = cell;
+                        break;
+                    }
+                    curIndex += span;
+                }
+                if (refCell) {
+                    row.insertBefore(voteCell, refCell);
+                } else {
+                    row.appendChild(voteCell);
+                }
 
                 let currentVote = isUnusable ? "no" : itemData.votes && itemData.votes[characterId] || "";
                 const characterVoteContainer = document.createElement("span");
@@ -448,6 +487,15 @@
                 .replace(/\s*-\s*/g, "-")
                 .trim()
                 .toLowerCase();
+            const getHeaderLabel = cell => [
+                cell.textContent,
+                ...Array.from(cell.querySelectorAll("input"))
+                    .map(input => input.value || input.getAttribute("value") || ""),
+            ].join(" ");
+            const isSalePriceHeader = cell =>
+                Array.from(cell.querySelectorAll("input"))
+                    .some(input => normalize(input.value || "") === "verkaufe")
+                && normalize(cell.textContent).includes("festpreis");
             const wantedLabels = saleColumnLabels.map(normalize);
             const tableColumns = [];
             for (const table of tables) {
@@ -463,8 +511,8 @@
                         while (occupied[columnIndex]) columnIndex++;
                         const columnSpan = cell.colSpan || 1;
                         const rowSpan = cell.rowSpan || 1;
-                        const label = normalize(cell.textContent);
-                        if (wantedLabels.some(wanted =>
+                        const label = normalize(getHeaderLabel(cell));
+                        if (isSalePriceHeader(cell) || wantedLabels.some(wanted =>
                             label === wanted || label.includes(wanted)
                         )) {
                             saleHeaderCells.add(cell);
@@ -500,15 +548,20 @@
                     for (const cell of saleHeaderCells) {
                         cell.style.display = checkbox.checked ? "" : "none";
                     }
-                    for (const row of table.tBodies[0].rows) {
-                        for (const cell of row.cells) {
-                            const cellStart = cell.cellIndex;
+                    const rows = [
+                        ...table.tBodies[0].rows,
+                        ...(table.tFoot ? table.tFoot.rows : []),
+                    ];
+                    for (const row of rows) {
+                        let cellStart = 0;
+                        for (const cell of Array.from(row.cells)) {
                             const cellEnd = cellStart + (cell.colSpan || 1);
                             if (Array.from(columnIndexes).some(index =>
                                 index >= cellStart && index < cellEnd
                             )) {
                                 cell.style.display = checkbox.checked ? "" : "none";
                             }
+                            cellStart = cellEnd;
                         }
                     }
                 }
