@@ -36,6 +36,7 @@
         static async startMod() {
             const view = _.WoD.getView(window);
             if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER || view === _.WoD.VIEW.ITEMS_STORE) {
+                this.resetFilterStateForLinkedPage();
                 this.insertGroupRepositoryUi();
             }
         }
@@ -591,8 +592,18 @@
         static getFilterStorageKey(table) {
             const sortInput = table.querySelector('thead input[name*="_DO_SORT"]');
             const sortName = sortInput && sortInput.name;
-            const pagePrefix = sortName && sortName.split("_DO_SORT")[0];
+            const pagePrefix = sortName
+                ? sortName.split("_DO_SORT")[0]
+                : this.getFilterPagePrefixFromView();
             return `wod-itemverwaltung-pending-filters:${pagePrefix || window.location.pathname}`;
+        }
+
+        static getFilterPagePrefixFromView() {
+            const view = new URL(window.location.href).searchParams.get("view") || "";
+            if (view.startsWith("groupcellar")) return "ITEMS_GROUPCELLAR";
+            if (view.startsWith("lager")) return "ITEMS_LAGER";
+            if (view.startsWith("group")) return "ITEMS_GROUP";
+            return null;
         }
 
         static loadFilterState(table) {
@@ -601,7 +612,6 @@
             }
             try {
                 if (!this.shouldRestoreFilterState()) {
-                    console.log("Delete Values");
                     GM_deleteValue(table._wodFilterStorageKey);
                     table._wodLoadedFilterState = null;
                     return null;
@@ -637,10 +647,22 @@
         static resetFilterStateForLinkedPage(table) {
             if (this.shouldRestoreFilterState()) return;
             try {
-                GM_deleteValue(table._wodFilterStorageKey);
+                const storageKey = table
+                    ? table._wodFilterStorageKey
+                    : this.getFilterStorageKeyFromView();
+                if (!storageKey) return;
+                GM_deleteValue(storageKey);
+                console.log("Delete Values", storageKey);
             } catch (error) {
                 console.warn("Filter konnten für die verlinkte Seite nicht zurückgesetzt werden.", error);
             }
+        }
+
+        static getFilterStorageKeyFromView() {
+            const pagePrefix = this.getFilterPagePrefixFromView();
+            return pagePrefix
+                ? `wod-itemverwaltung-pending-filters:${pagePrefix}`
+                : null;
         }
 
         static createSaleColumnControls(tables, container) {
