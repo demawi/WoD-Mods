@@ -85,9 +85,11 @@
             };
             const isStorageDurationHeader = cell => {
                 const label = getHeaderLabel(cell);
-                return label.includes("lager") && (
-                    label.includes("dauer") || label.includes("lager-")
+                const durationSortInput = cell.querySelector(
+                    'input[name*="DO_SORT"][value*="Lager-"]'
                 );
+                return Boolean(durationSortInput)
+                    || (label.includes("lager") && label.includes("dauer"));
             };
             let voteColumnIndex = 0;
             let lagerDurationHeader = null;
