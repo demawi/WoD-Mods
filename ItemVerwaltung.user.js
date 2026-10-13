@@ -61,6 +61,7 @@
             if (rows.length === 0) return;
             table._wodVoteRows = rows;
             table._wodFilterStorageKey = this.getFilterStorageKey(table);
+            this.registerFilterSubmitPersistence(table);
             const filter = this.createVoteFilter(table);
             const itemTables = Array.from(document.querySelectorAll("table.content_table"))
                 .filter(itemTable =>
@@ -565,6 +566,11 @@
             const combineItems = document.createElement("input");
             combineItems.type = "checkbox";
             combineItems.checked = savedState ? savedState.combineItems !== false : true;
+            table._wodFilterState = {
+                ...(savedState || {}),
+                voteFilter: filter.value,
+                combineItems: combineItems.checked,
+            };
             combineItems.title = "Namensgleiche Gegenstände für die Abstimmung zusammenfassen\nZusammenfassen ist gut für die Voting-Übersicht\nNicht zusammenfassen ist gut für Transfer/Verkaufen-Aktionen";
             combineItems.dataset.wodVoteCombineItems = "true";
             combineItems.addEventListener("change", () => {
@@ -585,28 +591,51 @@
             const sortInput = table.querySelector('thead input[name*="_DO_SORT"]');
             const sortName = sortInput && sortInput.name;
             const pagePrefix = sortName && sortName.split("_DO_SORT")[0];
-            return `wod-itemverwaltung-filters:${pagePrefix || window.location.pathname}`;
+            return `wod-itemverwaltung-pending-filters:${pagePrefix || window.location.pathname}`;
         }
 
         static loadFilterState(table) {
+            if (Object.prototype.hasOwnProperty.call(table, "_wodLoadedFilterState")) {
+                return table._wodLoadedFilterState;
+            }
             try {
-                const storedState = window.localStorage.getItem(table._wodFilterStorageKey);
-                return storedState ? JSON.parse(storedState) : null;
+                const storedState = window.sessionStorage.getItem(table._wodFilterStorageKey);
+                if (!storedState) {
+                    table._wodLoadedFilterState = null;
+                    return null;
+                }
+                window.sessionStorage.removeItem(table._wodFilterStorageKey);
+                table._wodLoadedFilterState = JSON.parse(storedState);
+                return table._wodLoadedFilterState;
             } catch (error) {
                 console.warn("Gespeicherte Filter konnten nicht geladen werden.", error);
+                table._wodLoadedFilterState = null;
                 return null;
             }
         }
 
         static saveFilterState(table, state) {
-            try {
-                window.localStorage.setItem(
-                    table._wodFilterStorageKey,
-                    JSON.stringify(state)
-                );
-            } catch (error) {
-                console.warn("Filter konnten nicht gespeichert werden.", error);
-            }
+            table._wodFilterState = {
+                ...(table._wodFilterState || {}),
+                ...state,
+            };
+        }
+
+        static registerFilterSubmitPersistence(table) {
+            const form = table.closest("form");
+            if (!form || form.dataset.wodFilterPersistence) return;
+            form.dataset.wodFilterPersistence = "true";
+            form.addEventListener("submit", () => {
+                const currentState = table._wodFilterState || {};
+                try {
+                    window.sessionStorage.setItem(
+                        table._wodFilterStorageKey,
+                        JSON.stringify(currentState)
+                    );
+                } catch (error) {
+                    console.warn("Filter konnten für den Formular-Submit nicht gespeichert werden.", error);
+                }
+            });
         }
 
         static createSaleColumnControls(tables, container) {
@@ -681,6 +710,7 @@
             checkbox.type = "checkbox";
             const savedState = this.loadFilterState(tables[0]);
             checkbox.checked = savedState ? savedState.saleColumns === true : false;
+            this.saveFilterState(tables[0], {saleColumns: checkbox.checked});
             checkbox.title = "Erweiterte Optionen in der Tabelle einblenden";
             checkbox.dataset.wodSaleColumns = "true";
             checkbox.addEventListener("change", () => {
