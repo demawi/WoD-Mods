@@ -599,13 +599,7 @@
                 return table._wodLoadedFilterState;
             }
             try {
-                const storedState = window.sessionStorage.getItem(table._wodFilterStorageKey);
-                if (!storedState) {
-                    table._wodLoadedFilterState = null;
-                    return null;
-                }
-                window.sessionStorage.removeItem(table._wodFilterStorageKey);
-                table._wodLoadedFilterState = JSON.parse(storedState);
+                table._wodLoadedFilterState = GM_getValue(table._wodFilterStorageKey, null);
                 return table._wodLoadedFilterState;
             } catch (error) {
                 console.warn("Gespeicherte Filter konnten nicht geladen werden.", error);
@@ -628,9 +622,9 @@
             form.addEventListener("submit", () => {
                 const currentState = table._wodFilterState || {};
                 try {
-                    window.sessionStorage.setItem(
+                    GM_setValue(
                         table._wodFilterStorageKey,
-                        JSON.stringify(currentState)
+                        currentState
                     );
                 } catch (error) {
                     console.warn("Filter konnten für den Formular-Submit nicht gespeichert werden.", error);
