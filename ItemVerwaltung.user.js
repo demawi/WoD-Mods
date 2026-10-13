@@ -72,6 +72,35 @@
                 console.error("Die zweite Kopfzeile der Schatzkammer-Tabelle wurde nicht gefunden.");
                 return;
             }
+            const normalizeHeader = text => text
+                .replace(/\s+/g, " ")
+                .replace(/\s*-\s*/g, "-")
+                .trim()
+                .toLowerCase();
+            const getHeaderLabel = cell => {
+                const inputValues = Array.from(cell.querySelectorAll("input"))
+                    .map(input => input.value || input.getAttribute("value") || "")
+                    .join(" ");
+                return normalizeHeader(`${cell.textContent} ${inputValues}`);
+            };
+            const isStorageDurationHeader = cell => {
+                const label = getHeaderLabel(cell);
+                return label.includes("lager") && (
+                    label.includes("dauer") || label.includes("lager-")
+                );
+            };
+            let voteColumnIndex = 0;
+            let lagerDurationHeader = null;
+            for (const cell of header.cells) {
+                if (isStorageDurationHeader(cell)) {
+                    lagerDurationHeader = cell;
+                    break;
+                }
+                voteColumnIndex += cell.colSpan || 1;
+            }
+            if (!lagerDurationHeader) {
+                voteColumnIndex = header.cells.length;
+            }
             if (!header.dataset.wodVoteHeader) {
                 const voteHeader = document.createElement("th");
                 voteHeader.textContent = "behalten?";
@@ -79,28 +108,11 @@
                 voteHeader.style.textAlign = "right";
                 voteHeader.style.verticalAlign = "top";
                 voteHeader.dataset.wodVoteHeaderCell = "true";
-                // Find the "Lager-dauer" column in this header row and insert the vote header before it
-                const normalizeHeader = t => t.replace(/\s+/g, ' ').replace(/\s*-\s*/g, '-').trim().toLowerCase();
-                const getHeaderLabelSimple = cell => {
-                    const inputs = Array.from(cell.querySelectorAll('input'))
-                        .map(i => i.value || i.getAttribute('value') || '')
-                        .join(' ');
-                    return (cell.textContent + ' ' + inputs).trim();
-                };
-                let inserted = false;
-                let colStart = 0;
-                for (const cell of header.cells) {
-                    const colSpan = cell.colSpan || 1;
-                    const label = normalizeHeader(getHeaderLabelSimple(cell));
-                    if (label.includes('lager') && label.includes('dauer') || label.includes('lager-') || label.includes('lager')) {
-                        // insert voteHeader before this cell
-                        header.insertBefore(voteHeader, cell);
-                        inserted = true;
-                        break;
-                    }
-                    colStart += colSpan;
+                if (lagerDurationHeader) {
+                    header.insertBefore(voteHeader, lagerDurationHeader);
+                } else {
+                    header.appendChild(voteHeader);
                 }
-                if (!inserted) header.appendChild(voteHeader);
                 header.dataset.wodVoteHeader = "true";
             }
 
@@ -148,17 +160,14 @@
                 voteCell.align = "center";
                 voteCell.style.position = "relative";
                 voteCell.style.backgroundColor = "transparent";
-                // determine reference cell in this row for insertion
                 let refCell = null;
-                let curIndex = 0;
+                let logicalIndex = 0;
                 for (const cell of Array.from(row.cells)) {
-                    const span = cell.colSpan || 1;
-                    const label = (cell.textContent || '').toLowerCase();
-                    if (label.includes('lager') && label.includes('dauer') || label.includes('lager-') || label.includes('lager')) {
+                    if (logicalIndex >= voteColumnIndex) {
                         refCell = cell;
                         break;
                     }
-                    curIndex += span;
+                    logicalIndex += cell.colSpan || 1;
                 }
                 if (refCell) {
                     row.insertBefore(voteCell, refCell);
