@@ -518,11 +518,20 @@
             container.style.bottom = "0";
             container.style.width = "80%";
             container.style.height = "20px";
-            container.style.backgroundColor = "rgba(255, 224, 122, 0.5)";
-            container.style.cursor = "pointer";
+            container.style.display = "inline-flex";
+            container.style.alignItems = "center";
+            container.style.justifyContent = "center";
+            container.style.gap = "2px";
             container.title = "Einzelentscheidung für alle angezeigten Items";
             header.append(container);
-            container.addEventListener("click", () => this.showDecisionChoice(container, saveVote));
+            for (const [value, sign, title] of [
+                ["yes", _.UI.WOD_SIGNS.YES, "Behalten für alle angezeigten Items"],
+                ["no", _.UI.WOD_SIGNS.NO, "Verkaufen für alle angezeigten Items"],
+            ]) {
+                const button = _.UI.createImgButton("20px", sign, () => saveVote(value));
+                button.title = title;
+                container.append(button);
+            }
         }
 
         static createVoteFilter(table) {
