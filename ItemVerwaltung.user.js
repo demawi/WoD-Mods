@@ -60,6 +60,7 @@
             const rows = Array.from(tbody.rows);
             if (rows.length === 0) return;
             table._wodVoteRows = rows;
+            table._wodFilterStorageKey = this.getFilterStorageKey(table);
             const filter = this.createVoteFilter(table);
             const itemTables = Array.from(document.querySelectorAll("table.content_table"))
                 .filter(itemTable =>
@@ -546,7 +547,15 @@
                 option.textContent = text;
                 filter.append(option);
             }
+            const savedState = this.loadFilterState(table);
+            if (savedState && options.some(([value]) => value === savedState.voteFilter)) {
+                filter.value = savedState.voteFilter;
+            }
             filter.addEventListener("change", () => {
+                this.saveFilterState(table, {
+                    voteFilter: filter.value,
+                    combineItems: combineItems.checked,
+                });
                 this.updateVoteFilter(table, filter.value, combineItems.checked);
             });
             container.append(filter);
@@ -555,10 +564,14 @@
             combineLabel.textContent = "Namentlich zusammenfassen ";
             const combineItems = document.createElement("input");
             combineItems.type = "checkbox";
-            combineItems.checked = true;
+            combineItems.checked = savedState ? savedState.combineItems !== false : true;
             combineItems.title = "Namensgleiche Gegenstände für die Abstimmung zusammenfassen\nZusammenfassen ist gut für die Voting-Übersicht\nNicht zusammenfassen ist gut für Transfer/Verkaufen-Aktionen";
             combineItems.dataset.wodVoteCombineItems = "true";
             combineItems.addEventListener("change", () => {
+                this.saveFilterState(table, {
+                    voteFilter: filter.value,
+                    combineItems: combineItems.checked,
+                });
                 this.updateVoteFilter(table, filter.value, combineItems.checked);
             });
             combineLabel.append(combineItems);
@@ -566,6 +579,34 @@
             table._wodVoteCombineItems = combineItems;
             table.parentElement.insertBefore(container, table);
             return filter;
+        }
+
+        static getFilterStorageKey(table) {
+            const sortInput = table.querySelector('thead input[name*="_DO_SORT"]');
+            const sortName = sortInput && sortInput.name;
+            const pagePrefix = sortName && sortName.split("_DO_SORT")[0];
+            return `wod-itemverwaltung-filters:${pagePrefix || window.location.pathname}`;
+        }
+
+        static loadFilterState(table) {
+            try {
+                const storedState = window.localStorage.getItem(table._wodFilterStorageKey);
+                return storedState ? JSON.parse(storedState) : null;
+            } catch (error) {
+                console.warn("Gespeicherte Filter konnten nicht geladen werden.", error);
+                return null;
+            }
+        }
+
+        static saveFilterState(table, state) {
+            try {
+                window.localStorage.setItem(
+                    table._wodFilterStorageKey,
+                    JSON.stringify(state)
+                );
+            } catch (error) {
+                console.warn("Filter konnten nicht gespeichert werden.", error);
+            }
         }
 
         static createSaleColumnControls(tables, container) {
@@ -638,10 +679,17 @@
             label.textContent = "Erweiterte Optionen anzeigen ";
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
-            checkbox.checked = false;
+            const savedState = this.loadFilterState(tables[0]);
+            checkbox.checked = savedState ? savedState.saleColumns === true : false;
             checkbox.title = "Erweiterte Optionen in der Tabelle einblenden";
             checkbox.dataset.wodSaleColumns = "true";
             checkbox.addEventListener("change", () => {
+                const table = tables[0];
+                const currentState = this.loadFilterState(table) || {};
+                this.saveFilterState(table, {
+                    ...currentState,
+                    saleColumns: checkbox.checked,
+                });
                 for (const {table, columnIndexes, saleHeaderCells} of tableColumns) {
                     for (const cell of saleHeaderCells) {
                         cell.style.display = checkbox.checked ? "" : "none";
