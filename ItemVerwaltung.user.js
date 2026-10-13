@@ -10,6 +10,7 @@
 // @require        repo/connect_firebase.js
 // @grant          GM_getValue
 // @grant          GM_setValue
+// @grant          GM_deleteValue
 //
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
@@ -600,6 +601,9 @@
             }
             try {
                 table._wodLoadedFilterState = GM_getValue(table._wodFilterStorageKey, null);
+                if (table._wodLoadedFilterState !== null) {
+                    GM_deleteValue(table._wodFilterStorageKey);
+                }
                 return table._wodLoadedFilterState;
             } catch (error) {
                 console.warn("Gespeicherte Filter konnten nicht geladen werden.", error);
@@ -619,7 +623,7 @@
             const form = table.closest("form");
             if (!form || form.dataset.wodFilterPersistence) return;
             form.dataset.wodFilterPersistence = "true";
-            form.addEventListener("submit", () => {
+            const persist = () => {
                 const currentState = table._wodFilterState || {};
                 try {
                     GM_setValue(
@@ -629,7 +633,20 @@
                 } catch (error) {
                     console.warn("Filter konnten für den Formular-Submit nicht gespeichert werden.", error);
                 }
-            });
+            };
+            form.addEventListener("submit", persist);
+            form.addEventListener("click", event => {
+                const target = event.target.closest("a, input, button");
+                if (!target || !form.contains(target)) return;
+                const inlineHandler = target.getAttribute("onclick") || "";
+                const isProgrammaticSubmit = /\.submit\s*\(\s*\)/.test(inlineHandler);
+                const isSubmitControl = target.matches(
+                    'input[type="submit"], button[type="submit"]'
+                );
+                if (isProgrammaticSubmit || isSubmitControl) {
+                    persist();
+                }
+            }, true);
         }
 
         static createSaleColumnControls(tables, container) {
