@@ -199,7 +199,14 @@
                 let currentVote = isUnusable ? "no" : itemData.votes && itemData.votes[characterId] || "";
                 const characterVoteContainer = document.createElement("span");
                 characterVoteContainer.title = "Eigene Entscheidung";
-                characterVoteContainer.style.position = "relative";
+                characterVoteContainer.style.position = "absolute";
+                characterVoteContainer.style.top = "0";
+                characterVoteContainer.style.left = "0";
+                characterVoteContainer.style.bottom = "0";
+                characterVoteContainer.style.width = "80%";
+                characterVoteContainer.style.display = "inline-flex";
+                characterVoteContainer.style.alignItems = "center";
+                characterVoteContainer.style.justifyContent = "center";
                 characterVoteContainer.style.zIndex = "1";
                 const yesButton = _.UI.createImgButton("20px", _.UI.WOD_SIGNS.YES, () =>
                     saveVote("yes")
@@ -567,11 +574,11 @@
 
             const label = document.createElement("label");
             label.style.marginLeft = "12px";
-            label.textContent = "Verkaufsoptionen anzeigen ";
+            label.textContent = "Erweiterte Optionen anzeigen ";
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
             checkbox.checked = false;
-            checkbox.title = "Verkaufsoptionen in der Tabelle einblenden";
+            checkbox.title = "Erweiterte Optionen in der Tabelle einblenden";
             checkbox.dataset.wodSaleColumns = "true";
             checkbox.addEventListener("change", () => {
                 for (const {table, columnIndexes, saleHeaderCells} of tableColumns) {
@@ -650,7 +657,9 @@
         }
 
         static getCharacterVoteColor(vote) {
-            return vote === "yes" ? "#80c995" : vote === "no" ? "#ed9696" : "#ffe07a";
+            return vote === "yes" ? "rgba(128, 201, 149, 0.5)"
+                : vote === "no" ? "rgba(237, 150, 150, 0.5)"
+                    : "rgba(255, 224, 122, 0.5)";
         }
 
         static getVoteSummary(decision, votes, memberIds) {
@@ -687,8 +696,8 @@
         static getVoteColor(decisionOrVotes, memberIds) {
             const result = this.getVoteResult(decisionOrVotes, memberIds);
             return result === "Behalten"
-                ? "#80c995"
-                : result === "Verkaufen" ? "#ed9696" : "#ffe07a";
+                ? "rgba(128, 201, 149, 0.5)"
+                : result === "Verkaufen" ? "rgba(237, 150, 150, 0.5)" : "rgba(255, 224, 122, 0.5)";
         }
     }
 
