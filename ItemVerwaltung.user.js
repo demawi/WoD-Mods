@@ -62,7 +62,6 @@
             if (rows.length === 0) return;
             table._wodVoteRows = rows;
             table._wodFilterStorageKey = this.getFilterStorageKey(table);
-            this.registerFilterSubmitPersistence(table);
             const filter = this.createVoteFilter(table);
             const itemTables = Array.from(document.querySelectorAll("table.content_table"))
                 .filter(itemTable =>
@@ -600,6 +599,11 @@
                 return table._wodLoadedFilterState;
             }
             try {
+                if (!this.shouldRestoreFilterState()) {
+                    GM_deleteValue(table._wodFilterStorageKey);
+                    table._wodLoadedFilterState = null;
+                    return null;
+                }
                 table._wodLoadedFilterState = GM_getValue(table._wodFilterStorageKey, null);
                 if (table._wodLoadedFilterState !== null) {
                     GM_deleteValue(table._wodFilterStorageKey);
@@ -617,36 +621,15 @@
                 ...(table._wodFilterState || {}),
                 ...state,
             };
+            try {
+                GM_setValue(table._wodFilterStorageKey, table._wodFilterState);
+            } catch (error) {
+                console.warn("Filter konnten nicht gespeichert werden.", error);
+            }
         }
 
-        static registerFilterSubmitPersistence(table) {
-            const form = table.closest("form");
-            if (!form || form.dataset.wodFilterPersistence) return;
-            form.dataset.wodFilterPersistence = "true";
-            const persist = () => {
-                const currentState = table._wodFilterState || {};
-                try {
-                    GM_setValue(
-                        table._wodFilterStorageKey,
-                        currentState
-                    );
-                } catch (error) {
-                    console.warn("Filter konnten für den Formular-Submit nicht gespeichert werden.", error);
-                }
-            };
-            form.addEventListener("submit", persist);
-            form.addEventListener("click", event => {
-                const target = event.target.closest("a, input, button");
-                if (!target || !form.contains(target)) return;
-                const inlineHandler = target.getAttribute("onclick") || "";
-                const isProgrammaticSubmit = /\.submit\s*\(\s*\)/.test(inlineHandler);
-                const isSubmitControl = target.matches(
-                    'input[type="submit"], button[type="submit"]'
-                );
-                if (isProgrammaticSubmit || isSubmitControl) {
-                    persist();
-                }
-            }, true);
+        static shouldRestoreFilterState() {
+            return !new URL(window.location.href).searchParams.has("view");
         }
 
         static createSaleColumnControls(tables, container) {
@@ -721,7 +704,10 @@
             checkbox.type = "checkbox";
             const savedState = this.loadFilterState(tables[0]);
             checkbox.checked = savedState ? savedState.saleColumns === true : false;
-            this.saveFilterState(tables[0], {saleColumns: checkbox.checked});
+            tables[0]._wodFilterState = {
+                ...(tables[0]._wodFilterState || {}),
+                saleColumns: checkbox.checked,
+            };
             checkbox.title = "Erweiterte Optionen in der Tabelle einblenden";
             checkbox.dataset.wodSaleColumns = "true";
             checkbox.addEventListener("change", () => {
