@@ -1743,7 +1743,7 @@
                 const yesButtonDiv = document.createElement("div");
                 yesButtonDiv.style.display = "inline-block";
                 yesButtonDiv.style.width = "50%";
-                const yesButton = util.createImgButton("20px", _.UI.WOD_SIGNS.YES, function () {
+                const yesButton = _.UI.createImgButton("20px", _.UI.WOD_SIGNS.YES, function () {
                     multiSelectionContainer.parentElement.removeChild(multiSelectionContainer);
                     var result = [];
                     var options = multiSelection.options;
@@ -1760,7 +1760,7 @@
                 const noButtonDiv = document.createElement("span");
                 noButtonDiv.style.width = "50%";
                 noButtonDiv.style.display = "inline-block";
-                const noButton = util.createImgButton("20px", "/wod/css/img/smiley/no.png", function () {
+                const noButton = _.UI.createImgButton("20px", _.UI.WOD_SIGNS.NO, function () {
                     multiSelectionContainer.parentElement.removeChild(multiSelectionContainer);
                     fnCallbackOnNo();
                 });
@@ -2171,14 +2171,6 @@
                     return href;
                 }
             }
-        }
-
-        static createImgButton(height, url, fnCallback) {
-            const result = document.createElement("img");
-            result.style.height = height;
-            result.src = url;
-            result.onclick = fnCallback;
-            return result;
         }
 
         static createSelectableElement(labelElement, selections) {

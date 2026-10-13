@@ -7,9 +7,26 @@
       "repoType": {
         ".validate": "newData.isString() && newData.val().length > 0"
       },
+      "items": {
+        "$itemName": {
+          "name": {
+            ".validate": "newData.isString() && newData.val().length > 0"
+          },
+          "groupDecision": {
+            ".validate": "newData.hasChildren(['value', 'decidedBy', 'decidedAt']) && (newData.child('value').val() == 'yes' || newData.child('value').val() == 'no') && newData.child('decidedBy').hasChildren(['id', 'name']) && newData.child('decidedBy').child('id').isString() && newData.child('decidedBy').child('name').isString() && newData.child('decidedAt').isNumber() && newData.child('decidedAt').val() >= now - 10000 && newData.child('decidedAt').val() <= now + 10000"
+          },
+          "votes": {
+            "$characterId": {
+              ".validate": "newData.val() == 'yes' || newData.val() == 'no'"
+            }
+          }
+        }
+      },
       "meta": {
-        "accessAt": {
-          ".validate": "newData.isNumber()"
+        "access": {
+          "$characterId": {
+            ".validate": "newData.hasChildren(['name', 'accessAt']) && newData.child('name').isString() && newData.child('accessAt').isNumber() && newData.child('accessAt').val() >= now - 10000 && newData.child('accessAt').val() <= now + 10000"
+          }
         }
       }
     }

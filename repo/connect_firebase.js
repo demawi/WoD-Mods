@@ -11,11 +11,11 @@
  *   const sameGroup = await firebase.connect("group", group.getId(), characterId);
  *   await sameGroup.set("items/example", { value: 1 });
  *
- * Bei createNew und connect wird einmalig meta/accessAt mit der Firebase-
- * Serverzeit aktualisiert.
+ * Bei createNew und connect wird einmalig meta/access/<characterId> mit
+ * Charaktername und Firebase-Serverzeit aktualisiert.
  */
 const WODB_FIREBASE_DATABASE_URL = "https://wodb-f27cf-default-rtdb.europe-west1.firebasedatabase.app";
-const FIREBASE_SERVER_TIMESTAMP = { ".sv": "timestamp" };
+const FIREBASE_SERVER_TIMESTAMP = {".sv": "timestamp"};
 
 class FirebaseGroupRepository {
     constructor(repoId, repoType, repoName, databaseUrl = WODB_FIREBASE_DATABASE_URL) {
@@ -34,6 +34,7 @@ class FirebaseGroupRepository {
         this.repoName = repoName;
         this.databaseUrl = databaseUrl.replace(/\/+$/, "");
         this.ready = Promise.resolve();
+        this.accessUpdatePromise = Promise.resolve();
     }
 
     getId() {
@@ -44,14 +45,21 @@ class FirebaseGroupRepository {
         return this.repoName;
     }
 
-    async updateAccessTimestamp() {
-        return this.set("meta/accessAt", FIREBASE_SERVER_TIMESTAMP);
+    async updateAccessTimestamp(characterId, characterName) {
+        if (typeof characterId !== "string" || characterId === "") {
+            throw new TypeError("Eine Charakter-ID ist für die Zugriffserfassung erforderlich.");
+        }
+        return this.set(`meta/access/${characterId}`, {
+            name: typeof characterName === "string" ? characterName : "",
+            accessAt: FIREBASE_SERVER_TIMESTAMP,
+        });
     }
 
-    updateAccessTimestampInBackground() {
-        this.updateAccessTimestamp().catch(error => {
+    updateAccessTimestampInBackground(characterId, characterName) {
+        this.accessUpdatePromise = this.updateAccessTimestamp(characterId, characterName).catch(error => {
             console.error("Firebase-Zugriffszeitpunkt konnte nicht aktualisiert werden.", error);
         });
+        return this.accessUpdatePromise;
     }
 
     async get(path) {
@@ -82,12 +90,13 @@ class FirebaseGroupRepository {
         return this.request(path, "DELETE");
     }
 
-    async request(path, method, body) {
+    async request(path, method, body, headers = {}) {
         const url = this.createUrl(path);
         const options = {
             method,
             headers: {
                 Accept: "application/json",
+                ...headers,
             },
         };
 
@@ -104,12 +113,14 @@ class FirebaseGroupRepository {
             try {
                 responseBody = JSON.parse(responseText);
             } catch (error) {
-                throw new Error(`Firebase lieferte ungültiges JSON zurück (${response.status}).`, { cause: error });
+                throw new Error(`Firebase lieferte ungültiges JSON zurück (${response.status}).`, {cause: error});
             }
         }
         if (!response.ok) {
             const details = responseBody && responseBody.error ? `: ${responseBody.error}` : "";
-            throw new Error(`Firebase-Anfrage fehlgeschlagen (${response.status})${details}`);
+            const error = new Error(`Firebase-Anfrage fehlgeschlagen (${response.status})${details}`);
+            error.status = response.status;
+            throw error;
         }
         return responseBody;
     }
@@ -163,32 +174,188 @@ class FirebaseGroupRepository {
 }
 
 class firebase {
-    static async createNew(repoType, repoName, characterId) {
+    static createRepositoryUi(repoType, onRepositoryConnected) {
+        const repository = typeof demawiRepository !== "undefined"
+            ? demawiRepository
+            : undefined;
+        if (!repository || !repository.WoD) {
+            throw new Error("Die WoD-Datenquelle ist für die Repository-UI nicht verfügbar.");
+        }
+
+        const characterId = repository.WoD.getMyHeroId();
+        const characterName = repository.WoD.getMyHeroName() || "Unbekannter Charakter";
+        const repoName = repository.WoD.getCurrentGroupName() || "";
+        const container = document.createElement("div");
+        container.className = "layout_clear";
+
+        const status = document.createElement("span");
+        status.textContent = "Verbindung wird geprüft ...";
+        container.append(status);
+
+        const actionsButton = document.createElement("input");
+        actionsButton.type = "button";
+        actionsButton.value = "v";
+        actionsButton.className = "button clickable";
+        actionsButton.title = "Repository-Aktionen anzeigen";
+        actionsButton.style.marginLeft = "8px";
+        container.append(actionsButton);
+
+        const actions = document.createElement("div");
+        actions.style.display = "none";
+        actions.style.marginTop = "8px";
+        container.append(actions);
+
+        const form = document.createElement("div");
+        form.style.marginBottom = "8px";
+        const repoIdInput = document.createElement("input");
+        repoIdInput.type = "text";
+        repoIdInput.placeholder = "Gruppen-ID";
+        repoIdInput.size = 28;
+        form.append(repoIdInput);
+
+        const connectButton = document.createElement("input");
+        connectButton.type = "button";
+        connectButton.value = "Verbinden";
+        connectButton.className = "button clickable";
+        form.append(connectButton);
+
+        const createButton = document.createElement("input");
+        createButton.type = "button";
+        createButton.value = "Neue Gruppenverbindung anlegen";
+        createButton.className = "button clickable";
+        form.append(createButton);
+        actions.append(form);
+
+        const details = document.createElement("div");
+        actions.append(details);
+
+        actionsButton.addEventListener("click", () => {
+            actions.style.display = actions.style.display === "none" ? "block" : "none";
+        });
+
+        const renderRepository = async repository => {
+            await repository.accessUpdatePromise;
+            const data = await repository.get("");
+            repoIdInput.value = repository.getId();
+            status.textContent = `Gruppenverbindung: ${data && data.name ? data.name : repository.getId()}`;
+            actions.style.display = "none";
+            details.replaceChildren();
+
+            const access = data && data.meta && data.meta.access ? data.meta.access : {};
+            const entries = Object.values(access);
+            if (entries.length === 0) {
+                details.textContent = "Noch keine Zugriffe erfasst.";
+                return;
+            }
+
+            const table = document.createElement("table");
+            table.className = "content_table";
+            const header = table.insertRow();
+            header.className = "header";
+            header.insertCell().textContent = "Charakter";
+            header.insertCell().textContent = "Letzter Zugriff";
+            for (const entry of entries) {
+                const row = table.insertRow();
+                row.insertCell().textContent = entry.name || "Unbekannter Charakter";
+                row.insertCell().textContent = entry.accessAt
+                    ? new Date(entry.accessAt).toLocaleString()
+                    : "unbekannt";
+            }
+            details.append(table);
+        };
+
+        const connect = async repoId => {
+            status.textContent = "Verbindung wird hergestellt ...";
+            try {
+                const repository = await firebase.connect(repoType, repoId, characterId, characterName);
+                    container.repository = repository;
+                    if (typeof onRepositoryConnected === "function") {
+                        await onRepositoryConnected(repository);
+                    }
+                    await renderRepository(repository);
+            } catch (error) {
+                status.textContent = `Keine Verbindung: ${error.message}`;
+                console.error("Repository konnte nicht verbunden werden.", error);
+            }
+        };
+
+        connectButton.addEventListener("click", () => {
+            const repoId = repoIdInput.value.trim();
+            if (repoId === "") {
+                status.textContent = "Gruppenverbindung: Bitte eine Gruppen-ID eingeben.";
+                return;
+            }
+            connect(repoId);
+        });
+
+        createButton.addEventListener("click", async () => {
+            status.textContent = "Repository wird angelegt ...";
+            try {
+                const repository = await firebase.createNew(repoType, repoName, characterId, characterName);
+                container.repository = repository;
+                if (typeof onRepositoryConnected === "function") {
+                    await onRepositoryConnected(repository);
+                }
+                await renderRepository(repository);
+            } catch (error) {
+                status.textContent = `Repository konnte nicht angelegt werden: ${error.message}`;
+                console.error("Repository konnte nicht angelegt werden.", error);
+            }
+        });
+
+        container.ready = (async () => {
+            try {
+                const repository = await firebase.connect(repoType, undefined, characterId, characterName);
+                container.repository = repository;
+                if (typeof onRepositoryConnected === "function") {
+                    await onRepositoryConnected(repository);
+                }
+                await renderRepository(repository);
+            } catch (error) {
+                status.textContent = "Gruppenverbindung: Nicht verbunden";
+            }
+        })();
+        return container;
+    }
+
+    static async createNew(repoType, repoName, characterId, characterName) {
         if (typeof repoType !== "string" || repoType === "") {
             throw new TypeError("Ein Repository-Typ ist erforderlich.");
         }
-        if (typeof repoName !== "string" || repoName.trim() === "") {
-            throw new TypeError("Ein Repository-Name ist erforderlich.");
-        }
+        repoName = typeof repoName === "string" ? repoName.trim() : "";
 
-        const repository = new FirebaseGroupRepository(
-            FirebaseGroupRepository.createId(),
-            repoType,
-            repoName.trim()
-        );
-        await repository.set("", {
-            repoType: repository.repoType,
-            name: repository.getName(),
-            createdAt: new Date().toISOString(),
-        });
+        let repository;
+        let created = false;
+        for (let attempt = 0; attempt < 5 && !created; attempt++) {
+            repository = new FirebaseGroupRepository(
+                FirebaseGroupRepository.createId(),
+                repoType,
+                repoName
+            );
+            try {
+                await repository.request("", "PUT", {
+                    repoType: repository.repoType,
+                    name: repository.getName(),
+                    createdAt: new Date().toISOString(),
+                }, {"If-Match": "null"});
+                created = true;
+            } catch (error) {
+                if (error.status !== 412) {
+                    throw error;
+                }
+            }
+        }
+        if (!created) {
+            throw new Error("Das neue Repository konnte nach mehreren Versuchen nicht angelegt werden.");
+        }
         if (characterId !== undefined) {
             await FirebaseGroupRepository.saveConnection(repoType, characterId, repository.getId());
+            repository.updateAccessTimestampInBackground(characterId, characterName);
         }
-        repository.updateAccessTimestampInBackground();
         return repository;
     }
 
-    static async connect(repoType, repoId, characterId) {
+    static async connect(repoType, repoId, characterId, characterName) {
         if (typeof repoType !== "string" || repoType === "") {
             throw new TypeError("Ein Repository-Typ ist erforderlich.");
         }
@@ -200,11 +367,19 @@ class firebase {
         if (typeof repoId !== "string" || repoId === "") {
             throw new Error(`Keine Repository-ID für ${FirebaseGroupRepository.storageKey(repoType, characterId)} übergeben oder gespeichert.`);
         }
+        const repository = new FirebaseGroupRepository(repoId, repoType);
+        const existingData = await repository.get("");
+        if (!existingData || typeof existingData !== "object"
+            || existingData.repoType !== repoType
+            || typeof existingData.name !== "string") {
+            throw new Error("Das Repository existiert nicht oder besitzt keine gültigen Metadaten. Bitte eine gültige Gruppen-ID verwenden oder eine neue Gruppe anlegen.");
+        }
         if (characterId !== undefined) {
             await FirebaseGroupRepository.saveConnection(repoType, characterId, repoId);
         }
-        const repository = new FirebaseGroupRepository(repoId, repoType);
-        repository.updateAccessTimestampInBackground();
+        if (characterId !== undefined) {
+            repository.updateAccessTimestampInBackground(characterId, characterName);
+        }
         return repository;
     }
 }

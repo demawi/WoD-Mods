@@ -2799,6 +2799,11 @@ class demawiRepository {
             return myMatch[1];
         }
 
+        static getBaseName(itemName) {
+            if(this.isVGName(itemName)) return this.getItemVGBaseName(itemName);
+            return itemName;
+        }
+
         /**
          * @return [vgBaseName, amount, max]
          */
@@ -4449,6 +4454,14 @@ class demawiRepository {
             button.style.cursor = "pointer";
             button.onclick = callback;
             return button;
+        }
+
+        static createImgButton(height, url, fnCallback) {
+            const result = document.createElement("img");
+            result.style.height = height;
+            result.src = url;
+            result.onclick = fnCallback;
+            return result;
         }
 
         static createCheckBox(supplier, consumer) {
