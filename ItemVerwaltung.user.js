@@ -128,8 +128,13 @@
             const repositoryData = await repository.get("") || {};
             const items = repositoryData.items || {};
             const characterId = _.WoD.getMyHeroId();
-            const characterName = _.WoD.getMyHeroName() || "Unbekannter Charakter";
+            const characterName = _.WoD.getMyHeroName() || "Unbekannter Held";
             const memberIds = Object.keys(repositoryData.meta && repositoryData.meta.access || {});
+            const memberNames = Object.fromEntries(
+                Object.entries(repositoryData.meta && repositoryData.meta.access || {})
+                    .map(([memberId, access]) => [memberId, access && access.name || memberId])
+            );
+            memberNames[characterId] = characterName;
             if (!memberIds.includes(characterId)) {
                 memberIds.push(characterId);
             }
@@ -246,7 +251,8 @@
                 groupDecisionIndicator.title = this.getVoteSummary(
                     currentGroupDecision,
                     itemData.votes,
-                    memberIds
+                    memberIds,
+                    memberNames
                 );
                 groupDecisionIndicator.style.cursor = "pointer";
                 voteBackground.append(characterDecisionIndicator, groupDecisionIndicator);
@@ -263,7 +269,8 @@
                         groupDecisionIndicator.title = this.getVoteSummary(
                             decision,
                             votes,
-                            updatedMemberIds
+                            updatedMemberIds,
+                            memberNames
                         );
                         row.dataset.wodVoteResult = this.getVoteResult(
                             decision || votes,
@@ -397,6 +404,43 @@
                     console.error("Gruppenentscheidung für alle Items konnte nicht gespeichert werden.", error);
                 }
             });
+            this.createBulkVoteControls(voteHeader, async vote => {
+                try {
+                    const visibleItemKeys = new Set(
+                        rows
+                            .filter(row => row.parentElement === tbody)
+                            .filter(row => row.dataset.wodVoteUnusable !== "true")
+                            .map(row => row.dataset.wodItemKey)
+                            .filter(Boolean)
+                    );
+                    for (const itemKey of visibleItemKeys) {
+                        const itemBaseName = itemNames.get(itemKey);
+                        await repository.set(`items/${itemKey}/name`, itemBaseName);
+                        await repository.set(`items/${itemKey}/votes/${characterId}`, vote);
+                    }
+                    const updatedRepositoryData = await repository.get("");
+                    const updatedMemberIds = Object.keys(
+                        updatedRepositoryData.meta && updatedRepositoryData.meta.access || {}
+                    );
+                    if (!updatedMemberIds.includes(characterId)) {
+                        updatedMemberIds.push(characterId);
+                    }
+                    for (const [itemKey, views] of voteViews) {
+                        const updatedItem = updatedRepositoryData.items
+                            && updatedRepositoryData.items[itemKey];
+                        for (const view of views) {
+                            view.setState(
+                                updatedItem && updatedItem.groupDecision,
+                                updatedItem && updatedItem.votes,
+                                updatedMemberIds
+                            );
+                        }
+                    }
+                    this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                } catch (error) {
+                    console.error("Einzelentscheidung für alle Items konnte nicht gespeichert werden.", error);
+                }
+            });
             this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
         }
 
@@ -460,6 +504,23 @@
             container.addEventListener("click", () => this.showDecisionChoice(container, saveDecision));
         }
 
+        static createBulkVoteControls(header, saveVote) {
+            if (header.dataset.wodBulkVote) return;
+            header.dataset.wodBulkVote = "true";
+            const container = document.createElement("span");
+            container.dataset.wodBulkVote = "true";
+            container.style.position = "absolute";
+            container.style.left = "0";
+            container.style.bottom = "0";
+            container.style.width = "80%";
+            container.style.height = "20px";
+            container.style.backgroundColor = "rgba(255, 224, 122, 0.5)";
+            container.style.cursor = "pointer";
+            container.title = "Einzelentscheidung für alle angezeigten Items";
+            header.append(container);
+            container.addEventListener("click", () => this.showDecisionChoice(container, saveVote));
+        }
+
         static createVoteFilter(table) {
             let filter = table.parentElement.querySelector("[data-wod-vote-filter]");
             if (filter) return filter;
@@ -491,7 +552,7 @@
             container.append(filter);
             const combineLabel = document.createElement("label");
             combineLabel.style.marginLeft = "12px";
-            combineLabel.textContent = "Gleiche Namen zusammenfassen ";
+            combineLabel.textContent = "Namentlich zusammenfassen ";
             const combineItems = document.createElement("input");
             combineItems.type = "checkbox";
             combineItems.checked = true;
@@ -657,12 +718,19 @@
         }
 
         static getCharacterVoteColor(vote) {
-            return vote === "yes" ? "rgba(128, 201, 149, 0.5)"
-                : vote === "no" ? "rgba(237, 150, 150, 0.5)"
-                    : "rgba(255, 224, 122, 0.5)";
+            return vote === "yes" ? "rgba(128, 201, 149, 0.8)"
+                : vote === "no" ? "rgba(237, 150, 150, 0.8)"
+                    : "rgba(255, 224, 122, 0.8)";
         }
 
-        static getVoteSummary(decision, votes, memberIds) {
+        static getVoteColor(decisionOrVotes, memberIds) {
+            const result = this.getVoteResult(decisionOrVotes, memberIds);
+            return result === "Behalten"
+                ? "rgba(128, 201, 149, 0.8)"
+                : result === "Verkaufen" ? "rgba(237, 150, 150, 0.8)" : "rgba(255, 224, 122, 0.8)";
+        }
+
+        static getVoteSummary(decision, votes, memberIds, memberNames) {
             const result = this.getVoteResult(decision || votes, memberIds);
             const members = memberIds || [];
             const values = members.map(memberId => votes && votes[memberId]);
@@ -672,9 +740,19 @@
             const summary = [
                 `Einzel-Votes: Ja: ${yesVotes}, Nein: ${noVotes}, Offen: ${openVotes}`,
                 `Einzel-Ergebnis: ${this.getVoteResult(votes, members)}`,
+                "Einzel-Abstimmungen:",
             ];
+            for (const memberId of members) {
+                const vote = votes && votes[memberId];
+                if (vote !== "yes" && vote !== "no") continue;
+                const voteText = vote === "yes"
+                    ? "Behalten"
+                    : "Verkaufen";
+                const memberName = memberNames && memberNames[memberId] || memberId;
+                summary.push(`- ${memberName}: ${voteText}`);
+            }
             if (decision && decision.decidedBy) {
-                const decidedBy = decision.decidedBy.name || decision.decidedBy.id || "Unbekannter Charakter";
+                const decidedBy = decision.decidedBy.name || decision.decidedBy.id || "Unbekannter Held";
                 summary.unshift(`Direkte Gruppenentscheidung: ${result}`);
                 summary.splice(1, 0, `Direkt entschieden von: ${decidedBy}`);
             } else {
@@ -693,12 +771,7 @@
             return "Offen";
         }
 
-        static getVoteColor(decisionOrVotes, memberIds) {
-            const result = this.getVoteResult(decisionOrVotes, memberIds);
-            return result === "Behalten"
-                ? "rgba(128, 201, 149, 0.5)"
-                : result === "Verkaufen" ? "rgba(237, 150, 150, 0.5)" : "rgba(255, 224, 122, 0.5)";
-        }
+
     }
 
     try {
