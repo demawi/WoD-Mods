@@ -361,6 +361,11 @@
                     );
                     for (const itemKey of visibleItemKeys) {
                         const itemBaseName = itemNames.get(itemKey);
+                        const itemData = items[itemKey];
+                        if (itemData && itemData.groupDecision
+                            && itemData.groupDecision.value === decision) {
+                            continue;
+                        }
                         await repository.set(`items/${itemKey}/name`, itemBaseName);
                         await repository.set(`items/${itemKey}/groupDecision`, {
                             value: decision,
@@ -402,6 +407,11 @@
                     );
                     for (const itemKey of visibleItemKeys) {
                         const itemBaseName = itemNames.get(itemKey);
+                        const itemData = items[itemKey];
+                        if (itemData && itemData.votes
+                            && itemData.votes[characterId] === vote) {
+                            continue;
+                        }
                         await repository.set(`items/${itemKey}/name`, itemBaseName);
                         await repository.set(`items/${itemKey}/votes/${characterId}`, vote);
                     }
