@@ -379,7 +379,7 @@
                 };
                 const savePrimaryHero = async primaryHero => {
                     try {
-                        if (!currentGroupDecision) {
+                        if (!currentGroupDecision || !currentGroupDecision.value) {
                             await ensureItemName(itemKey, itemBaseName);
                             if (primaryHero) {
                                 await repository.set(`items/${itemKey}/primaryHero`, primaryHero);
