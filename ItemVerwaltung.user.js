@@ -11,6 +11,8 @@
 // @grant          GM_getValue
 // @grant          GM_setValue
 // @grant          GM_deleteValue
+// @grant          GM_xmlhttpRequest
+// @connect        wodb-f27cf-default-rtdb.europe-west1.firebasedatabase.app
 //
 // @require        libs/jszip.min.js
 // @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
