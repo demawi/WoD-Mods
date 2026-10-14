@@ -137,6 +137,17 @@
             }
             const voteViews = new Map();
             const itemNames = new Map();
+            const ensureItemName = async (itemKey, itemBaseName) => {
+                const itemData = items[itemKey];
+                if (itemData && typeof itemData.name === "string" && itemData.name !== "") {
+                    return;
+                }
+                await repository.set(`items/${itemKey}/name`, itemBaseName);
+                items[itemKey] = {
+                    ...(itemData || {}),
+                    name: itemBaseName,
+                };
+            };
             for (const row of rows) {
                 const itemSelect = row.querySelector('select[name^="EquipItem["]');
                 const itemLink = row.children[1] && row.children[1].querySelector("a");
@@ -152,7 +163,7 @@
                 const itemData = items[itemKey] || {name: itemBaseName};
                 const isUnusable = itemLink.classList.contains("item_unusable");
                 if (isUnusable && (!itemData.votes || itemData.votes[characterId] !== "no")) {
-                    await repository.set(`items/${itemKey}/name`, itemBaseName);
+                    await ensureItemName(itemKey, itemBaseName);
                     await repository.set(`items/${itemKey}/votes/${characterId}`, "no");
                     itemData.votes = Object.assign({}, itemData.votes, {[characterId]: "no"});
                     items[itemKey] = itemData;
@@ -285,7 +296,7 @@
                     yesButton.style.pointerEvents = "none";
                     noButton.style.pointerEvents = "none";
                     try {
-                        await repository.set(`items/${itemKey}/name`, itemBaseName);
+                        await ensureItemName(itemKey, itemBaseName);
                         if (nextVote === "") {
                             await repository.remove(`items/${itemKey}/votes/${characterId}`);
                         } else {
@@ -320,7 +331,7 @@
                             return;
                         }
                         const nextDecision = decision;
-                        await repository.set(`items/${itemKey}/name`, itemBaseName);
+                        await ensureItemName(itemKey, itemBaseName);
                         await repository.set(`items/${itemKey}/groupDecision`, {
                             value: nextDecision,
                             decidedBy: {
@@ -365,7 +376,7 @@
                             && itemData.groupDecision.value === decision) {
                             continue;
                         }
-                        await repository.set(`items/${itemKey}/name`, itemBaseName);
+                        await ensureItemName(itemKey, itemBaseName);
                         await repository.set(`items/${itemKey}/groupDecision`, {
                             value: decision,
                             decidedBy: {
@@ -412,7 +423,7 @@
                             && itemData.votes[characterId] === vote) {
                             continue;
                         }
-                        await repository.set(`items/${itemKey}/name`, itemBaseName);
+                        await ensureItemName(itemKey, itemBaseName);
                         await repository.set(`items/${itemKey}/votes/${characterId}`, vote);
                     }
                     const updatedRepositoryData = await repository.get("");
