@@ -204,6 +204,8 @@
                 const noButton = _.UI.createImgButton("20px", _.UI.WOD_SIGNS.NO, () =>
                     saveVote("no")
                 );
+                yesButton.style.cursor = "pointer";
+                noButton.style.cursor = "pointer";
                 if (!isUnusable) {
                     yesButton.title = "Behalten";
                     noButton.title = "Verkaufen";
@@ -454,6 +456,7 @@
                     saveDecision(value);
                 });
                 button.title = labelText;
+                button.style.cursor = "pointer";
                 button.style.margin = "0 2px";
                 choice.append(button);
             }
@@ -511,6 +514,7 @@
             ]) {
                 const button = _.UI.createImgButton("20px", sign, () => saveVote(value));
                 button.title = title;
+                button.style.cursor = "pointer";
                 container.append(button);
             }
         }
