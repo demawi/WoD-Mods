@@ -105,8 +105,22 @@ class FirebaseGroupRepository {
             options.body = JSON.stringify(body);
         }
 
-        const response = await fetch(url, options);
-        const responseText = await response.text();
+        const response = await new Promise((resolve, reject) => {
+            const request = new XMLHttpRequest();
+            request.open(options.method, url, true);
+            for (const [name, value] of Object.entries(options.headers)) {
+                request.setRequestHeader(name, value);
+            }
+            request.onload = () => resolve({
+                status: request.status,
+                responseText: request.responseText,
+            });
+            request.onerror = () => reject(
+                new Error(`Firebase-Anfrage konnte nicht gesendet werden (${options.method} ${url}).`)
+            );
+            request.send(options.body);
+        });
+        const responseText = response.responseText;
         let responseBody;
 
         if (responseText !== "") {
@@ -116,7 +130,7 @@ class FirebaseGroupRepository {
                 throw new Error(`Firebase lieferte ungültiges JSON zurück (${response.status}).`, {cause: error});
             }
         }
-        if (!response.ok) {
+        if (response.status < 200 || response.status >= 300) {
             const details = responseBody && responseBody.error ? `: ${responseBody.error}` : "";
             const error = new Error(`Firebase-Anfrage fehlgeschlagen (${response.status})${details}`);
             error.status = response.status;
