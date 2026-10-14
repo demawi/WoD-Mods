@@ -264,6 +264,9 @@
                     ? "H"
                     : "";
                 groupDecisionIndicator.style.textAlign = "center";
+                groupDecisionIndicator.style.display = "flex";
+                groupDecisionIndicator.style.alignItems = "center";
+                groupDecisionIndicator.style.justifyContent = "center";
                 groupDecisionIndicator.title = this.getVoteSummary(
                     currentGroupDecision,
                     itemData.votes,
