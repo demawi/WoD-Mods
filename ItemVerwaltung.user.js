@@ -259,6 +259,11 @@
                     currentGroupDecision || itemData.votes,
                     memberIds
                 );
+                groupDecisionIndicator.textContent = currentGroupDecision
+                    && currentGroupDecision.primaryHero
+                    ? "H"
+                    : "";
+                groupDecisionIndicator.style.textAlign = "center";
                 groupDecisionIndicator.title = this.getVoteSummary(
                     currentGroupDecision,
                     itemData.votes,
@@ -277,6 +282,11 @@
                             decision || votes,
                             updatedMemberIds
                         );
+                        groupDecisionIndicator.textContent = decision
+                            && decision.primaryHero
+                            || items[itemKey] && items[itemKey].primaryHero
+                            ? "H"
+                            : "";
                         groupDecisionIndicator.title = this.getVoteSummary(
                             decision,
                             votes,
@@ -392,6 +402,7 @@
                             };
                             currentGroupDecision = {primaryHero};
                             row.dataset.wodPrimaryHero = primaryHero;
+                            groupDecisionIndicator.textContent = primaryHero ? "H" : "";
                             groupDecisionIndicator.title = this.getVoteSummary(
                                 currentGroupDecision,
                                 items[itemKey].votes,
@@ -415,6 +426,7 @@
                             primaryHero,
                         };
                         row.dataset.wodPrimaryHero = primaryHero;
+                        groupDecisionIndicator.textContent = primaryHero ? "H" : "";
                         items[itemKey] = {
                             ...(items[itemKey] || {}),
                             groupDecision: currentGroupDecision,
