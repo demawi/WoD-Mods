@@ -1056,7 +1056,7 @@
             if (decision && decision.primaryHero) {
                 const primaryHero = memberNames && memberNames[decision.primaryHero]
                     || decision.primaryHero;
-                summary.splice(decision.decidedBy ? 2 : 1, 0, `=> ${primaryHero}`);
+                summary.unshift(`=> ${primaryHero}`);
             }
             return summary.join("\n");
         }
