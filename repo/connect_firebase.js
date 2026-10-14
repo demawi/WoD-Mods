@@ -105,22 +105,8 @@ class FirebaseGroupRepository {
             options.body = JSON.stringify(body);
         }
 
-        const response = typeof GM_xmlhttpRequest === "function"
-            ? await new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method,
-                    url,
-                    headers: options.headers,
-                    data: options.body,
-                    onload: resolve,
-                    onerror: reject,
-                    ontimeout: reject,
-                });
-            })
-            : await fetch(url, options);
-        const responseText = typeof response.responseText === "string"
-            ? response.responseText
-            : await response.text();
+        const response = await fetch(url, options);
+        const responseText = await response.text();
         let responseBody;
 
         if (responseText !== "") {
@@ -130,10 +116,7 @@ class FirebaseGroupRepository {
                 throw new Error(`Firebase lieferte ungültiges JSON zurück (${response.status}).`, {cause: error});
             }
         }
-        const responseOk = typeof response.ok === "boolean"
-            ? response.ok
-            : response.status >= 200 && response.status < 300;
-        if (!responseOk) {
+        if (!response.ok) {
             const details = responseBody && responseBody.error ? `: ${responseBody.error}` : "";
             const error = new Error(`Firebase-Anfrage fehlgeschlagen (${response.status})${details}`);
             error.status = response.status;
@@ -200,7 +183,7 @@ class firebase {
         }
 
         const characterId = repository.WoD.getMyHeroId();
-        const characterName = repository.WoD.getMyHeroName() || "Unbekannter Charakter";
+        const characterName = repository.WoD.getMyHeroName() || "Unbekannter Held";
         const repoName = repository.WoD.getCurrentGroupName() || "";
         const container = document.createElement("div");
         container.className = "layout_clear";
