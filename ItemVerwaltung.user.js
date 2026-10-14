@@ -516,7 +516,15 @@
                         };
                         await repository.set(`items/${itemKey}/groupDecision`, groupDecision);
                         items[itemKey] = {...itemData, groupDecision};
+                        for (const view of voteViews.get(itemKey) || []) {
+                            view.setState(
+                                groupDecision,
+                                itemData.votes,
+                                memberIds
+                            );
+                        }
                     }
+                    this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
                 } catch (error) {
                     console.error("Primäre Helden konnten nicht gespeichert werden.", error);
                 }
