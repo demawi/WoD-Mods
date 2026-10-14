@@ -455,7 +455,8 @@
                         const itemBaseName = itemNames.get(itemKey);
                         const itemData = items[itemKey];
                         if (itemData && itemData.groupDecision
-                            && itemData.groupDecision.value === decision) {
+                            && itemData.groupDecision.value === decision
+                            && (itemData.groupDecision.primaryHero || "") === (primaryHero || "")) {
                             continue;
                         }
                         await ensureItemName(itemKey, itemBaseName);
