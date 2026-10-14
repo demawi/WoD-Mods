@@ -401,7 +401,9 @@
                     this.showDecisionChoice(
                         groupDecisionIndicator,
                         saveDecision,
-                        currentGroupDecision,
+                        currentGroupDecision || {
+                            primaryHero: items[itemKey] && items[itemKey].primaryHero || "",
+                        },
                         memberNames,
                         savePrimaryHero
                     );
