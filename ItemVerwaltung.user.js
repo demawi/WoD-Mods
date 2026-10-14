@@ -97,14 +97,7 @@
             };
             let voteColumnIndex = 0;
             let lagerDurationHeader = null;
-            let locationColumnIndex = null;
             for (const cell of header.cells) {
-                const sortInput = cell.querySelector('input[name*="DO_SORT"]');
-                if (sortInput && normalizeHeader(sortInput.value || "") === "ort") {
-                    locationColumnIndex = voteColumnIndex;
-                    cell.style.textAlign = "center";
-                    cell.setAttribute("align", "center");
-                }
                 if (isStorageDurationHeader(cell)) {
                     lagerDurationHeader = cell;
                     break;
@@ -173,18 +166,6 @@
                 row.dataset.wodGroupDecisionOpen = itemData.groupDecision ? "false" : "true";
                 row.dataset.wodItemKey = itemKey;
                 row.dataset.wodVoteUnusable = isUnusable ? "true" : "false";
-                if (locationColumnIndex !== null) {
-                    let rowColumnIndex = 0;
-                    for (const cell of Array.from(row.cells)) {
-                        const cellEnd = rowColumnIndex + (cell.colSpan || 1);
-                        if (locationColumnIndex >= rowColumnIndex && locationColumnIndex < cellEnd) {
-                            cell.style.textAlign = "center";
-                            cell.setAttribute("align", "center");
-                            break;
-                        }
-                        rowColumnIndex = cellEnd;
-                    }
-                }
                 // Create vote cell and insert it before the "Lager-dauer" cell when possible
                 const voteCell = document.createElement('td');
                 voteCell.align = "center";
