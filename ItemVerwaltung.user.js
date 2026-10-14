@@ -241,7 +241,13 @@
 
                 const groupDecisionIndicator = document.createElement("span");
                 groupDecisionIndicator.style.flex = "0 0 20%";
-                let currentGroupDecision = itemData.groupDecision;
+                let currentGroupDecision = itemData.groupDecision
+                    && {
+                        ...itemData.groupDecision,
+                        primaryHero: itemData.groupDecision.primaryHero
+                            || itemData.primaryHero
+                            || "",
+                    };
                 groupDecisionIndicator.style.backgroundColor = this.getVoteColor(
                     currentGroupDecision || itemData.votes,
                     memberIds
@@ -325,15 +331,19 @@
                         noButton.style.pointerEvents = "";
                     }
                 };
-                const saveDecision = async decision => {
+                const saveDecision = async (decision, selectedPrimaryHero) => {
                     try {
                         if (currentGroupDecision && currentGroupDecision.value === decision) {
                             return;
                         }
                         const nextDecision = decision;
+                        const primaryHero = selectedPrimaryHero
+                            || items[itemKey] && items[itemKey].primaryHero
+                            || "";
                         await ensureItemName(itemKey, itemBaseName);
                         await repository.set(`items/${itemKey}/groupDecision`, {
                             value: nextDecision,
+                            primaryHero,
                             decidedBy: {
                                 id: characterId,
                                 name: characterName,
@@ -356,12 +366,49 @@
                         console.error("Gruppenentscheidung konnte nicht gespeichert werden.", error);
                     }
                 };
+                const savePrimaryHero = async primaryHero => {
+                    try {
+                        if (!currentGroupDecision) {
+                            await ensureItemName(itemKey, itemBaseName);
+                            if (primaryHero) {
+                                await repository.set(`items/${itemKey}/primaryHero`, primaryHero);
+                            } else {
+                                await repository.remove(`items/${itemKey}/primaryHero`);
+                            }
+                            items[itemKey] = {
+                                ...(items[itemKey] || {}),
+                                primaryHero,
+                            };
+                            return;
+                        }
+                        await repository.set(`items/${itemKey}/groupDecision`, {
+                            ...currentGroupDecision,
+                            primaryHero,
+                        });
+                        currentGroupDecision = {
+                            ...currentGroupDecision,
+                            primaryHero,
+                        };
+                        items[itemKey] = {
+                            ...(items[itemKey] || {}),
+                            groupDecision: currentGroupDecision,
+                        };
+                    } catch (error) {
+                        console.error("Primärer Held konnte nicht gespeichert werden.", error);
+                    }
+                };
                 groupDecisionIndicator.addEventListener("click", () => {
-                    this.showDecisionChoice(groupDecisionIndicator, saveDecision);
+                    this.showDecisionChoice(
+                        groupDecisionIndicator,
+                        saveDecision,
+                        currentGroupDecision,
+                        memberNames,
+                        savePrimaryHero
+                    );
                 });
             }
             const voteHeader = header.querySelector("[data-wod-vote-header-cell]");
-            this.createBulkDecisionControls(voteHeader, async decision => {
+            this.createBulkDecisionControls(voteHeader, async (decision, primaryHero) => {
                 try {
                     const visibleItemKeys = new Set(
                         rows
@@ -379,6 +426,7 @@
                         await ensureItemName(itemKey, itemBaseName);
                         await repository.set(`items/${itemKey}/groupDecision`, {
                             value: decision,
+                            primaryHero,
                             decidedBy: {
                                 id: characterId,
                                 name: characterName,
@@ -405,6 +453,31 @@
                     this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
                 } catch (error) {
                     console.error("Gruppenentscheidung für alle Items konnte nicht gespeichert werden.", error);
+                }
+            }, memberNames, async primaryHero => {
+                try {
+                    const visibleItemKeys = new Set(
+                        rows
+                            .filter(row => row.parentElement === tbody)
+                            .map(row => row.dataset.wodItemKey)
+                            .filter(Boolean)
+                    );
+                    for (const itemKey of visibleItemKeys) {
+                        const itemData = items[itemKey];
+                        if (!itemData || !itemData.groupDecision
+                            || itemData.groupDecision.primaryHero === primaryHero) {
+                            continue;
+                        }
+                        await ensureItemName(itemKey, itemNames.get(itemKey));
+                        const groupDecision = {
+                            ...itemData.groupDecision,
+                            primaryHero,
+                        };
+                        await repository.set(`items/${itemKey}/groupDecision`, groupDecision);
+                        items[itemKey] = {...itemData, groupDecision};
+                    }
+                } catch (error) {
+                    console.error("Primäre Helden konnten nicht gespeichert werden.", error);
                 }
             });
             this.createBulkVoteControls(voteHeader, async vote => {
@@ -453,7 +526,13 @@
             this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
         }
 
-        static showDecisionChoice(anchor, saveDecision) {
+        static showDecisionChoice(
+            anchor,
+            saveDecision,
+            currentDecision,
+            memberNames,
+            savePrimaryHero
+        ) {
             const existingChoice = document.querySelector("[data-wod-group-decision-choice]");
             if (existingChoice) existingChoice.remove();
 
@@ -469,13 +548,31 @@
             choice.style.padding = "0";
             choice.style.margin = "0";
             choice.style.whiteSpace = "nowrap";
+            const primaryHero = document.createElement("select");
+            primaryHero.title = "Primär nutzender Held";
+            primaryHero.style.margin = "0 2px";
+            const emptyOption = document.createElement("option");
+            emptyOption.value = "";
+            emptyOption.textContent = "Primärer Held";
+            primaryHero.append(emptyOption);
+            for (const [heroId, heroName] of Object.entries(memberNames || {})) {
+                const option = document.createElement("option");
+                option.value = heroId;
+                option.textContent = heroName;
+                primaryHero.append(option);
+            }
+            primaryHero.value = currentDecision && currentDecision.primaryHero || "";
+            primaryHero.addEventListener("change", () => {
+                if (savePrimaryHero) savePrimaryHero(primaryHero.value);
+            });
+            choice.append(primaryHero);
             for (const [value, sign, labelText] of [
                 ["yes", _.UI.WOD_SIGNS.YES, "Ja"],
                 ["no", _.UI.WOD_SIGNS.NO, "Nein"],
             ]) {
                 const button = _.UI.createImgButton("20px", sign, () => {
                     choice.remove();
-                    saveDecision(value);
+                    saveDecision(value, primaryHero.value);
                 });
                 button.title = labelText;
                 button.style.cursor = "pointer";
@@ -494,9 +591,10 @@
             const anchorBounds = anchor.getBoundingClientRect();
             choice.style.top = `${anchorBounds.top}px`;
             choice.style.left = `${Math.max(0, anchorBounds.right - choice.offsetWidth)}px`;
+            return primaryHero;
         }
 
-        static createBulkDecisionControls(header, saveDecision) {
+        static createBulkDecisionControls(header, saveDecision, memberNames, savePrimaryHero) {
             if (header.dataset.wodBulkGroupDecision) return;
             header.dataset.wodBulkGroupDecision = "true";
             header.title = "Gruppenentscheidung für alle Items";
@@ -511,7 +609,15 @@
             container.style.cursor = "pointer";
             container.title = "Gruppenentscheidung für alle Items";
             header.append(container);
-            container.addEventListener("click", () => this.showDecisionChoice(container, saveDecision));
+            container.addEventListener("click", () => {
+                this.showDecisionChoice(
+                    container,
+                    (decision, primaryHero) => saveDecision(decision, primaryHero),
+                    null,
+                    memberNames,
+                    savePrimaryHero
+                );
+            });
         }
 
         static createBulkVoteControls(header, saveVote) {
