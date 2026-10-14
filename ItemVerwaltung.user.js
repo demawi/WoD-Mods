@@ -704,7 +704,6 @@
             const tableColumns = [];
             for (const table of tables) {
                 const columnIndexes = new Set();
-                const saleHeaderCells = new Set();
                 const headerGrid = [];
                 const headerRows = table.tHead ? Array.from(table.tHead.rows) : [];
                 for (let rowIndex = 0; rowIndex < headerRows.length; rowIndex++) {
@@ -719,7 +718,6 @@
                         if (isSalePriceHeader(cell) || wantedLabels.some(wanted =>
                             label === wanted || label.includes(wanted)
                         )) {
-                            saleHeaderCells.add(cell);
                             for (let offset = 0; offset < columnSpan; offset++) {
                                 columnIndexes.add(columnIndex + offset);
                             }
@@ -767,7 +765,7 @@
                         columns.push(column);
                     }
                     table.insertBefore(colgroup, table.tHead || table.firstChild);
-                    tableColumns.push({table, columnIndexes, saleHeaderCells, columns});
+                    tableColumns.push({table, columnIndexes, columns});
                 }
             }
             if (tableColumns.length === 0) return;
@@ -792,14 +790,11 @@
                     ...currentState,
                     saleColumns: checkbox.checked,
                 });
-                for (const {table, columnIndexes, saleHeaderCells, columns} of tableColumns) {
+                for (const {table, columnIndexes, columns} of tableColumns) {
                     for (const [index, column] of columns.entries()) {
                         column.style.visibility = columnIndexes.has(index) && !checkbox.checked
                             ? "collapse"
                             : "";
-                    }
-                    for (const cell of saleHeaderCells) {
-                        cell.style.display = checkbox.checked ? "" : "none";
                     }
                 }
             });
