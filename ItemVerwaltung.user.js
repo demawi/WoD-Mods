@@ -734,7 +734,32 @@
                     }
                 }
                 if (columnIndexes.size > 0) {
-                    tableColumns.push({table, columnIndexes, saleHeaderCells});
+                    const bodyColumnCount = [
+                        ...Array.from(table.tBodies, body => Array.from(body.rows)),
+                        ...(table.tFoot ? [Array.from(table.tFoot.rows)] : []),
+                    ]
+                        .flat()
+                        .reduce((maximum, row) => Math.max(
+                            maximum,
+                            Array.from(row.cells).reduce(
+                                (count, cell) => count + (cell.colSpan || 1),
+                                0
+                            )
+                        ), 0);
+                    const columnCount = Math.max(
+                        bodyColumnCount,
+                        ...headerGrid.map(row => row.length)
+                    );
+                    const colgroup = document.createElement("colgroup");
+                    colgroup.dataset.wodSaleColumnGroup = "true";
+                    const columns = [];
+                    for (let index = 0; index < columnCount; index++) {
+                        const column = document.createElement("col");
+                        colgroup.append(column);
+                        columns.push(column);
+                    }
+                    table.insertBefore(colgroup, table.tHead || table.firstChild);
+                    tableColumns.push({table, columnIndexes, saleHeaderCells, columns});
                 }
             }
             if (tableColumns.length === 0) return;
@@ -759,25 +784,14 @@
                     ...currentState,
                     saleColumns: checkbox.checked,
                 });
-                for (const {table, columnIndexes, saleHeaderCells} of tableColumns) {
+                for (const {table, columnIndexes, saleHeaderCells, columns} of tableColumns) {
+                    for (const [index, column] of columns.entries()) {
+                        column.style.display = columnIndexes.has(index) && !checkbox.checked
+                            ? "none"
+                            : "";
+                    }
                     for (const cell of saleHeaderCells) {
                         cell.style.display = checkbox.checked ? "" : "none";
-                    }
-                    const rows = [
-                        ...table.tBodies[0].rows,
-                        ...(table.tFoot ? table.tFoot.rows : []),
-                    ];
-                    for (const row of rows) {
-                        let cellStart = 0;
-                        for (const cell of Array.from(row.cells)) {
-                            const cellEnd = cellStart + (cell.colSpan || 1);
-                            if (Array.from(columnIndexes).some(index =>
-                                index >= cellStart && index < cellEnd
-                            )) {
-                                cell.style.display = checkbox.checked ? "" : "none";
-                            }
-                            cellStart = cellEnd;
-                        }
                     }
                 }
             });
