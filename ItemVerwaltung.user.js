@@ -241,13 +241,15 @@
 
                 const groupDecisionIndicator = document.createElement("span");
                 groupDecisionIndicator.style.flex = "0 0 20%";
-                let currentGroupDecision = itemData.groupDecision
-                    && {
-                        ...itemData.groupDecision,
-                        primaryHero: itemData.groupDecision.primaryHero
+                let currentGroupDecision = itemData.groupDecision || itemData.primaryHero
+                    ? {
+                        ...(itemData.groupDecision || {}),
+                        primaryHero: itemData.groupDecision
+                            && itemData.groupDecision.primaryHero
                             || itemData.primaryHero
                             || "",
-                    };
+                    }
+                    : null;
                 groupDecisionIndicator.style.backgroundColor = this.getVoteColor(
                     currentGroupDecision || itemData.votes,
                     memberIds
