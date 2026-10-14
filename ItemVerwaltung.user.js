@@ -125,6 +125,7 @@
             const repositoryData = await repository.get("") || {};
             const items = repositoryData.items || {};
             const characterId = _.WoD.getMyHeroId();
+            table._wodCharacterId = characterId;
             const characterName = _.WoD.getMyHeroName() || "Unbekannter Held";
             const memberIds = Object.keys(repositoryData.meta && repositoryData.meta.access || {});
             const memberNames = Object.fromEntries(
@@ -175,6 +176,10 @@
                     ? "true"
                     : "false";
                 row.dataset.wodGroupDecisionOpen = itemData.groupDecision ? "false" : "true";
+                row.dataset.wodPrimaryHero = itemData.groupDecision
+                    && itemData.groupDecision.primaryHero
+                    || itemData.primaryHero
+                    || "";
                 row.dataset.wodItemKey = itemKey;
                 row.dataset.wodVoteUnusable = isUnusable ? "true" : "false";
                 // Create vote cell and insert it before the "Lager-dauer" cell when possible
@@ -288,6 +293,10 @@
                             ? "true"
                             : "false";
                         row.dataset.wodGroupDecisionOpen = decision ? "false" : "true";
+                        row.dataset.wodPrimaryHero = decision
+                            && decision.primaryHero
+                            || items[itemKey] && items[itemKey].primaryHero
+                            || "";
                         currentVote = votes && votes[characterId] || "";
                         characterDecisionIndicator.style.backgroundColor = decision
                             ? currentVote ? this.getCharacterVoteColor(currentVote) : "transparent"
@@ -382,12 +391,14 @@
                                 primaryHero,
                             };
                             currentGroupDecision = {primaryHero};
+                            row.dataset.wodPrimaryHero = primaryHero;
                             groupDecisionIndicator.title = this.getVoteSummary(
                                 currentGroupDecision,
                                 items[itemKey].votes,
                                 memberIds,
                                 memberNames
                             );
+                            this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
                             return;
                         }
                         await repository.set(`items/${itemKey}/groupDecision`, {
@@ -398,6 +409,7 @@
                             ...currentGroupDecision,
                             primaryHero,
                         };
+                        row.dataset.wodPrimaryHero = primaryHero;
                         items[itemKey] = {
                             ...(items[itemKey] || {}),
                             groupDecision: currentGroupDecision,
@@ -408,6 +420,7 @@
                             memberIds,
                             memberNames
                         );
+                        this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
                     } catch (error) {
                         console.error("Primärer Held konnte nicht gespeichert werden.", error);
                     }
@@ -679,6 +692,7 @@
             const options = [
                 ["all", "Alle"],
                 ["me-open", "Eigen: Offen"],
+                ["me-primary", "Eigen: Für mich"],
                 ["group-open", "Gruppe: Offen"],
                 ["group-keep", "Gruppe: Behalten"],
                 ["group-sell", "Gruppe: Verkaufen"],
@@ -943,6 +957,8 @@
                 const matchesFilter = filterValue === "all"
                     || filterValue === "me-open"
                     && row.dataset.wodIndividualVoteOpen === "true"
+                    || filterValue === "me-primary"
+                    && row.dataset.wodPrimaryHero === table._wodCharacterId
                     || filterValue === "group-open"
                     && row.dataset.wodGroupDecisionOpen === "true"
                     || filterValue === "group-keep" && row.dataset.wodVoteResult === "Behalten"
