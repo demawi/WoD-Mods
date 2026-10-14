@@ -583,7 +583,7 @@
             combineLabel.textContent = "Namentlich zusammenfassen ";
             const combineItems = document.createElement("input");
             combineItems.type = "checkbox";
-            combineItems.checked = savedState ? savedState.combineItems !== false : true;
+            combineItems.checked = savedState ? savedState.combineItems === true : false;
             table._wodFilterState = {
                 ...(savedState || {}),
                 voteFilter: filter.value,
