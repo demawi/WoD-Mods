@@ -295,6 +295,7 @@
                         const updatedRepositoryData = await repository.get("");
                         const updatedItem = updatedRepositoryData.items
                             && updatedRepositoryData.items[itemKey];
+                        if (updatedItem) items[itemKey] = updatedItem;
                         const updatedMemberIds = Object.keys(
                             updatedRepositoryData.meta && updatedRepositoryData.meta.access || {}
                         );
@@ -315,25 +316,23 @@
                 };
                 const saveDecision = async decision => {
                     try {
-                        const nextDecision = currentGroupDecision && currentGroupDecision.value === decision
-                            ? null
-                            : decision;
-                        await repository.set(`items/${itemKey}/name`, itemBaseName);
-                        if (nextDecision === null) {
-                            await repository.remove(`items/${itemKey}/groupDecision`);
-                        } else {
-                            await repository.set(`items/${itemKey}/groupDecision`, {
-                                value: nextDecision,
-                                decidedBy: {
-                                    id: characterId,
-                                    name: characterName,
-                                },
-                                decidedAt: {".sv": "timestamp"},
-                            });
+                        if (currentGroupDecision && currentGroupDecision.value === decision) {
+                            return;
                         }
+                        const nextDecision = decision;
+                        await repository.set(`items/${itemKey}/name`, itemBaseName);
+                        await repository.set(`items/${itemKey}/groupDecision`, {
+                            value: nextDecision,
+                            decidedBy: {
+                                id: characterId,
+                                name: characterName,
+                            },
+                            decidedAt: {".sv": "timestamp"},
+                        });
                         const updatedRepositoryData = await repository.get("");
                         const updatedItem = updatedRepositoryData.items
                             && updatedRepositoryData.items[itemKey];
+                        if (updatedItem) items[itemKey] = updatedItem;
                         for (const view of voteViews.get(itemKey) || []) {
                             view.setState(
                                 updatedItem && updatedItem.groupDecision,
@@ -377,6 +376,7 @@
                         });
                     }
                     const updatedRepositoryData = await repository.get("");
+                    Object.assign(items, updatedRepositoryData.items || {});
                     const updatedMemberIds = Object.keys(
                         updatedRepositoryData.meta && updatedRepositoryData.meta.access || {}
                     );
@@ -416,6 +416,7 @@
                         await repository.set(`items/${itemKey}/votes/${characterId}`, vote);
                     }
                     const updatedRepositoryData = await repository.get("");
+                    Object.assign(items, updatedRepositoryData.items || {});
                     const updatedMemberIds = Object.keys(
                         updatedRepositoryData.meta && updatedRepositoryData.meta.access || {}
                     );
