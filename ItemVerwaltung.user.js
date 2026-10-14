@@ -734,22 +734,30 @@
                     }
                 }
                 if (columnIndexes.size > 0) {
-                    const bodyColumnCount = [
-                        ...Array.from(table.tBodies, body => Array.from(body.rows)),
-                        ...(table.tFoot ? [Array.from(table.tFoot.rows)] : []),
-                    ]
-                        .flat()
-                        .reduce((maximum, row) => Math.max(
-                            maximum,
-                            Array.from(row.cells).reduce(
-                                (count, cell) => count + (cell.colSpan || 1),
-                                0
-                            )
-                        ), 0);
+                    const getColumnCount = row => Array.from(row.cells)
+                        .reduce((count, cell) => count + (cell.colSpan || 1), 0);
+                    const itemRows = Array.from(table.tBodies)
+                        .flatMap(body => Array.from(body.rows))
+                        .filter(row => row.querySelector('select[name^="EquipItem["]'));
+                    const bodyColumnCount = Math.max(
+                        0,
+                        ...itemRows.map(getColumnCount)
+                    );
+                    const sortHeaderRows = headerRows.filter(row =>
+                        row.querySelector('input[name*="_DO_SORT"]')
+                    );
+                    const sortHeaderColumnCount = Math.max(
+                        0,
+                        ...sortHeaderRows.map(getColumnCount)
+                    );
                     const columnCount = Math.max(
                         bodyColumnCount,
-                        ...headerGrid.map(row => row.length)
+                        sortHeaderColumnCount
                     );
+                    const existingColgroup = table.querySelector(
+                        "colgroup[data-wod-sale-column-group]"
+                    );
+                    if (existingColgroup) existingColgroup.remove();
                     const colgroup = document.createElement("colgroup");
                     colgroup.dataset.wodSaleColumnGroup = "true";
                     const columns = [];
