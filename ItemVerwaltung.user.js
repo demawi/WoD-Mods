@@ -808,9 +808,6 @@
             const rows = table._wodVoteRows || Array.from(tbody.rows);
             const visibleItemKeys = new Set();
             const visibleRows = [];
-            const groupFilter = filterValue === "group-open"
-                || filterValue === "group-keep"
-                || filterValue === "group-sell";
             for (const row of rows) {
                 if (!row.dataset.wodVoteResult) continue;
                 const matchesFilter = filterValue === "all"
@@ -820,8 +817,7 @@
                     && row.dataset.wodGroupDecisionOpen === "true"
                     || filterValue === "group-keep" && row.dataset.wodVoteResult === "Behalten"
                     || filterValue === "group-sell" && row.dataset.wodVoteResult === "Verkaufen";
-                const isDuplicate = groupFilter
-                    && combineItems
+                const isDuplicate = combineItems
                     && visibleItemKeys.has(row.dataset.wodItemKey);
                 if (matchesFilter && !isDuplicate) {
                     visibleItemKeys.add(row.dataset.wodItemKey);
