@@ -998,6 +998,11 @@
                 const decidedBy = decision.decidedBy.name || decision.decidedBy.id || "Unbekannter Held";
                 summary.unshift(`Direkte Gruppenentscheidung: ${result}`);
                 summary.splice(1, 0, `Direkt entschieden von: ${decidedBy}`);
+                if (decision.primaryHero) {
+                    const primaryHero = memberNames && memberNames[decision.primaryHero]
+                        || decision.primaryHero;
+                    summary.splice(2, 0, `=> ${primaryHero}`);
+                }
             } else {
                 summary.unshift(`Gruppenentscheidung: ${result}`);
             }
