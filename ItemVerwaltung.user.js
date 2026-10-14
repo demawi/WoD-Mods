@@ -794,8 +794,8 @@
                 });
                 for (const {table, columnIndexes, saleHeaderCells, columns} of tableColumns) {
                     for (const [index, column] of columns.entries()) {
-                        column.style.display = columnIndexes.has(index) && !checkbox.checked
-                            ? "none"
+                        column.style.visibility = columnIndexes.has(index) && !checkbox.checked
+                            ? "collapse"
                             : "";
                     }
                     for (const cell of saleHeaderCells) {
