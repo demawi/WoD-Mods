@@ -379,6 +379,13 @@
                                 ...(items[itemKey] || {}),
                                 primaryHero,
                             };
+                            currentGroupDecision = {primaryHero};
+                            groupDecisionIndicator.title = this.getVoteSummary(
+                                currentGroupDecision,
+                                items[itemKey].votes,
+                                memberIds,
+                                memberNames
+                            );
                             return;
                         }
                         await repository.set(`items/${itemKey}/groupDecision`, {
@@ -393,6 +400,12 @@
                             ...(items[itemKey] || {}),
                             groupDecision: currentGroupDecision,
                         };
+                        groupDecisionIndicator.title = this.getVoteSummary(
+                            currentGroupDecision,
+                            items[itemKey].votes,
+                            memberIds,
+                            memberNames
+                        );
                     } catch (error) {
                         console.error("Primärer Held konnte nicht gespeichert werden.", error);
                     }
@@ -1000,13 +1013,13 @@
                 const decidedBy = decision.decidedBy.name || decision.decidedBy.id || "Unbekannter Held";
                 summary.unshift(`Direkte Gruppenentscheidung: ${result}`);
                 summary.splice(1, 0, `Direkt entschieden von: ${decidedBy}`);
-                if (decision.primaryHero) {
-                    const primaryHero = memberNames && memberNames[decision.primaryHero]
-                        || decision.primaryHero;
-                    summary.splice(2, 0, `=> ${primaryHero}`);
-                }
             } else {
                 summary.unshift(`Gruppenentscheidung: ${result}`);
+            }
+            if (decision && decision.primaryHero) {
+                const primaryHero = memberNames && memberNames[decision.primaryHero]
+                    || decision.primaryHero;
+                summary.splice(decision.decidedBy ? 2 : 1, 0, `=> ${primaryHero}`);
             }
             return summary.join("\n");
         }
