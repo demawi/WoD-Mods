@@ -404,6 +404,11 @@
                         await repository.set(`items/${itemKey}/groupDecision`, {
                             ...currentGroupDecision,
                             primaryHero,
+                            decidedBy: {
+                                id: characterId,
+                                name: characterName,
+                            },
+                            decidedAt: {".sv": "timestamp"},
                         });
                         currentGroupDecision = {
                             ...currentGroupDecision,
@@ -502,6 +507,11 @@
                         const groupDecision = {
                             ...itemData.groupDecision,
                             primaryHero,
+                            decidedBy: {
+                                id: characterId,
+                                name: characterName,
+                            },
+                            decidedAt: {".sv": "timestamp"},
                         };
                         await repository.set(`items/${itemKey}/groupDecision`, groupDecision);
                         items[itemKey] = {...itemData, groupDecision};
