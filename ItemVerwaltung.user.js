@@ -509,6 +509,52 @@
                     ? firstPrimaryHero
                     : "";
             };
+            const updateBulkDecisionIndicators = () => {
+                const visibleItemKeys = new Set(
+                    rows
+                        .filter(row => row.parentElement === tbody)
+                        .map(row => row.dataset.wodItemKey)
+                        .filter(Boolean)
+                );
+                const visibleItems = Array.from(visibleItemKeys)
+                    .map(itemKey => items[itemKey])
+                    .filter(Boolean);
+                const visibleRows = rows.filter(row => row.parentElement === tbody);
+                const individualVotes = visibleRows
+                    .filter(row => row.dataset.wodVoteUnusable !== "true")
+                    .map(row => {
+                        const itemData = items[row.dataset.wodItemKey];
+                        return itemData && itemData.votes && itemData.votes[characterId] || "";
+                    });
+                const groupDecisions = visibleItems.map(
+                    itemData => itemData.groupDecision && itemData.groupDecision.value || ""
+                );
+                const commonValue = values => values.length > 0
+                    && values.every(value => value === values[0])
+                    ? values[0]
+                    : "";
+                const voteContainer = voteHeader.querySelector("[data-wod-bulk-vote]");
+                const groupContainer = voteHeader.querySelector("[data-wod-bulk-group-decision]");
+                if (voteContainer) {
+                    const commonVote = commonValue(individualVotes);
+                    voteContainer.style.backgroundColor = commonVote
+                        ? this.getCharacterVoteColor(commonVote)
+                        : "transparent";
+                }
+                if (groupContainer) {
+                    const commonDecision = commonValue(groupDecisions);
+                    groupContainer.style.backgroundColor = commonDecision
+                        ? this.getVoteColor({value: commonDecision}, memberIds)
+                        : "#ffe07a";
+                    groupContainer.textContent = this.getPrimaryHeroMarker(
+                        getCommonPrimaryHero(),
+                        memberNames
+                    );
+                    groupContainer.style.display = "flex";
+                    groupContainer.style.alignItems = "center";
+                    groupContainer.style.justifyContent = "center";
+                }
+            };
             this.createBulkDecisionControls(voteHeader, async (decision, primaryHero) => {
                 try {
                     const visibleItemKeys = new Set(
@@ -537,6 +583,7 @@
                         }
                     }
                     this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                    updateBulkDecisionIndicators();
                 } catch (error) {
                     console.error("Gruppenentscheidung für alle Items konnte nicht gespeichert werden.", error);
                 }
@@ -591,6 +638,7 @@
                         }
                     }
                     this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                    updateBulkDecisionIndicators();
                 } catch (error) {
                     console.error("Primäre Helden konnten nicht gespeichert werden.", error);
                 }
@@ -636,10 +684,12 @@
                         }
                     }
                     this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                    updateBulkDecisionIndicators();
                 } catch (error) {
                     console.error("Einzelentscheidung für alle Items konnte nicht gespeichert werden.", error);
                 }
             });
+            updateBulkDecisionIndicators();
             this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
         }
 
