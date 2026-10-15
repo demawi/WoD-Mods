@@ -186,7 +186,6 @@
                 const voteCell = document.createElement('td');
                 voteCell.align = "center";
                 voteCell.style.position = "relative";
-                voteCell.style.backgroundColor = "transparent";
                 let refCell = null;
                 let logicalIndex = 0;
                 for (const cell of Array.from(row.cells)) {
@@ -246,7 +245,8 @@
 
                 const groupDecisionIndicator = document.createElement("span");
                 groupDecisionIndicator.style.flex = "0 0 35%";
-                groupDecisionIndicator.style.borderLeft = "2px solid transparent";
+                groupDecisionIndicator.style.borderLeft =
+                    `2px solid ${getComputedStyle(voteCell).backgroundColor}`;
                 groupDecisionIndicator.style.boxSizing = "border-box";
                 let currentGroupDecision = itemData.groupDecision || itemData.primaryHero
                     ? {
@@ -677,7 +677,8 @@
             container.style.bottom = "0";
             container.style.width = "35%";
             container.style.height = "20px";
-            container.style.borderLeft = "2px solid transparent";
+            container.style.borderLeft =
+                `2px solid ${getComputedStyle(header).backgroundColor}`;
             container.style.boxSizing = "border-box";
             container.style.backgroundColor = "#ffe07a";
             container.style.cursor = "pointer";
