@@ -611,7 +611,7 @@
 
             const choice = document.createElement("span");
             choice.dataset.wodGroupDecisionChoice = "true";
-            choice.style.position = "fixed";
+            choice.style.position = "absolute";
             choice.style.zIndex = "2";
             choice.style.display = "inline-flex";
             choice.style.alignItems = "center";
@@ -662,8 +662,11 @@
             choice.append(closeButton);
             document.body.append(choice);
             const anchorBounds = anchor.getBoundingClientRect();
-            choice.style.top = `${anchorBounds.top}px`;
-            choice.style.left = `${Math.max(0, anchorBounds.right - choice.offsetWidth)}px`;
+            choice.style.top = `${anchorBounds.top + window.scrollY}px`;
+            choice.style.left = `${Math.max(
+                0,
+                anchorBounds.right + window.scrollX - choice.offsetWidth
+            )}px`;
             return primaryHero;
         }
 
