@@ -37,13 +37,37 @@
         static async startMod() {
             await _.startMod();
             const view = _.WoD.getView(window);
+            this.standardSortierungen();
+            if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER) {
+                this.formularStandardSortierung();
+            }
+            if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER || view === _.WoD.VIEW.ITEMS_STORE) {
+                this.resetFilterStateForLinkedPage();
+                this.insertGroupRepositoryUi();
+            }
+        }
+
+        /**
+         * Seiten, welche die Gegenstandsliste direkt beim ersten Aufruf ausliefern müssen auch direkt die Sortierung mit übergeben.
+         * Dies ist für die Seite "Lager" und "Meine Verkäufe" der Fall.
+         * "Keller" zwar auch, aber dort wollen wir keine Standardsortierung.
+         */
+        static standardSortierungen() {
             // Meine Verkäufe: Älteste zuerst
             Opt(document.querySelector("a[href*=\"items.php?view=market\"]")).foreach(a => a.href += "&ITEMS_MARKET_SORT_DIR=ASC&ITEMS_MARKET_SORT_COL=8");
             // Lager: Neueste zuerst
             Opt(document.querySelector("a[href*=\"items.php\"]:not([href*=\"goto=\"]):not([href*=\"view=\"])")).foreach(a => a.href += "&ITEMS_LAGER_DO_SORT[8_DESC_PAGE_1]=Lager-");
-            if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER || view === _.WoD.VIEW.ITEMS_STORE) {
-                this.resetFilterStateForLinkedPage();
-                this.insertGroupRepositoryUi();
+        }
+
+        static formularStandardSortierung() {
+            // Standarsuche nach Lagerdauer für die Schatzkammer
+            var checkInitial = document.getElementsByClassName("message_success")[0];
+            if (checkInitial && checkInitial.innerText.includes("Gib bitte deine Suchkriterien ein und klicke auf Suchen")) {
+                var input = document.createElement("input");
+                input.type = "hidden";
+                input.name = "ITEMS_GROUPCELLAR_DO_SORT[6_DESC_PAGE_1]";
+                document.getElementsByName("the_form")[0].append(input);
+
             }
         }
 
