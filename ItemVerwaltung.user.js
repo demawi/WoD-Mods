@@ -246,6 +246,7 @@
 
                 const groupDecisionIndicator = document.createElement("span");
                 groupDecisionIndicator.style.flex = "0 0 20%";
+                groupDecisionIndicator.style.borderLeft = "2px solid rgba(0, 0, 0, 0.35)";
                 let currentGroupDecision = itemData.groupDecision || itemData.primaryHero
                     ? {
                         ...(itemData.groupDecision || {}),
