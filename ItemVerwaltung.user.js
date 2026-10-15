@@ -260,10 +260,10 @@
                     currentGroupDecision || itemData.votes,
                     memberIds
                 );
-                groupDecisionIndicator.textContent = currentGroupDecision
-                    && currentGroupDecision.primaryHero
-                    ? "H"
-                    : "";
+                groupDecisionIndicator.textContent = this.getPrimaryHeroMarker(
+                    currentGroupDecision && currentGroupDecision.primaryHero,
+                    memberNames
+                );
                 groupDecisionIndicator.style.textAlign = "center";
                 groupDecisionIndicator.style.display = "flex";
                 groupDecisionIndicator.style.alignItems = "center";
@@ -286,11 +286,11 @@
                             decision || votes,
                             updatedMemberIds
                         );
-                        groupDecisionIndicator.textContent = decision
-                            && decision.primaryHero
-                            || items[itemKey] && items[itemKey].primaryHero
-                            ? "H"
-                            : "";
+                        groupDecisionIndicator.textContent = this.getPrimaryHeroMarker(
+                            decision && decision.primaryHero
+                                || items[itemKey] && items[itemKey].primaryHero,
+                            memberNames
+                        );
                         groupDecisionIndicator.title = this.getVoteSummary(
                             decision,
                             votes,
@@ -406,7 +406,10 @@
                             };
                             currentGroupDecision = {primaryHero};
                             row.dataset.wodPrimaryHero = primaryHero;
-                            groupDecisionIndicator.textContent = primaryHero ? "H" : "";
+                            groupDecisionIndicator.textContent = this.getPrimaryHeroMarker(
+                                primaryHero,
+                                memberNames
+                            );
                             groupDecisionIndicator.title = this.getVoteSummary(
                                 currentGroupDecision,
                                 items[itemKey].votes,
@@ -430,7 +433,10 @@
                             primaryHero,
                         };
                         row.dataset.wodPrimaryHero = primaryHero;
-                        groupDecisionIndicator.textContent = primaryHero ? "H" : "";
+                        groupDecisionIndicator.textContent = this.getPrimaryHeroMarker(
+                            primaryHero,
+                            memberNames
+                        );
                         items[itemKey] = {
                             ...(items[itemKey] || {}),
                             groupDecision: currentGroupDecision,
@@ -1039,6 +1045,12 @@
             return result === "Behalten"
                 ? "rgba(128, 201, 149, 0.8)"
                 : result === "Verkaufen" ? "rgba(237, 150, 150, 0.8)" : "rgba(255, 224, 122, 0.8)";
+        }
+
+        static getPrimaryHeroMarker(primaryHero, memberNames) {
+            if (!primaryHero) return "";
+            const heroName = memberNames && memberNames[primaryHero] || primaryHero;
+            return Array.from(heroName.trim()).slice(0, 2).join("").toUpperCase();
         }
 
         static getVoteSummary(decision, votes, memberIds, memberNames) {
