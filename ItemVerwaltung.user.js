@@ -388,6 +388,7 @@
                             );
                         }
                         this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                        updateBulkDecisionIndicators();
                     } catch (error) {
                         console.error("Einzelentscheidung konnte nicht gespeichert werden.", error);
                     } finally {
@@ -413,6 +414,7 @@
                             );
                         }
                         this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                        updateBulkDecisionIndicators();
                     } catch (error) {
                         console.error("Gruppenentscheidung konnte nicht gespeichert werden.", error);
                     }
@@ -443,6 +445,7 @@
                                 memberNames
                             );
                             this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                            updateBulkDecisionIndicators();
                             return;
                         }
                         await repository.set(`items/${itemKey}/groupDecision`, {
@@ -474,6 +477,7 @@
                             memberNames
                         );
                         this.updateVoteFilter(table, filter.value, table._wodVoteCombineItems.checked);
+                        updateBulkDecisionIndicators();
                     } catch (error) {
                         console.error("Primärer Held konnte nicht gespeichert werden.", error);
                     }
@@ -528,10 +532,17 @@
                 const groupDecisions = visibleItems.map(
                     itemData => itemData.groupDecision && itemData.groupDecision.value || ""
                 );
+                const individualVoteControlsVisible = visibleRows.map(
+                    row => row.dataset.wodVoteUnusable !== "true"
+                );
                 const commonValue = values => values.length > 0
                     && values.every(value => value === values[0])
                     ? values[0]
                     : "";
+                const commonBoolean = values => values.length > 0
+                    && values.every(value => value === values[0])
+                    ? values[0]
+                    : null;
                 const voteContainer = voteHeader.querySelector("[data-wod-bulk-vote]");
                 const groupContainer = voteHeader.querySelector("[data-wod-bulk-group-decision]");
                 if (voteContainer) {
@@ -544,8 +555,9 @@
                         backgroundColor,
                         "important"
                     );
+                    const controlsVisible = commonBoolean(individualVoteControlsVisible);
                     for (const button of voteContainer.children) {
-                        button.style.display = commonVote ? "none" : "";
+                        button.style.display = controlsVisible === false ? "none" : "";
                     }
                 }
                 if (groupContainer) {
