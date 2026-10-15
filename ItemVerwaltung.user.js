@@ -209,7 +209,7 @@
                 characterVoteContainer.style.top = "0";
                 characterVoteContainer.style.left = "0";
                 characterVoteContainer.style.bottom = "0";
-                characterVoteContainer.style.width = "80%";
+                characterVoteContainer.style.width = "65%";
                 characterVoteContainer.style.display = "inline-flex";
                 characterVoteContainer.style.alignItems = "center";
                 characterVoteContainer.style.justifyContent = "center";
@@ -239,13 +239,13 @@
                 voteBackground.style.zIndex = "0";
 
                 const characterDecisionIndicator = document.createElement("span");
-                characterDecisionIndicator.style.flex = "0 0 80%";
+                characterDecisionIndicator.style.flex = "0 0 65%";
                 characterDecisionIndicator.style.backgroundColor = itemData.groupDecision
                     ? currentVote ? this.getCharacterVoteColor(currentVote) : "transparent"
                     : this.getCharacterVoteColor(currentVote);
 
                 const groupDecisionIndicator = document.createElement("span");
-                groupDecisionIndicator.style.flex = "0 0 20%";
+                groupDecisionIndicator.style.flex = "0 0 35%";
                 groupDecisionIndicator.style.borderLeft = "2px solid transparent";
                 groupDecisionIndicator.style.boxSizing = "border-box";
                 let currentGroupDecision = itemData.groupDecision || itemData.primaryHero
@@ -675,7 +675,7 @@
             container.style.position = "absolute";
             container.style.right = "0";
             container.style.bottom = "0";
-            container.style.width = "20%";
+            container.style.width = "35%";
             container.style.height = "20px";
             container.style.borderLeft = "2px solid transparent";
             container.style.boxSizing = "border-box";
@@ -702,7 +702,7 @@
             container.style.position = "absolute";
             container.style.left = "0";
             container.style.bottom = "0";
-            container.style.width = "80%";
+            container.style.width = "65%";
             container.style.height = "20px";
             container.style.display = "inline-flex";
             container.style.alignItems = "center";
@@ -1053,7 +1053,7 @@
         static getPrimaryHeroMarker(primaryHero, memberNames) {
             if (!primaryHero) return "";
             const heroName = memberNames && memberNames[primaryHero] || primaryHero;
-            return Array.from(heroName.trim()).slice(0, 2).join("").toUpperCase();
+            return Array.from(heroName.trim()).slice(0, 2).join("");
         }
 
         static getVoteSummary(decision, votes, memberIds, memberNames) {
