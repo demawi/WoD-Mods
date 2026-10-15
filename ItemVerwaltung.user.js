@@ -200,6 +200,8 @@
                 } else {
                     row.appendChild(voteCell);
                 }
+                const cellBackgroundColor = this.getEffectiveBackgroundColor(refCell || row);
+                voteCell.style.backgroundColor = cellBackgroundColor;
 
                 let currentVote = isUnusable ? "no" : itemData.votes && itemData.votes[characterId] || "";
                 const characterVoteContainer = document.createElement("span");
@@ -245,8 +247,7 @@
 
                 const groupDecisionIndicator = document.createElement("span");
                 groupDecisionIndicator.style.flex = "0 0 35%";
-                groupDecisionIndicator.style.borderLeft =
-                    `2px solid ${getComputedStyle(voteCell).backgroundColor}`;
+                groupDecisionIndicator.style.borderLeft = `2px solid ${cellBackgroundColor}`;
                 groupDecisionIndicator.style.boxSizing = "border-box";
                 let currentGroupDecision = itemData.groupDecision || itemData.primaryHero
                     ? {
@@ -678,7 +679,7 @@
             container.style.width = "35%";
             container.style.height = "20px";
             container.style.borderLeft =
-                `2px solid ${getComputedStyle(header).backgroundColor}`;
+                `2px solid ${this.getEffectiveBackgroundColor(header)}`;
             container.style.boxSizing = "border-box";
             container.style.backgroundColor = "#ffe07a";
             container.style.cursor = "pointer";
@@ -1049,6 +1050,19 @@
             return result === "Behalten"
                 ? "rgba(128, 201, 149, 0.8)"
                 : result === "Verkaufen" ? "rgba(237, 150, 150, 0.8)" : "rgba(255, 224, 122, 0.8)";
+        }
+
+        static getEffectiveBackgroundColor(element) {
+            let current = element;
+            while (current) {
+                const backgroundColor = getComputedStyle(current).backgroundColor;
+                if (backgroundColor !== "transparent"
+                    && backgroundColor !== "rgba(0, 0, 0, 0)") {
+                    return backgroundColor;
+                }
+                current = current.parentElement;
+            }
+            return "transparent";
         }
 
         static getPrimaryHeroMarker(primaryHero, memberNames) {
