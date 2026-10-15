@@ -246,7 +246,8 @@
 
                 const groupDecisionIndicator = document.createElement("span");
                 groupDecisionIndicator.style.flex = "0 0 20%";
-                groupDecisionIndicator.style.borderLeft = "2px solid rgba(0, 0, 0, 0.35)";
+                groupDecisionIndicator.style.borderLeft = "2px solid transparent";
+                groupDecisionIndicator.style.boxSizing = "border-box";
                 let currentGroupDecision = itemData.groupDecision || itemData.primaryHero
                     ? {
                         ...(itemData.groupDecision || {}),
@@ -676,6 +677,8 @@
             container.style.bottom = "0";
             container.style.width = "20%";
             container.style.height = "20px";
+            container.style.borderLeft = "2px solid transparent";
+            container.style.boxSizing = "border-box";
             container.style.backgroundColor = "#ffe07a";
             container.style.cursor = "pointer";
             container.title = "Gruppenentscheidung für alle Items";
