@@ -524,7 +524,14 @@
                 const visibleRows = rows.filter(row => row.parentElement === tbody);
                 const individualVotes = visibleRows
                     .filter(row => row.dataset.wodVoteUnusable !== "true")
-                    .map(row => row.dataset.wodIndividualVote || "");
+                    .map(row => {
+                        if (row.dataset.wodIndividualVote) {
+                            return row.dataset.wodIndividualVote;
+                        }
+                        const itemData = items[row.dataset.wodItemKey];
+                        return itemData && itemData.votes
+                            && itemData.votes[characterId] || "";
+                    });
                 const groupDecisions = visibleItems.map(
                     itemData => itemData.groupDecision && itemData.groupDecision.value || ""
                 );
@@ -536,9 +543,14 @@
                 const groupContainer = voteHeader.querySelector("[data-wod-bulk-group-decision]");
                 if (voteContainer) {
                     const commonVote = commonValue(individualVotes);
-                    voteContainer.style.backgroundColor = commonVote
+                    const backgroundColor = commonVote
                         ? this.getCharacterVoteColor(commonVote)
                         : "transparent";
+                    voteContainer.style.setProperty(
+                        "background-color",
+                        backgroundColor,
+                        "important"
+                    );
                 }
                 if (groupContainer) {
                     const commonDecision = commonValue(groupDecisions);
@@ -820,6 +832,7 @@
             container.style.alignItems = "center";
             container.style.justifyContent = "center";
             container.style.gap = "2px";
+            container.style.zIndex = "1";
             container.title = "Einzelentscheidung für alle angezeigten Items";
             header.append(container);
             for (const [value, sign, title] of [
