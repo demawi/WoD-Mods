@@ -12,7 +12,7 @@
  *   await sameGroup.set("items/example", { value: 1 });
  *
  * Bei createNew und connect wird einmalig meta/access/<characterId> mit
- * Charaktername und Firebase-Serverzeit aktualisiert.
+ * Heldname und Firebase-Serverzeit aktualisiert.
  */
 const WODB_FIREBASE_DATABASE_URL = "https://wodb-f27cf-default-rtdb.europe-west1.firebasedatabase.app";
 const FIREBASE_SERVER_TIMESTAMP = {".sv": "timestamp"};
@@ -47,7 +47,7 @@ class FirebaseGroupRepository {
 
     async updateAccessTimestamp(characterId, characterName) {
         if (typeof characterId !== "string" || characterId === "") {
-            throw new TypeError("Eine Charakter-ID ist für die Zugriffserfassung erforderlich.");
+            throw new TypeError("Eine Held-ID ist für die Zugriffserfassung erforderlich.");
         }
         return this.set(`meta/access/${characterId}`, {
             name: typeof characterName === "string" ? characterName : "",
@@ -252,11 +252,11 @@ class firebase {
             table.className = "content_table";
             const header = table.insertRow();
             header.className = "header";
-            header.insertCell().textContent = "Charakter";
+            header.insertCell().textContent = "Held";
             header.insertCell().textContent = "Letzter Zugriff";
             for (const entry of entries) {
                 const row = table.insertRow();
-                row.insertCell().textContent = entry.name || "Unbekannter Charakter";
+                row.insertCell().textContent = entry.name || "Unbekannter Held";
                 row.insertCell().textContent = entry.accessAt
                     ? new Date(entry.accessAt).toLocaleString()
                     : "unbekannt";

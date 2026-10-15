@@ -5,7 +5,8 @@
 // @namespace      demawi
 // @description    Hilfe bei der ItemVerwaltung innerhalb einer Gruppe
 //
-// @match          *://*.world-of-dungeons.de/wod/spiel/hero/items.php*
+// @match          *://*.world-of-dungeons.de/wod/spiel/*
+// @exclude-match  *://*.world-of-dungeons.de/wod/spiel/*item.php*
 // @require        repo/DemawiRepository.js
 // @require        repo/connect_firebase.js
 // @grant          GM_getValue
@@ -34,7 +35,12 @@
         static version = GM.info.script.version;
 
         static async startMod() {
+            await _.startMod();
             const view = _.WoD.getView(window);
+            // Meine Verkäufe: Älteste zuerst
+            Opt(document.querySelector("a[href*=\"items.php?view=market\"]")).foreach(a => a.href += "&ITEMS_MARKET_SORT_DIR=ASC&ITEMS_MARKET_SORT_COL=8");
+            // Lager: Neueste zuerst
+            Opt(document.querySelector("a[href*=\"items.php\"]:not([href*=\"goto=\"]):not([href*=\"view=\"])")).foreach(a => a.href += "&ITEMS_LAGER_DO_SORT[8_DESC_PAGE_1]=Lager-");
             if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER || view === _.WoD.VIEW.ITEMS_STORE) {
                 this.resetFilterStateForLinkedPage();
                 this.insertGroupRepositoryUi();
@@ -536,11 +542,11 @@
                     row => row.dataset.wodVoteUnusable !== "true"
                 );
                 const commonValue = values => values.length > 0
-                    && values.every(value => value === values[0])
+                && values.every(value => value === values[0])
                     ? values[0]
                     : "";
                 const commonBoolean = values => values.length > 0
-                    && values.every(value => value === values[0])
+                && values.every(value => value === values[0])
                     ? values[0]
                     : null;
                 const voteContainer = voteHeader.querySelector("[data-wod-bulk-vote]");
@@ -800,7 +806,7 @@
         ) {
             if (header.dataset.wodBulkGroupDecision) return;
             header.dataset.wodBulkGroupDecision = "true";
-            header.title = "Gruppenentscheidung für alle Items";
+            header.title = "Gruppenentscheidung für alle Items\nDie hier getroffenen Entscheidungen gelten für alle Gegenstands-Zeilen";
             const container = document.createElement("span");
             container.dataset.wodBulkGroupDecision = "true";
             container.style.position = "absolute";
