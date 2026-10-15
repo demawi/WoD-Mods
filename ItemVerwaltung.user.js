@@ -284,17 +284,24 @@
                     row,
                     setState: (decision, votes, updatedMemberIds) => {
                         currentGroupDecision = decision;
+                        const displayDecision = decision || items[itemKey] && items[itemKey].primaryHero
+                            ? {
+                                ...(decision || {}),
+                                primaryHero: decision && decision.primaryHero
+                                    || items[itemKey] && items[itemKey].primaryHero
+                                    || "",
+                            }
+                            : null;
                         groupDecisionIndicator.style.backgroundColor = this.getVoteColor(
                             decision || votes,
                             updatedMemberIds
                         );
                         groupDecisionIndicator.textContent = this.getPrimaryHeroMarker(
-                            decision && decision.primaryHero
-                                || items[itemKey] && items[itemKey].primaryHero,
+                            displayDecision && displayDecision.primaryHero,
                             memberNames
                         );
                         groupDecisionIndicator.title = this.getVoteSummary(
-                            decision,
+                            displayDecision,
                             votes,
                             updatedMemberIds,
                             memberNames
@@ -524,26 +531,42 @@
                     );
                     for (const itemKey of visibleItemKeys) {
                         const itemData = items[itemKey];
-                        if (!itemData || !itemData.groupDecision
-                            || itemData.groupDecision.primaryHero === primaryHero) {
+                        if (!itemData) {
                             continue;
                         }
                         await ensureItemName(itemKey, itemNames.get(itemKey));
-                        const groupDecision = {
-                            ...itemData.groupDecision,
-                            primaryHero,
-                            decidedBy: {
-                                id: characterId,
-                                name: characterName,
-                            },
-                            decidedAt: {".sv": "timestamp"},
-                        };
-                        await repository.set(`items/${itemKey}/groupDecision`, groupDecision);
-                        items[itemKey] = {...itemData, groupDecision};
+                        let updatedItem = itemData;
+                        if (itemData.groupDecision) {
+                            if ((itemData.groupDecision.primaryHero || "") === (primaryHero || "")) {
+                                continue;
+                            }
+                            const groupDecision = {
+                                ...itemData.groupDecision,
+                                primaryHero,
+                                decidedBy: {
+                                    id: characterId,
+                                    name: characterName,
+                                },
+                                decidedAt: {".sv": "timestamp"},
+                            };
+                            await repository.set(`items/${itemKey}/groupDecision`, groupDecision);
+                            updatedItem = {...itemData, groupDecision};
+                        } else {
+                            if ((itemData.primaryHero || "") === (primaryHero || "")) {
+                                continue;
+                            }
+                            if (primaryHero) {
+                                await repository.set(`items/${itemKey}/primaryHero`, primaryHero);
+                            } else {
+                                await repository.remove(`items/${itemKey}/primaryHero`);
+                            }
+                            updatedItem = {...itemData, primaryHero};
+                        }
+                        items[itemKey] = updatedItem;
                         for (const view of voteViews.get(itemKey) || []) {
                             view.setState(
-                                groupDecision,
-                                itemData.votes,
+                                updatedItem.groupDecision,
+                                updatedItem.votes,
                                 memberIds
                             );
                         }
