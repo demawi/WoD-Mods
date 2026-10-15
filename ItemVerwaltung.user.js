@@ -232,6 +232,7 @@
                 voteCell.style.backgroundColor = cellBackgroundColor;
 
                 let currentVote = isUnusable ? "no" : itemData.votes && itemData.votes[characterId] || "";
+                row.dataset.wodIndividualVote = currentVote;
                 const characterVoteContainer = document.createElement("span");
                 characterVoteContainer.title = "Eigene Entscheidung";
                 characterVoteContainer.style.position = "absolute";
@@ -349,6 +350,7 @@
                             || items[itemKey] && items[itemKey].primaryHero
                             || "";
                         currentVote = votes && votes[characterId] || "";
+                        row.dataset.wodIndividualVote = currentVote;
                         characterDecisionIndicator.style.backgroundColor = decision
                             ? currentVote ? this.getCharacterVoteColor(currentVote) : "transparent"
                             : this.getCharacterVoteColor(currentVote);
@@ -522,10 +524,7 @@
                 const visibleRows = rows.filter(row => row.parentElement === tbody);
                 const individualVotes = visibleRows
                     .filter(row => row.dataset.wodVoteUnusable !== "true")
-                    .map(row => {
-                        const itemData = items[row.dataset.wodItemKey];
-                        return itemData && itemData.votes && itemData.votes[characterId] || "";
-                    });
+                    .map(row => row.dataset.wodIndividualVote || "");
                 const groupDecisions = visibleItems.map(
                     itemData => itemData.groupDecision && itemData.groupDecision.value || ""
                 );
