@@ -372,6 +372,7 @@
                         }
                         const nextDecision = decision;
                         const primaryHero = selectedPrimaryHero
+                            || currentGroupDecision && currentGroupDecision.primaryHero
                             || items[itemKey] && items[itemKey].primaryHero
                             || "";
                         await ensureItemName(itemKey, itemBaseName);
@@ -485,15 +486,20 @@
                     for (const itemKey of visibleItemKeys) {
                         const itemBaseName = itemNames.get(itemKey);
                         const itemData = items[itemKey];
+                        const existingPrimaryHero = itemData && itemData.groupDecision
+                            && itemData.groupDecision.primaryHero
+                            || itemData && itemData.primaryHero
+                            || "";
+                        const nextPrimaryHero = primaryHero || existingPrimaryHero;
                         if (itemData && itemData.groupDecision
                             && itemData.groupDecision.value === decision
-                            && (itemData.groupDecision.primaryHero || "") === (primaryHero || "")) {
+                            && (itemData.groupDecision.primaryHero || "") === nextPrimaryHero) {
                             continue;
                         }
                         await ensureItemName(itemKey, itemBaseName);
                         await repository.set(`items/${itemKey}/groupDecision`, {
                             value: decision,
-                            primaryHero,
+                            primaryHero: nextPrimaryHero,
                             decidedBy: {
                                 id: characterId,
                                 name: characterName,
