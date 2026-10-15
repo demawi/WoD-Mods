@@ -733,6 +733,13 @@
                 if (savePrimaryHero) savePrimaryHero(primaryHero.value);
             });
             choice.append(primaryHero);
+            const decisionButtons = document.createElement("span");
+            decisionButtons.style.display = "inline-flex";
+            decisionButtons.style.alignItems = "center";
+            decisionButtons.style.backgroundColor = this.getVoteColor(
+                currentDecision,
+                []
+            );
             for (const [value, sign, labelText] of [
                 ["yes", _.UI.WOD_SIGNS.YES, "Ja"],
                 ["no", _.UI.WOD_SIGNS.NO, "Nein"],
@@ -744,8 +751,9 @@
                 button.title = labelText;
                 button.style.cursor = "pointer";
                 button.style.margin = "0 2px";
-                choice.append(button);
+                decisionButtons.append(button);
             }
+            choice.append(decisionButtons);
             const closeButton = document.createElement("input");
             closeButton.type = "button";
             closeButton.value = "×";
