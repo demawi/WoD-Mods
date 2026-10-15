@@ -489,6 +489,26 @@
                 });
             }
             const voteHeader = header.querySelector("[data-wod-vote-header-cell]");
+            const getCommonPrimaryHero = () => {
+                const visibleItemKeys = new Set(
+                    rows
+                        .filter(row => row.parentElement === tbody)
+                        .map(row => row.dataset.wodItemKey)
+                        .filter(Boolean)
+                );
+                if (visibleItemKeys.size === 0) return "";
+                const primaryHeroes = Array.from(visibleItemKeys).map(itemKey => {
+                    const itemData = items[itemKey];
+                    return itemData && itemData.groupDecision
+                        && itemData.groupDecision.primaryHero
+                        || itemData && itemData.primaryHero
+                        || "";
+                });
+                const firstPrimaryHero = primaryHeroes[0];
+                return primaryHeroes.every(primaryHero => primaryHero === firstPrimaryHero)
+                    ? firstPrimaryHero
+                    : "";
+            };
             this.createBulkDecisionControls(voteHeader, async (decision, primaryHero) => {
                 try {
                     const visibleItemKeys = new Set(
@@ -574,7 +594,9 @@
                 } catch (error) {
                     console.error("Primäre Helden konnten nicht gespeichert werden.", error);
                 }
-            });
+            }, () => ({
+                primaryHero: getCommonPrimaryHero(),
+            }));
             this.createBulkVoteControls(voteHeader, async vote => {
                 try {
                     const visibleItemKeys = new Set(
@@ -692,7 +714,13 @@
             return primaryHero;
         }
 
-        static createBulkDecisionControls(header, saveDecision, memberNames, savePrimaryHero) {
+        static createBulkDecisionControls(
+            header,
+            saveDecision,
+            memberNames,
+            savePrimaryHero,
+            getCurrentDecision
+        ) {
             if (header.dataset.wodBulkGroupDecision) return;
             header.dataset.wodBulkGroupDecision = "true";
             header.title = "Gruppenentscheidung für alle Items";
@@ -714,7 +742,7 @@
                 this.showDecisionChoice(
                     container,
                     (decision, primaryHero) => saveDecision(decision, primaryHero),
-                    null,
+                    getCurrentDecision ? getCurrentDecision() : null,
                     memberNames,
                     savePrimaryHero
                 );
