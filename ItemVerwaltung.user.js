@@ -149,6 +149,34 @@
                     name: itemBaseName,
                 };
             };
+            const saveGroupDecision = async (itemKey, decision, selectedPrimaryHero) => {
+                const itemData = items[itemKey] || {};
+                const groupDecision = itemData.groupDecision || {};
+                const primaryHero = selectedPrimaryHero
+                    || groupDecision.primaryHero
+                    || itemData.primaryHero
+                    || "";
+                if (groupDecision.value === decision
+                    && (groupDecision.primaryHero || "") === primaryHero) {
+                    return null;
+                }
+                await ensureItemName(itemKey, itemNames.get(itemKey));
+                const nextGroupDecision = {
+                    value: decision,
+                    primaryHero,
+                    decidedBy: {
+                        id: characterId,
+                        name: characterName,
+                    },
+                    decidedAt: {".sv": "timestamp"},
+                };
+                await repository.set(`items/${itemKey}/groupDecision`, nextGroupDecision);
+                items[itemKey] = {
+                    ...items[itemKey],
+                    groupDecision: nextGroupDecision,
+                };
+                return nextGroupDecision;
+            };
             for (const row of rows) {
                 const itemSelect = row.querySelector('select[name^="EquipItem["]');
                 const itemLink = row.children[1] && row.children[1].querySelector("a");
@@ -367,32 +395,18 @@
                 };
                 const saveDecision = async (decision, selectedPrimaryHero) => {
                     try {
-                        if (currentGroupDecision && currentGroupDecision.value === decision) {
+                        const groupDecision = await saveGroupDecision(
+                            itemKey,
+                            decision,
+                            selectedPrimaryHero
+                        );
+                        if (!groupDecision) {
                             return;
                         }
-                        const nextDecision = decision;
-                        const primaryHero = selectedPrimaryHero
-                            || currentGroupDecision && currentGroupDecision.primaryHero
-                            || items[itemKey] && items[itemKey].primaryHero
-                            || "";
-                        await ensureItemName(itemKey, itemBaseName);
-                        await repository.set(`items/${itemKey}/groupDecision`, {
-                            value: nextDecision,
-                            primaryHero,
-                            decidedBy: {
-                                id: characterId,
-                                name: characterName,
-                            },
-                            decidedAt: {".sv": "timestamp"},
-                        });
-                        const updatedRepositoryData = await repository.get("");
-                        const updatedItem = updatedRepositoryData.items
-                            && updatedRepositoryData.items[itemKey];
-                        if (updatedItem) items[itemKey] = updatedItem;
                         for (const view of voteViews.get(itemKey) || []) {
                             view.setState(
-                                updatedItem && updatedItem.groupDecision,
-                                updatedItem && updatedItem.votes,
+                                groupDecision,
+                                items[itemKey].votes,
                                 memberIds
                             );
                         }
@@ -484,28 +498,7 @@
                             .filter(Boolean)
                     );
                     for (const itemKey of visibleItemKeys) {
-                        const itemBaseName = itemNames.get(itemKey);
-                        const itemData = items[itemKey];
-                        const existingPrimaryHero = itemData && itemData.groupDecision
-                            && itemData.groupDecision.primaryHero
-                            || itemData && itemData.primaryHero
-                            || "";
-                        const nextPrimaryHero = primaryHero || existingPrimaryHero;
-                        if (itemData && itemData.groupDecision
-                            && itemData.groupDecision.value === decision
-                            && (itemData.groupDecision.primaryHero || "") === nextPrimaryHero) {
-                            continue;
-                        }
-                        await ensureItemName(itemKey, itemBaseName);
-                        await repository.set(`items/${itemKey}/groupDecision`, {
-                            value: decision,
-                            primaryHero: nextPrimaryHero,
-                            decidedBy: {
-                                id: characterId,
-                                name: characterName,
-                            },
-                            decidedAt: {".sv": "timestamp"},
-                        });
+                        await saveGroupDecision(itemKey, decision, primaryHero);
                     }
                     const updatedRepositoryData = await repository.get("");
                     Object.assign(items, updatedRepositoryData.items || {});
