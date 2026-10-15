@@ -522,16 +522,9 @@
                     .map(itemKey => items[itemKey])
                     .filter(Boolean);
                 const visibleRows = rows.filter(row => row.parentElement === tbody);
-                const individualVotes = visibleRows
-                    .filter(row => row.dataset.wodVoteUnusable !== "true")
-                    .map(row => {
-                        if (row.dataset.wodIndividualVote) {
-                            return row.dataset.wodIndividualVote;
-                        }
-                        const itemData = items[row.dataset.wodItemKey];
-                        return itemData && itemData.votes
-                            && itemData.votes[characterId] || "";
-                    });
+                const individualVotes = visibleRows.map(
+                    row => row.dataset.wodIndividualVote || ""
+                );
                 const groupDecisions = visibleItems.map(
                     itemData => itemData.groupDecision && itemData.groupDecision.value || ""
                 );
@@ -551,6 +544,9 @@
                         backgroundColor,
                         "important"
                     );
+                    for (const button of voteContainer.children) {
+                        button.style.display = commonVote ? "none" : "";
+                    }
                 }
                 if (groupContainer) {
                     const commonDecision = commonValue(groupDecisions);
