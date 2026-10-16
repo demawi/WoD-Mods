@@ -117,7 +117,8 @@
                                 ts: tsMsecs / 60000,
                                 success: {
                                     levels: [win ? 1 : 0, 1],
-                                }
+                                },
+                                fav: {none: 1},
                             };
                             report.loc.schlacht = schlachtName;
                             report.ts = tsMsecs / 60000;
