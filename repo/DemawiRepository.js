@@ -962,7 +962,9 @@ class demawiRepository {
                     this.query.subQueryId = "BatchSearch#" + this.idx++;
                     if (this.query.debug) console.log("Batch-query: ", this.query, results.length);
                     for (let i = 0, l = results.length; i < l; i++) {
-                        if (await this.iteration(results[i], this.alreadyFetched + i) === false) return true;
+                        const result = results[i];
+                        const clonedResult = result ? cloneInto(result, {}) : result; // für FF cloneInto benötigt, damit auch wenn man nur lokal auf die DB zugreift kein Cross-Origin-Problem auftritt
+                        if (await this.iteration(clonedResult, this.alreadyFetched + i) === false) return true;
                     }
                     this.alreadyFetched += results.length;
                     this.limit -= results.length;
@@ -1243,7 +1245,10 @@ class demawiRepository {
 
                 static #getResultForCursor(cursor, keyRange, retrieveFnName) {
                     if (keyRange && !this.#isCursorInMultiRange(cursor, keyRange)) return;
-                    if (retrieveFnName === "getAll") return cursor.value;
+                    if (retrieveFnName === "getAll") {
+                        const result = cursor.value;
+                        return result ? cloneInto(result, {}) : result; // für FF benötigt, damit auch wenn man nur lokal auf die DB zugreift kein Cross-Origin-Problem auftritt
+                    }
                     if (retrieveFnName === "getAllKeys") return cursor.primaryKey;
                     if (retrieveFnName === "cursor") return cursor;
                 }
@@ -1534,7 +1539,7 @@ class demawiRepository {
                 delete data.exec;
                 delete data.vars;
                 if (data.debug) log("CSProxy[" + myOrigin + "] antwortet", data, result);
-                data = cloneInto(data, {});
+                data = cloneInto(data, {}); // für FF benötigt, damit auch wenn man nur lokal auf die DB zugreift kein Cross-Origin-Problem auftritt
                 data.result = result;
                 if (data.debug) log("CSProxy[" + myOrigin + "] antwortet2", data, result);
                 parentWindow.postMessage(data, parentOrigin);
