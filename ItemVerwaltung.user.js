@@ -907,6 +907,7 @@
             for (const [value, text] of options) {
                 const option = document.createElement("option");
                 option.value = value;
+                option.dataset.wodFilterLabel = text;
                 option.textContent = text;
                 filter.append(option);
             }
@@ -945,6 +946,7 @@
             combineLabel.append(combineItems);
             container.append(combineLabel);
             table._wodVoteCombineItems = combineItems;
+            table._wodVoteFilter = filter;
             table.parentElement.insertBefore(container, table);
             return filter;
         }
@@ -1157,6 +1159,7 @@
         static updateVoteFilter(table, filterValue, combineItems = true) {
             const tbody = table.tBodies[0];
             const rows = table._wodVoteRows || Array.from(tbody.rows);
+            this.updateVoteFilterCounts(table, rows, combineItems);
             const visibleItemKeys = new Set();
             const visibleRows = [];
             for (const row of rows) {
@@ -1187,6 +1190,46 @@
             }
             for (const row of rowsToKeep) {
                 tbody.appendChild(row);
+            }
+        }
+
+        static updateVoteFilterCounts(table, rows, combineItems) {
+            const filter = table._wodVoteFilter;
+            if (!filter) return;
+
+            const options = Array.from(filter.options);
+            const counts = Object.fromEntries(options.map(option => [option.value, 0]));
+            const countedItems = Object.fromEntries(
+                options.map(option => [option.value, new Set()])
+            );
+            const matchesFilter = (row, filterValue) => filterValue === "all"
+                || filterValue === "me-open"
+                && row.dataset.wodIndividualVoteOpen === "true"
+                || filterValue === "me-primary"
+                && row.dataset.wodPrimaryHero === table._wodCharacterId
+                || filterValue === "group-open"
+                && row.dataset.wodGroupDecisionOpen === "true"
+                || filterValue === "group-keep"
+                && row.dataset.wodVoteResult === "Behalten"
+                || filterValue === "group-sell"
+                && row.dataset.wodVoteResult === "Verkaufen";
+
+            for (const [rowIndex, row] of rows.entries()) {
+                if (!row.dataset.wodVoteResult) continue;
+                for (const option of options) {
+                    if (!matchesFilter(row, option.value)) continue;
+                    if (!combineItems) {
+                        counts[option.value] += 1;
+                        continue;
+                    }
+                    const itemKey = row.dataset.wodItemKey || `row-${rowIndex}`;
+                    if (countedItems[option.value].has(itemKey)) continue;
+                    countedItems[option.value].add(itemKey);
+                    counts[option.value] += 1;
+                }
+            }
+            for (const option of options) {
+                option.textContent = `${option.dataset.wodFilterLabel} (${counts[option.value]})`;
             }
         }
 
