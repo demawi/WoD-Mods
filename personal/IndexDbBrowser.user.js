@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] IndexDbBrowser
-// @version        0.11.3
+// @version        0.11.4
 // @author         demawi
 // @namespace      demawi
 // @description    Lässt einen die Index des Browsers ansehen und bearbeiten
