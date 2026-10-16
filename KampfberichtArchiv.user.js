@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] Kampfbericht Archiv
-// @version        0.15.8
+// @version        0.15.9
 // @author         demawi
 // @namespace      demawi
 // @description    Der große Kampfbericht-Archivar und alles was bei Kampfberichten an Informationen rauszuholen ist.
@@ -117,7 +117,8 @@
                                 ts: tsMsecs / 60000,
                                 success: {
                                     levels: [win ? 1 : 0, 1],
-                                }
+                                },
+                                fav: {none: 1},
                             };
                             report.loc.schlacht = schlachtName;
                             report.ts = tsMsecs / 60000;
