@@ -3949,6 +3949,7 @@ class demawiRepository {
         static getHeroes(doc) {
             doc = doc || document;
             const helden = [];
+            const ownPlayerName = _.WoD.getMyUserName(doc) || "";
             const characterRefs = doc.querySelectorAll("#main_content .content_table tr a[href*=\"profile.php\"]");
             for (let i = 0, l = characterRefs.length; i < l; i++) {
                 const curCharacterRef = characterRefs[i];
@@ -3973,7 +3974,7 @@ class demawiRepository {
                     klasse: klasse,
                     playerName: playerRef && playerRef.textContent.trim()
                         || playerNameMatch && playerNameMatch[1].trim()
-                        || "",
+                        || ownPlayerName,
                 };
                 //console.log("Held", held);
                 helden.push(held);
