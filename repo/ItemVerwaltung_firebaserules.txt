@@ -23,6 +23,11 @@
         }
       },
       "meta": {
+        "heroes": {
+          "$characterId": {
+            ".validate": "newData.hasChildren(['id', 'name']) && newData.child('id').isString() && newData.child('name').isString()"
+          }
+        },
         "access": {
           "$characterId": {
             ".validate": "newData.hasChildren(['name', 'accessAt']) && newData.child('name').isString() && newData.child('accessAt').isNumber() && newData.child('accessAt').val() >= now - 10000 && newData.child('accessAt').val() <= now + 10000"

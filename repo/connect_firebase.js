@@ -382,6 +382,25 @@ class firebase {
         }
         return repository;
     }
+
+    static async syncGroupHeroes(repoType, characterId, characterName, heroes) {
+        if (!Array.isArray(heroes)) {
+            throw new TypeError("Die Gruppenhelden müssen als Array übergeben werden.");
+        }
+        const repository = await this.connect(repoType, undefined, characterId, characterName);
+        const synchronizedHeroes = {};
+        for (const hero of heroes) {
+            if (!hero || hero.id === undefined || hero.id === null) continue;
+            const heroId = String(hero.id);
+            if (heroId === "") continue;
+            synchronizedHeroes[heroId] = {
+                id: heroId,
+                name: typeof hero.name === "string" ? hero.name : "",
+            };
+        }
+        await repository.set("meta/heroes", synchronizedHeroes);
+        return repository;
+    }
 }
 
 if (typeof globalThis !== "undefined") {

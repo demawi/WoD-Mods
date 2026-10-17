@@ -38,12 +38,29 @@
             await _.startMod();
             const view = _.WoD.getView(window);
             this.standardSortierungen();
+            if(view === _.WoD.VIEW.MY_GOUP) {
+                await this.synchronizeGroupHeroes();
+            }
             if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER) {
                 this.formularStandardSortierung();
             }
             if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER || view === _.WoD.VIEW.ITEMS_STORE) {
                 this.resetFilterStateForLinkedPage();
                 this.insertGroupRepositoryUi();
+            }
+        }
+
+        static async synchronizeGroupHeroes() {
+            try {
+                const heroes = _.MyGroupView.getHeroes();
+                await firebase.syncGroupHeroes(
+                    "group",
+                    _.WoD.getMyHeroId(),
+                    _.WoD.getMyHeroName() || "Unbekannter Held",
+                    heroes
+                );
+            } catch (error) {
+                console.warn("Gruppenhelden konnten nicht mit Firebase synchronisiert werden.", error);
             }
         }
 
@@ -157,15 +174,32 @@
             const characterId = _.WoD.getMyHeroId();
             table._wodCharacterId = characterId;
             const characterName = _.WoD.getMyHeroName() || "Unbekannter Held";
-            const memberIds = Object.keys(repositoryData.meta && repositoryData.meta.access || {});
+            const access = repositoryData.meta && repositoryData.meta.access || {};
+            const heroes = repositoryData.meta && repositoryData.meta.heroes || {};
+            const memberIds = Array.from(new Set([
+                ...Object.keys(heroes),
+                ...Object.keys(access),
+            ]));
             const memberNames = Object.fromEntries(
-                Object.entries(repositoryData.meta && repositoryData.meta.access || {})
-                    .map(([memberId, access]) => [memberId, access && access.name || memberId])
+                Object.entries(heroes)
+                    .map(([memberId, hero]) => [memberId, hero && hero.name || memberId])
+            );
+            Object.assign(
+                memberNames,
+                Object.fromEntries(
+                    Object.entries(access)
+                        .map(([memberId, entry]) => [memberId, entry && entry.name || memberId])
+                )
             );
             memberNames[characterId] = characterName;
             if (!memberIds.includes(characterId)) {
                 memberIds.push(characterId);
             }
+            const getMemberIds = data => Array.from(new Set([
+                ...Object.keys(data && data.meta && data.meta.heroes || {}),
+                ...Object.keys(data && data.meta && data.meta.access || {}),
+                characterId,
+            ]));
             const voteViews = new Map();
             const itemNames = new Map();
             const ensureItemName = async (itemKey, itemBaseName) => {
@@ -407,9 +441,7 @@
                         const updatedItem = updatedRepositoryData.items
                             && updatedRepositoryData.items[itemKey];
                         if (updatedItem) items[itemKey] = updatedItem;
-                        const updatedMemberIds = Object.keys(
-                            updatedRepositoryData.meta && updatedRepositoryData.meta.access || {}
-                        );
+                        const updatedMemberIds = getMemberIds(updatedRepositoryData);
                         for (const view of voteViews.get(itemKey) || []) {
                             view.setState(
                                 updatedItem && updatedItem.groupDecision,
@@ -617,9 +649,7 @@
                     }
                     const updatedRepositoryData = await repository.get("");
                     Object.assign(items, updatedRepositoryData.items || {});
-                    const updatedMemberIds = Object.keys(
-                        updatedRepositoryData.meta && updatedRepositoryData.meta.access || {}
-                    );
+                    const updatedMemberIds = getMemberIds(updatedRepositoryData);
                     for (const [itemKey, views] of voteViews) {
                         const updatedItem = updatedRepositoryData.items
                             && updatedRepositoryData.items[itemKey];
@@ -715,12 +745,7 @@
                     }
                     const updatedRepositoryData = await repository.get("");
                     Object.assign(items, updatedRepositoryData.items || {});
-                    const updatedMemberIds = Object.keys(
-                        updatedRepositoryData.meta && updatedRepositoryData.meta.access || {}
-                    );
-                    if (!updatedMemberIds.includes(characterId)) {
-                        updatedMemberIds.push(characterId);
-                    }
+                    const updatedMemberIds = getMemberIds(updatedRepositoryData);
                     for (const [itemKey, views] of voteViews) {
                         const updatedItem = updatedRepositoryData.items
                             && updatedRepositoryData.items[itemKey];
