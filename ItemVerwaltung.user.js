@@ -53,12 +53,23 @@
         static async synchronizeGroupHeroes() {
             try {
                 const heroes = _.MyGroupView.getHeroes();
-                await firebase.syncGroupHeroes(
+                const repository = await firebase.connect(
                     "group",
+                    undefined,
                     _.WoD.getMyHeroId(),
-                    _.WoD.getMyHeroName() || "Unbekannter Held",
-                    heroes
+                    _.WoD.getMyHeroName() || "Unbekannter Held"
                 );
+                const synchronizedHeroes = {};
+                for (const hero of heroes) {
+                    if (!hero || hero.id === undefined || hero.id === null) continue;
+                    const heroId = String(hero.id);
+                    if (heroId === "") continue;
+                    synchronizedHeroes[heroId] = {
+                        id: heroId,
+                        name: typeof hero.name === "string" ? hero.name : "",
+                    };
+                }
+                await repository.set("meta/heroes", synchronizedHeroes);
             } catch (error) {
                 console.warn("Gruppenhelden konnten nicht mit Firebase synchronisiert werden.", error);
             }

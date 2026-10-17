@@ -12,8 +12,7 @@
  *   await sameGroup.set("items/example", { value: 1 });
  *
  * Bei createNew und connect wird einmalig meta/access/<characterId> mit
- * Heldname und Firebase-Serverzeit aktualisiert. Die Gruppenansicht kann
- * zusätzlich den vollständigen Kader unter meta/heroes synchronisieren.
+ * Heldname und Firebase-Serverzeit aktualisiert.
  */
 const WODB_FIREBASE_DATABASE_URL = "https://wodb-f27cf-default-rtdb.europe-west1.firebasedatabase.app";
 const FIREBASE_SERVER_TIMESTAMP = {".sv": "timestamp"};
@@ -384,24 +383,6 @@ class firebase {
         return repository;
     }
 
-    static async syncGroupHeroes(repoType, characterId, characterName, heroes) {
-        if (!Array.isArray(heroes)) {
-            throw new TypeError("Die Gruppenhelden müssen als Array übergeben werden.");
-        }
-        const repository = await this.connect(repoType, undefined, characterId, characterName);
-        const synchronizedHeroes = {};
-        for (const hero of heroes) {
-            if (!hero || hero.id === undefined || hero.id === null) continue;
-            const heroId = String(hero.id);
-            if (heroId === "") continue;
-            synchronizedHeroes[heroId] = {
-                id: heroId,
-                name: typeof hero.name === "string" ? hero.name : "",
-            };
-        }
-        await repository.set("meta/heroes", synchronizedHeroes);
-        return repository;
-    }
 }
 
 if (typeof globalThis !== "undefined") {
