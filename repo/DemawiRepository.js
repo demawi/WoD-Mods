@@ -2999,7 +2999,7 @@ class demawiRepository {
             DUNGEONS: "dungeons",
             QUEST: "quest",
             MY_HEROES: "myHeroes",
-            MY_GOUP: "group",
+            MY_GROUP: "group",
             MOVE: "move",
             ITEM: "item",
             REPORT_OVERVIEW: "report_overview",
@@ -3052,7 +3052,7 @@ class demawiRepository {
                 case "heroes.php":
                     return this.VIEW.MY_HEROES;
                 case "group.php":
-                    return this.VIEW.MY_GOUP;
+                    return this.VIEW.MY_GROUP;
                 case "move.php":
                     return this.VIEW.MOVE;
                 case "item.php":
@@ -3949,19 +3949,11 @@ class demawiRepository {
         static getHeroes(doc) {
             doc = doc || document;
             const helden = [];
-            const ownPlayerName = _.WoD.getMyUserName(doc) || "";
             const characterRefs = doc.querySelectorAll("#main_content .content_table tr a[href*=\"profile.php\"]");
             for (let i = 0, l = characterRefs.length; i < l; i++) {
                 const curCharacterRef = characterRefs[i];
                 const row = curCharacterRef.closest("tr");
                 const hrefs = row.querySelectorAll("a[href*=\"class.php\"]");
-                const playerRef = row.querySelector(
-                    "a[href*=\"player\"], a[href*=\"user\"], a[href*=\"account\"]"
-                );
-                const tooltip = curCharacterRef.getAttribute("onmouseover") || "";
-                const playerNameMatch = tooltip.match(
-                    /profiles\/player\.php[^>]*?(?:>|&gt;)([^<]+?)(?:<|&lt;)/i
-                );
                 const heroId = Number(new URL(curCharacterRef.href, doc.baseURI).searchParams.get("id"));
                 //console.log("BBB", curCharacterRef.textContent, hrefs);
                 if(hrefs.length < 2) continue; // z.B. Mentor
@@ -3972,9 +3964,6 @@ class demawiRepository {
                     name: curCharacterRef.textContent,
                     volk: volk,
                     klasse: klasse,
-                    playerName: playerRef && playerRef.textContent.trim()
-                        || playerNameMatch && playerNameMatch[1].trim()
-                        || ownPlayerName,
                 };
                 //console.log("Held", held);
                 helden.push(held);

@@ -37,8 +37,8 @@
         static async startMod() {
             await _.startMod();
             const view = _.WoD.getView(window);
-            this.standardSortierungen();
-            if(view === _.WoD.VIEW.MY_GOUP) {
+            this.standardSortierungenLinks();
+            if(view === _.WoD.VIEW.MY_GROUP) {
                 await this.synchronizeGroupHeroes();
             }
             if (view === _.WoD.VIEW.SCHATZKAMMER || view === _.WoD.VIEW.GRUPPENLAGER) {
@@ -53,23 +53,43 @@
         static async synchronizeGroupHeroes() {
             try {
                 const heroes = _.MyGroupView.getHeroes();
+                const currentHeroId = String(_.WoD.getMyHeroId());
+                const currentHeroName = _.WoD.getMyHeroName() || "Unbekannter Held";
                 const repository = await firebase.connect(
                     "group",
                     undefined,
                     _.WoD.getMyHeroId(),
-                    _.WoD.getMyHeroName() || "Unbekannter Held"
+                    currentHeroName
                 );
+                const repositoryHeroes = await repository.get("meta/heroes") || {};
                 const synchronizedHeroes = {};
+                for (const [heroId, hero] of Object.entries(repositoryHeroes)) {
+                    if (!hero || typeof hero !== "object") continue;
+                    synchronizedHeroes[heroId] = {
+                        id: String(hero.id || heroId),
+                        name: typeof hero.name === "string" ? hero.name : "",
+                        ...(typeof hero.playerName === "string" && hero.playerName
+                            ? {playerName: hero.playerName}
+                            : {}),
+                    };
+                }
                 for (const hero of heroes) {
                     if (!hero || hero.id === undefined || hero.id === null) continue;
                     const heroId = String(hero.id);
                     if (heroId === "") continue;
                     synchronizedHeroes[heroId] = {
+                        ...(synchronizedHeroes[heroId] || {}),
                         id: heroId,
                         name: typeof hero.name === "string" ? hero.name : "",
-                        playerName: typeof hero.playerName === "string" ? hero.playerName : "",
                     };
                 }
+                synchronizedHeroes[currentHeroId] = {
+                    ...(synchronizedHeroes[currentHeroId] || {}),
+                    id: currentHeroId,
+                    name: synchronizedHeroes[currentHeroId]
+                        && synchronizedHeroes[currentHeroId].name || currentHeroName,
+                    playerName: _.WoD.getMyUserName() || "",
+                };
                 await repository.set("meta/heroes", synchronizedHeroes);
             } catch (error) {
                 console.warn("Gruppenhelden konnten nicht mit Firebase synchronisiert werden.", error);
@@ -81,11 +101,11 @@
          * Dies ist für die Seite "Lager" und "Meine Verkäufe" der Fall.
          * "Keller" zwar auch, aber dort wollen wir keine Standardsortierung.
          */
-        static standardSortierungen() {
+        static standardSortierungenLinks() {
             // Meine Verkäufe: Älteste zuerst
-            Opt(document.querySelector("a[href*=\"items.php?view=market\"]")).foreach(a => a.href += "&ITEMS_MARKET_SORT_DIR=ASC&ITEMS_MARKET_SORT_COL=8");
+            document.querySelectorAll("a[href*=\"items.php?view=market\"]").forEach(a => a.href += "&ITEMS_MARKET_SORT_DIR=ASC&ITEMS_MARKET_SORT_COL=8");
             // Lager: Neueste zuerst
-            Opt(document.querySelector("a[href*=\"items.php\"]:not([href*=\"goto=\"]):not([href*=\"view=\"])")).foreach(a => a.href += "&ITEMS_LAGER_DO_SORT[8_DESC_PAGE_1]=Lager-");
+            document.querySelectorAll("a[href*=\"items.php\"]:not([href*=\"goto=\"]):not([href*=\"view=\"])").forEach(a => a.href += "&ITEMS_LAGER_DO_SORT[8_DESC_PAGE_1]=Lager-");
         }
 
         static formularStandardSortierung() {
@@ -186,6 +206,22 @@
             const characterId = _.WoD.getMyHeroId();
             table._wodCharacterId = characterId;
             const characterName = _.WoD.getMyHeroName() || "Unbekannter Held";
+            const playerName = _.WoD.getMyUserName() || "";
+            if (characterId !== undefined && characterId !== null) {
+                const currentHero = {
+                    id: String(characterId),
+                    name: characterName,
+                    playerName,
+                };
+                try {
+                    await repository.set(`meta/heroes/${characterId}`, currentHero);
+                    repositoryData.meta = repositoryData.meta || {};
+                    repositoryData.meta.heroes = repositoryData.meta.heroes || {};
+                    repositoryData.meta.heroes[String(characterId)] = currentHero;
+                } catch (error) {
+                    console.warn("Aktueller Held konnte nicht mit Firebase synchronisiert werden.", error);
+                }
+            }
             const access = repositoryData.meta && repositoryData.meta.access || {};
             const heroes = repositoryData.meta && repositoryData.meta.heroes || {};
             const memberIds = Array.from(new Set([
@@ -204,6 +240,7 @@
                     )
                     .map(([heroId]) => heroId)
             );
+            ownHeroIds.add(String(characterId));
             Object.defineProperty(memberNames, "_ownHeroIds", {
                 value: ownHeroIds,
                 enumerable: false,
@@ -828,12 +865,23 @@
                         sensitivity: "base",
                     }) || heroIdA.localeCompare(heroIdB)
                 );
-            for (const [heroId, heroName] of sortedHeroes) {
+            const ownHeroIds = memberNames._ownHeroIds || new Set();
+            const ownHeroes = sortedHeroes.filter(([heroId]) => ownHeroIds.has(heroId));
+            const otherHeroes = sortedHeroes.filter(([heroId]) => !ownHeroIds.has(heroId));
+            const appendHeroOption = ([heroId, heroName]) => {
                 const option = document.createElement("option");
                 option.value = heroId;
                 option.textContent = heroName;
                 primaryHero.append(option);
+            };
+            ownHeroes.forEach(appendHeroOption);
+            if (ownHeroes.length > 0 && otherHeroes.length > 0) {
+                const separator = document.createElement("option");
+                separator.disabled = true;
+                separator.textContent = "────────────";
+                primaryHero.append(separator);
             }
+            otherHeroes.forEach(appendHeroOption);
             primaryHero.value = currentDecision && currentDecision.primaryHero || "";
             primaryHero.addEventListener("change", () => {
                 if (savePrimaryHero) savePrimaryHero(primaryHero.value);
@@ -949,7 +997,7 @@
             container.dataset.wodVoteFilter = "true";
             container.style.display = "inline-block";
             container.style.marginBottom = "8px";
-            container.textContent = "Voting anzeigen: ";
+            container.textContent = "Votingfilter: ";
 
             filter = document.createElement("select");
             filter.title = "Gegenstandstabelle nach dem Gruppenentscheid filtern";

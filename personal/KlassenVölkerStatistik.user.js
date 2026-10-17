@@ -150,7 +150,7 @@
                 "Klingenmagierin": "Klingenmagier",
                 "Magierin": "Magier",
                 "Priesterin": "Priester",
-                "Prophet": "Prophetin",
+                "Prophetin": "Prophet",
                 "Quacksalberin": "Quacksalber",
                 "Ritterin": "Ritter",
                 "Schamanin": "Schamane",
