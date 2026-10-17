@@ -2999,6 +2999,7 @@ class demawiRepository {
             DUNGEONS: "dungeons",
             QUEST: "quest",
             MY_HEROES: "myHeroes",
+            MY_GOUP: "group",
             MOVE: "move",
             ITEM: "item",
             REPORT_OVERVIEW: "report_overview",
@@ -3050,6 +3051,8 @@ class demawiRepository {
                     return this.VIEW.QUEST;
                 case "heroes.php":
                     return this.VIEW.MY_HEROES;
+                case "group.php":
+                    return this.VIEW.MY_GOUP;
                 case "move.php":
                     return this.VIEW.MOVE;
                 case "item.php":
@@ -3938,6 +3941,45 @@ class demawiRepository {
                 const value = converter(cur.getAttribute("href"));
                 if (value) cur.href = value;
             }
+        }
+    }
+
+    static MyGroupView = class {
+
+        static getHeroes(doc) {
+            doc = doc || document;
+            const helden = [];
+            const characterRefs = doc.querySelectorAll("#main_content .content_table tr a[href*=\"profile.php\"]");
+            for (let i = 0, l = characterRefs.length; i < l; i++) {
+                const curCharacterRef = characterRefs[i];
+                const row = curCharacterRef.closest("tr");
+                const hrefs = row.querySelectorAll("a[href*=\"class.php\"]");
+                const playerRef = row.querySelector(
+                    "a[href*=\"player\"], a[href*=\"user\"], a[href*=\"account\"]"
+                );
+                const tooltip = curCharacterRef.getAttribute("onmouseover") || "";
+                const playerNameMatch = tooltip.match(
+                    /profiles\/player\.php[^>]*?(?:>|&gt;)([^<]+?)(?:<|&lt;)/i
+                );
+                const heroId = Number(new URL(curCharacterRef.href, doc.baseURI).searchParams.get("id"));
+                //console.log("BBB", curCharacterRef.textContent, hrefs);
+                if(hrefs.length < 2) continue; // z.B. Mentor
+                const volk = hrefs[0].textContent;
+                const klasse = hrefs[1].textContent;
+                const held = {
+                    id: heroId,
+                    name: curCharacterRef.textContent,
+                    volk: volk,
+                    klasse: klasse,
+                    playerName: playerRef && playerRef.textContent.trim()
+                        || playerNameMatch && playerNameMatch[1].trim()
+                        || "",
+                };
+                //console.log("Held", held);
+                helden.push(held);
+            }
+            //console.log("Helden", helden);
+            return helden;
         }
     }
 
