@@ -122,7 +122,14 @@
 
         static insertGroupRepositoryUi() {
             const container = firebase.createRepositoryUi("group", repository => this.addItemVotes(repository));
-            const contentTable = document.querySelector(".content_table");
+            container.dataset.wodItemverwaltungRepository = "true";
+            const itemSelect = document.querySelector(
+                "table.content_table tbody select[name^=\"EquipItem[\"]"
+            );
+            const contentTable = itemSelect
+                ? itemSelect.closest("table")
+                : Array.from(document.body.children)
+                    .find(element => element.classList.contains("content_table"));
             if (contentTable) {
                 contentTable.parentElement.insertBefore(container, contentTable);
             } else {

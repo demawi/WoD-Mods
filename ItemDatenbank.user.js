@@ -265,9 +265,15 @@
                 buttonContainer.append(button);
 
                 const resultContainer = document.createElement("div");
-                const originalResultTable = searchContainer.parentElement.getElementsByClassName("content_table")[0];
+                const originalResultTable = Array.from(
+                    searchContainer.parentElement.getElementsByClassName("content_table")
+                ).find(table => !table.closest("[data-wod-itemverwaltung-repository]"));
+                if (!originalResultTable) {
+                    console.error("ItemDB: Die ursprüngliche Ergebnistabelle wurde nicht gefunden.");
+                    return;
+                }
+                originalResultTable.dataset.wodItemDatabaseOriginal = "true";
                 searchContainer.parentElement.insertBefore(resultContainer, originalResultTable);
-                searchContainer.parentElement.removeChild(originalResultTable);
                 resultContainer.append(originalResultTable);
 
                 toBBCodeButton.onclick = function () {
@@ -378,94 +384,105 @@
                     return itemResult;
                 }
 
+                let searchInProgress = false;
                 const updateResultTable = async function () {
-                    // Search and display result
-                    if (resultContainer.children.length > 0) {
-                        resultContainer.removeChild(resultContainer.children[0]);
-                    }
-                    const itemOrSkillResults = await search()
+                    if (searchInProgress) return;
+                    searchInProgress = true;
+                    mySearchButton.style.pointerEvents = "none";
+                    mySearchButton.setAttribute("aria-busy", "true");
 
-                    updateMissingButton();
-                    const table = document.createElement("table");
-                    table.className = "content_table";
-                    const thead = document.createElement("thead");
-                    table.append(thead);
-                    const headTR = document.createElement("tr");
-                    thead.append(headTR);
-                    headTR.className = "header";
-                    const tbody = document.createElement("tbody");
-                    table.append(tbody);
-                    resultContainer.append(table);
-                    headTR.innerHTML += "<th></th><th>Gegenstand (" + itemOrSkillResults.length + ")</th>";
+                    try {
+                        // Search and display result
+                        const itemOrSkillResults = await search()
 
-                    var columns;
-                    if (itemDBSearch.checked) {
-                        columns = AutoColumns.getAutoColumns();
-                        for (const [columnTitle, columnDef] of Object.entries(columns)) {
-                            const columnHead = document.createElement("th");
-                            headTR.append(columnHead);
-                            columnHead.innerHTML = columnTitle;
-                            columnHead.style.cursor = "pointer";
-                            columnHead.onclick = function () {
-                                sortOrderColumnDef = columnDef;
-                                updateResultTable();
-                            }
-                        }
-                    } else {
-                        columns = Array();
-                    }
+                        updateMissingButton();
+                        const table = document.createElement("table");
+                        table.className = "content_table";
+                        const thead = document.createElement("thead");
+                        table.append(thead);
+                        const headTR = document.createElement("tr");
+                        thead.append(headTR);
+                        headTR.className = "header";
+                        const tbody = document.createElement("tbody");
+                        table.append(tbody);
+                        headTR.innerHTML += "<th></th><th>Gegenstand (" + itemOrSkillResults.length + ")</th>";
 
-                    var i = 1;
-                    var switcher = false;
-
-                    for (const itemOrSkill of itemOrSkillResults) {
-                        switcher = !switcher;
-                        const tr = document.createElement("tr");
-                        tr.className = "row" + (switcher ? "0" : "1");
-                        tbody.append(tr);
-                        var td = document.createElement("td");
-                        tr.append(td);
-                        td.innerHTML = "" + i;
-                        td = document.createElement("td");
-                        tr.append(td);
-
-                        for (const [title, columnDef] of Object.entries(columns)) {
-                            const td = document.createElement("td");
-                            td.innerHTML = getItemValue(itemOrSkill, columnDef);
-                            tr.append(td);
-                        }
-
-                        const itemSpan = document.createElement("span");
-                        const isItemAndNotSkill = _.EffectsParser.isItem(itemOrSkill);
-                        const href = isItemAndNotSkill ? _.WoD.createItemLink(itemOrSkill.name) : _.WoD.createSkillLink(itemOrSkill.name);
-                        itemSpan.append(href);
-                        href.target = "ItemView";
-
+                        var columns;
                         if (itemDBSearch.checked) {
-                            if (itemOrSkill?.data?.slots) {
-                                for (let i = 0, l = itemOrSkill.data.slots; i < l; i++) {
-                                    if (itemSpan.children.length < 2) {
-                                        const abstand = document.createElement("span");
-                                        abstand.innerHTML = "&nbsp;";
-                                        itemSpan.append(abstand);
-                                    }
-                                    const img = document.createElement("img");
-                                    img.src = "/wod/css/icons/WOD/gems/gem_0.png";
-                                    itemSpan.append(img);
+                            columns = AutoColumns.getAutoColumns();
+                            for (const [columnTitle, columnDef] of Object.entries(columns)) {
+                                const columnHead = document.createElement("th");
+                                headTR.append(columnHead);
+                                columnHead.innerHTML = columnTitle;
+                                columnHead.style.cursor = "pointer";
+                                columnHead.onclick = function () {
+                                    sortOrderColumnDef = columnDef;
+                                    updateResultTable();
                                 }
-                            } else {
-                                // nix
                             }
-
-                        } else { // Fehlende Items
-                            href.onclick = function () {
-                                itemSpan.parentElement.removeChild(itemSpan);
-                                //return wo(url + "&IS_POPUP=1");
-                            }
+                        } else {
+                            columns = Array();
                         }
 
-                        td.append(itemSpan);
-                        i++;
+                        var i = 1;
+                        var switcher = false;
+
+                        for (const itemOrSkill of itemOrSkillResults) {
+                            switcher = !switcher;
+                            const tr = document.createElement("tr");
+                            tr.className = "row" + (switcher ? "0" : "1");
+                            tbody.append(tr);
+                            var td = document.createElement("td");
+                            tr.append(td);
+                            td.innerHTML = "" + i;
+                            td = document.createElement("td");
+                            tr.append(td);
+
+                            for (const [title, columnDef] of Object.entries(columns)) {
+                                const td = document.createElement("td");
+                                td.innerHTML = getItemValue(itemOrSkill, columnDef);
+                                tr.append(td);
+                            }
+
+                            const itemSpan = document.createElement("span");
+                            const isItemAndNotSkill = _.EffectsParser.isItem(itemOrSkill);
+                            const href = isItemAndNotSkill ? _.WoD.createItemLink(itemOrSkill.name) : _.WoD.createSkillLink(itemOrSkill.name);
+                            itemSpan.append(href);
+                            href.target = "ItemView";
+
+                            if (itemDBSearch.checked) {
+                                if (itemOrSkill?.data?.slots) {
+                                    for (let i = 0, l = itemOrSkill.data.slots; i < l; i++) {
+                                        if (itemSpan.children.length < 2) {
+                                            const abstand = document.createElement("span");
+                                            abstand.innerHTML = "&nbsp;";
+                                            itemSpan.append(abstand);
+                                        }
+                                        const img = document.createElement("img");
+                                        img.src = "/wod/css/icons/WOD/gems/gem_0.png";
+                                        itemSpan.append(img);
+                                    }
+                                }
+
+                            } else { // Fehlende Items
+                                href.onclick = function () {
+                                    itemSpan.parentElement.removeChild(itemSpan);
+                                    //return wo(url + "&IS_POPUP=1");
+                                }
+                            }
+
+                            td.append(itemSpan);
+                            i++;
+                        }
+
+                        resultContainer.replaceChildren(table);
+                        if (originalResultTable.isConnected) {
+                            originalResultTable.remove();
+                        }
+                    } finally {
+                        searchInProgress = false;
+                        mySearchButton.style.pointerEvents = "";
+                        mySearchButton.removeAttribute("aria-busy");
                     }
                 }
                 mySearchButton.onclick = updateResultTable;
