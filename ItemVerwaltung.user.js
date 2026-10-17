@@ -1080,6 +1080,7 @@
                 "Gruppen-Gegenst.",
                 "Gruppengegenst.",
                 "Von",
+                "Übergeben an",
             ];
             const normalize = text => text
                 .replace(/\s+/g, " ")
