@@ -807,7 +807,13 @@
             emptyOption.value = "";
             emptyOption.textContent = "Primärer Held";
             primaryHero.append(emptyOption);
-            for (const [heroId, heroName] of Object.entries(memberNames || {})) {
+            const sortedHeroes = Object.entries(memberNames || {})
+                .sort(([heroIdA, heroNameA], [heroIdB, heroNameB]) =>
+                    String(heroNameA).localeCompare(String(heroNameB), "de", {
+                        sensitivity: "base",
+                    }) || heroIdA.localeCompare(heroIdB)
+                );
+            for (const [heroId, heroName] of sortedHeroes) {
                 const option = document.createElement("option");
                 option.value = heroId;
                 option.textContent = heroName;
