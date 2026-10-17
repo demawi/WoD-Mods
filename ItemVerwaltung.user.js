@@ -67,6 +67,7 @@
                     synchronizedHeroes[heroId] = {
                         id: heroId,
                         name: typeof hero.name === "string" ? hero.name : "",
+                        playerName: typeof hero.playerName === "string" ? hero.playerName : "",
                     };
                 }
                 await repository.set("meta/heroes", synchronizedHeroes);
@@ -195,6 +196,18 @@
                 Object.entries(heroes)
                     .map(([memberId, hero]) => [memberId, hero && hero.name || memberId])
             );
+            const ownHeroIds = new Set(
+                Object.entries(heroes)
+                    .filter(([, hero]) =>
+                        hero && hero.playerName
+                        && hero.playerName === _.WoD.getMyUserName()
+                    )
+                    .map(([heroId]) => heroId)
+            );
+            Object.defineProperty(memberNames, "_ownHeroIds", {
+                value: ownHeroIds,
+                enumerable: false,
+            });
             Object.assign(
                 memberNames,
                 Object.fromEntries(
@@ -809,7 +822,9 @@
             primaryHero.append(emptyOption);
             const sortedHeroes = Object.entries(memberNames || {})
                 .sort(([heroIdA, heroNameA], [heroIdB, heroNameB]) =>
-                    String(heroNameA).localeCompare(String(heroNameB), "de", {
+                    Number(memberNames._ownHeroIds && memberNames._ownHeroIds.has(heroIdB))
+                    - Number(memberNames._ownHeroIds && memberNames._ownHeroIds.has(heroIdA))
+                    || String(heroNameA).localeCompare(String(heroNameB), "de", {
                         sensitivity: "base",
                     }) || heroIdA.localeCompare(heroIdB)
                 );
