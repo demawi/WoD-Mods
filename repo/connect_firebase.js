@@ -12,7 +12,8 @@
  *   await sameGroup.set("items/example", { value: 1 });
  *
  * Bei createNew und connect wird einmalig meta/access/<characterId> mit
- * Heldname und Firebase-Serverzeit aktualisiert.
+ * Heldname und Firebase-Serverzeit aktualisiert. Die Gruppenansicht kann
+ * zusätzlich den vollständigen Kader unter meta/heroes synchronisieren.
  */
 const WODB_FIREBASE_DATABASE_URL = "https://wodb-f27cf-default-rtdb.europe-west1.firebasedatabase.app";
 const FIREBASE_SERVER_TIMESTAMP = {".sv": "timestamp"};
