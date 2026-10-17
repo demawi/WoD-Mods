@@ -2804,6 +2804,11 @@ class demawiRepository {
             return myMatch[1];
         }
 
+        static getBaseName(itemName) {
+            if(this.isVGName(itemName)) return this.getItemVGBaseName(itemName);
+            return itemName;
+        }
+
         /**
          * @return [vgBaseName, amount, max]
          */
@@ -2994,6 +2999,7 @@ class demawiRepository {
             DUNGEONS: "dungeons",
             QUEST: "quest",
             MY_HEROES: "myHeroes",
+            MY_GROUP: "group",
             MOVE: "move",
             ITEM: "item",
             REPORT_OVERVIEW: "report_overview",
@@ -3002,7 +3008,10 @@ class demawiRepository {
             REPORT_STATS: "report_stats", // subsite from REPORT
             REPORT_COMBAT: "report_combat", // subsite from REPORT
             SKILL: "skill",
-            ITEMS_STORE: "storage",
+            ITEMS_STORE: "storage", // Lager
+            KELLER: "cellar",
+            SCHATZKAMMER: "groupcellar",
+            GRUPPENLAGER: "groupcellar_2",
             EVENTLIST: "eventlist",
             PLAY: "play",
             HERO_CLASS: "heroClass",
@@ -3042,6 +3051,8 @@ class demawiRepository {
                     return this.VIEW.QUEST;
                 case "heroes.php":
                     return this.VIEW.MY_HEROES;
+                case "group.php":
+                    return this.VIEW.MY_GROUP;
                 case "move.php":
                     return this.VIEW.MOVE;
                 case "item.php":
@@ -3933,6 +3944,35 @@ class demawiRepository {
         }
     }
 
+    static MyGroupView = class {
+
+        static getHeroes(doc) {
+            doc = doc || document;
+            const helden = [];
+            const characterRefs = doc.querySelectorAll("#main_content .content_table tr a[href*=\"profile.php\"]");
+            for (let i = 0, l = characterRefs.length; i < l; i++) {
+                const curCharacterRef = characterRefs[i];
+                const row = curCharacterRef.closest("tr");
+                const hrefs = row.querySelectorAll("a[href*=\"class.php\"]");
+                const heroId = Number(new URL(curCharacterRef.href, doc.baseURI).searchParams.get("id"));
+                //console.log("BBB", curCharacterRef.textContent, hrefs);
+                if(hrefs.length < 2) continue; // z.B. Mentor
+                const volk = hrefs[0].textContent;
+                const klasse = hrefs[1].textContent;
+                const held = {
+                    id: heroId,
+                    name: curCharacterRef.textContent,
+                    volk: volk,
+                    klasse: klasse,
+                };
+                //console.log("Held", held);
+                helden.push(held);
+            }
+            //console.log("Helden", helden);
+            return helden;
+        }
+    }
+
     static MyHeroesView = class {
 
         /**
@@ -4451,6 +4491,14 @@ class demawiRepository {
             button.style.cursor = "pointer";
             button.onclick = callback;
             return button;
+        }
+
+        static createImgButton(height, url, fnCallback) {
+            const result = document.createElement("img");
+            result.style.height = height;
+            result.src = url;
+            result.onclick = fnCallback;
+            return result;
         }
 
         static createCheckBox(supplier, consumer) {
