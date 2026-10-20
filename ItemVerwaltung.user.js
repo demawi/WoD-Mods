@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] ItemVerwaltung
-// @version        0.1
+// @version        0.1.1
 // @author         demawi
 // @namespace      demawi
 // @description    Hilfe bei der ItemVerwaltung innerhalb einer Gruppe
@@ -17,6 +17,7 @@
 // @require        https://code.jquery.com/jquery-3.7.1.min.js#sha512=v2CJ7UaYy4JwqLDIrZUI/4hqeoQieOmAZNXBeQyjo21dadnwR+8ZaIJVT8EE2iyI61OV8e6M8PP2/4hpQINQ/g==
 // @require        https://code.jquery.com/ui/1.14.1/jquery-ui.js#sha512=ETeDoII5o/Zv6W1AtLiNDwfdkH684h6M/S8wd2N0vMEAeL3UAOf7a1SHdP1LGDieDrofe1KZpp9k6yLkR90E6A==
 // @require	       https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js#sha512=2ImtlRlf2VVmiGZsjm9bEyhjGW4dU7B6TNwh/hx/iSByxNENtj3WVE6o/9Lj4TJeVXPi4bnOIMXFIJJAeufa0A==
+// @icon         https://world-of-dungeons.de/wod/css/WOD.gif
 // ==/UserScript==
 // *************************************************************
 // *** WoD-ItemVerwaltung                                   ***
@@ -55,13 +56,15 @@
                 const heroes = _.MyGroupView.getHeroes();
                 const currentHeroId = String(_.WoD.getMyHeroId());
                 const currentHeroName = _.WoD.getMyHeroName() || "Unbekannter Held";
-                const repository = await firebase.connect(
+                const repository = await firebase.connectScoped(
                     "group",
+                    "meta",
                     undefined,
                     _.WoD.getMyHeroId(),
-                    currentHeroName
+                    currentHeroName,
+                    false
                 );
-                const repositoryHeroes = await repository.get("meta/heroes") || {};
+                const repositoryHeroes = repository.initialData.heroes || {};
                 const synchronizedHeroes = {};
                 for (const [heroId, hero] of Object.entries(repositoryHeroes)) {
                     if (!hero || typeof hero !== "object") continue;
@@ -90,7 +93,16 @@
                         && synchronizedHeroes[currentHeroId].name || currentHeroName,
                     playerName: _.WoD.getMyUserName() || "",
                 };
-                await repository.set("meta/heroes", synchronizedHeroes);
+                const metadataUpdates = {
+                    [`meta/access/${currentHeroId}`]: {
+                        name: currentHeroName,
+                        accessAt: {".sv": "timestamp"},
+                    },
+                };
+                for (const [heroId, hero] of Object.entries(synchronizedHeroes)) {
+                    metadataUpdates[`meta/heroes/${heroId}`] = hero;
+                }
+                await repository.update("", metadataUpdates);
             } catch (error) {
                 console.warn("Gruppenhelden konnten nicht mit Firebase synchronisiert werden.", error);
             }
@@ -127,14 +139,15 @@
             if (!itemSelect) return;
             const container = firebase.createRepositoryUi(
                 "group",
-                repository => this.addItemVotes(repository)
+                (repository, repositoryData) => this.addItemVotes(repository, repositoryData),
+                {dataPath: "meta", recordAccess: false}
             );
             container.dataset.wodItemverwaltungRepository = "true";
             const contentTable = itemSelect.closest("table");
             contentTable.parentElement.insertBefore(container, contentTable);
         }
 
-        static async addItemVotes(repository) {
+        static async addItemVotes(repository, initialRepositoryData) {
             const itemSelect = document.querySelector('table.content_table tbody select[name^="EquipItem["]');
             const table = itemSelect && itemSelect.closest("table");
             const tbody = table && table.tBodies[0];
@@ -205,8 +218,23 @@
                 header.dataset.wodVoteHeader = "true";
             }
 
-            const repositoryData = await repository.get("") || {};
-            const items = repositoryData.items || {};
+            const repositoryData = initialRepositoryData
+                && initialRepositoryData.meta
+                ? initialRepositoryData
+                : {meta: initialRepositoryData || {}};
+            const items = {};
+            const pageItems = new Map();
+            for (const row of rows) {
+                const itemLink = row.children[1] && row.children[1].querySelector("a");
+                if (!itemLink) continue;
+                const itemName = itemLink.textContent.replace(/!$/, "").trim();
+                const itemBaseName = _.WoDItemDb.getBaseName(itemName);
+                if (!itemBaseName) continue;
+                pageItems.set(this.getItemKey(itemBaseName), itemBaseName);
+            }
+            await Promise.all(Array.from(pageItems.keys()).map(async itemKey => {
+                items[itemKey] = await repository.get(`items/${itemKey}`) || {};
+            }));
             const characterId = _.WoD.getMyHeroId();
             table._wodCharacterId = characterId;
             const characterName = _.WoD.getMyHeroName() || "Unbekannter Held";
@@ -218,7 +246,13 @@
                     playerName,
                 };
                 try {
-                    await repository.set(`meta/heroes/${characterId}`, currentHero);
+                    await repository.update("", {
+                        [`meta/access/${characterId}`]: {
+                            name: characterName,
+                            accessAt: {".sv": "timestamp"},
+                        },
+                        [`meta/heroes/${characterId}`]: currentHero,
+                    });
                     repositoryData.meta = repositoryData.meta || {};
                     repositoryData.meta.heroes = repositoryData.meta.heroes || {};
                     repositoryData.meta.heroes[String(characterId)] = currentHero;
@@ -260,11 +294,6 @@
             if (!memberIds.includes(characterId)) {
                 memberIds.push(characterId);
             }
-            const getMemberIds = data => Array.from(new Set([
-                ...Object.keys(data && data.meta && data.meta.heroes || {}),
-                ...Object.keys(data && data.meta && data.meta.access || {}),
-                characterId,
-            ]));
             const voteViews = new Map();
             const itemNames = new Map();
             const ensureItemName = async (itemKey, itemBaseName) => {
@@ -502,11 +531,17 @@
                             await repository.set(`items/${itemKey}/votes/${characterId}`, nextVote);
                         }
                         currentVote = nextVote;
-                        const updatedRepositoryData = await repository.get("");
-                        const updatedItem = updatedRepositoryData.items
-                            && updatedRepositoryData.items[itemKey];
-                        if (updatedItem) items[itemKey] = updatedItem;
-                        const updatedMemberIds = getMemberIds(updatedRepositoryData);
+                        const updatedItem = {
+                            ...(items[itemKey] || {}),
+                            votes: {...(items[itemKey] && items[itemKey].votes || {})},
+                        };
+                        if (nextVote === "") {
+                            delete updatedItem.votes[characterId];
+                        } else {
+                            updatedItem.votes[characterId] = nextVote;
+                        }
+                        items[itemKey] = updatedItem;
+                        const updatedMemberIds = memberIds;
                         for (const view of voteViews.get(itemKey) || []) {
                             view.setState(
                                 updatedItem && updatedItem.groupDecision,
@@ -587,6 +622,10 @@
                         currentGroupDecision = {
                             ...currentGroupDecision,
                             primaryHero,
+                        };
+                        items[itemKey] = {
+                            ...(items[itemKey] || {}),
+                            groupDecision: currentGroupDecision,
                         };
                         row.dataset.wodPrimaryHero = primaryHero;
                         groupDecisionIndicator.textContent = this.getPrimaryHeroMarker(
@@ -712,12 +751,9 @@
                     for (const itemKey of visibleItemKeys) {
                         await saveGroupDecision(itemKey, decision, primaryHero);
                     }
-                    const updatedRepositoryData = await repository.get("");
-                    Object.assign(items, updatedRepositoryData.items || {});
-                    const updatedMemberIds = getMemberIds(updatedRepositoryData);
+                    const updatedMemberIds = memberIds;
                     for (const [itemKey, views] of voteViews) {
-                        const updatedItem = updatedRepositoryData.items
-                            && updatedRepositoryData.items[itemKey];
+                        const updatedItem = items[itemKey];
                         for (const view of views) {
                             view.setState(
                                 updatedItem && updatedItem.groupDecision,
@@ -807,13 +843,17 @@
                         }
                         await ensureItemName(itemKey, itemBaseName);
                         await repository.set(`items/${itemKey}/votes/${characterId}`, vote);
+                        items[itemKey] = {
+                            ...(items[itemKey] || {}),
+                            votes: {
+                                ...(items[itemKey] && items[itemKey].votes || {}),
+                                [characterId]: vote,
+                            },
+                        };
                     }
-                    const updatedRepositoryData = await repository.get("");
-                    Object.assign(items, updatedRepositoryData.items || {});
-                    const updatedMemberIds = getMemberIds(updatedRepositoryData);
+                    const updatedMemberIds = memberIds;
                     for (const [itemKey, views] of voteViews) {
-                        const updatedItem = updatedRepositoryData.items
-                            && updatedRepositoryData.items[itemKey];
+                        const updatedItem = items[itemKey];
                         for (const view of views) {
                             view.setState(
                                 updatedItem && updatedItem.groupDecision,

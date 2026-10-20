@@ -5,6 +5,7 @@
 // @include        http://*.world-of-dungeons.de/wod*spiel/hero/skillconf*
 // @include        https://*.world-of-dungeons.de/wod*spiel/hero/skillconf*
 // @version        0.2.0beta3
+// @icon           https://world-of-dungeons.de/wod/css/WOD.gif
 // ==/UserScript==
 // --------------------------------------------------------------------
 // WoD-Konfigtool

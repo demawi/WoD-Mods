@@ -7,8 +7,9 @@
 // @exclude     *://xerasia.world-of-dungeons.de*
 // @exclude     *://*.world-of-dungeons.de/wod/spiel/hero/skills.php?class=*
 // @exclude     *://*.world-of-dungeons.de/wod/spiel/hero/skills.php?subclass=*
-// @version     0.73.1-dirty2
+// @version     0.73.1-dirty3
 // @run-at      document-start
+// @icon           https://world-of-dungeons.de/wod/css/WOD.gif
 // ==/UserScript==
 "use strict";
 
@@ -5894,7 +5895,7 @@ const oClassSkills = new oSkillOptimizerSkills();
 
     const oContentLoaded = new Promise((oResolve, oReject) => {
         console.log("Wait for contentLoad", document.readyState);
-        if(document.readyState === "complete" || document.readyState === "loaded" || document.readyState === "interactive") {
+        if (document.readyState === "complete" || document.readyState === "loaded" || document.readyState === "interactive") {
             oResolve("DOMDONE");
         } else { // "loading"
             console.log("LKAHKLKLH", document.readyState);

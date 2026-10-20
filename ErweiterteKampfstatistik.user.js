@@ -12,6 +12,7 @@
 // @match          *://*.world-of-dungeons.de/wod/spiel/hero/skill.php*
 // @match          *://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
+// @icon           https://world-of-dungeons.de/wod/css/WOD.gif
 // ==/UserScript==
 // *************************************************************
 // *** WoD-Erweiterte Kammpfstatistik                        ***
