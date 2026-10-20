@@ -9,6 +9,7 @@
 // @match          *://*.world-of-dungeons.de/
 // @match          *://world-of-dungeons.de/*
 // @require        repo/DemawiRepository.js
+// @icon           https://world-of-dungeons.de/wod/css/WOD.gif
 // ==/UserScript==
 // *************************************************************
 // *** [WoD] Item-Datenbank                                  ***
