@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name           [WoD] ItemVerwaltung
-// @version        0.1.1
+// @version        0.1.2
 // @author         demawi
 // @namespace      demawi
 // @description    Hilfe bei der ItemVerwaltung innerhalb einer Gruppe

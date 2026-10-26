@@ -1647,7 +1647,7 @@ class demawiRepository {
                 }
             };
             rootWindow.addEventListener("message", messageListener, false);
-            window.addEventListener("unload", function () {
+            window.addEventListener("pagehide", function () {
                 rootWindow.removeEventListener("message", messageListener);
             });
 
@@ -1835,24 +1835,14 @@ class demawiRepository {
                 if (!isPopup) {
                     // Titel und Url ins Hauptfenster übernehmen
                     document.title = win.document.title; // rootDocument!
+                    window.history.replaceState({}, "", win.location.href); // rootWindow
 
                     win.addEventListener("beforeunload", function () {
+                        console.clear();
                         loadingIndicator.style.display = "";
                     });
-                    win.addEventListener("unload", function () {
-                        console.clear();
-                        setTimeout(function () {
-                            const newUrl = win.location.href;
-                            window.history.replaceState({}, "", newUrl); // rootWindow
-                        }, 0);
-                    });
                 } else {
-                    // Da wir beim Popup direkt auf dem Window den load-Eventlistener haben, wird dieser nach einem unload abgeräumt
-                    win.addEventListener("unload", function () {
-                        setTimeout(function () {
-                            win.addEventListener("load", captureLoadFn);
-                        }, 0);
-                    });
+                    // Popup-Navigation wird über den bestehenden load-Listener verarbeitet.
                 }
 
                 // Popup-Catcher
@@ -2508,16 +2498,18 @@ class demawiRepository {
 
         static async placeSeasonElem(doc) {
             doc = doc || document;
-            const nameElem = doc.querySelector(".hero_full");
-            if (nameElem) {
-                if (nameElem.getElementsByClassName("wodSeason").length) return;
-                nameElem.style.position = "relative";
+            const initialNameElem = doc.querySelector(".hero_full");
+            if (initialNameElem) {
+                if (initialNameElem.getElementsByClassName("wodSeason").length) return;
                 const seasonElem = await this.createSeasonElem(undefined, doc);
+                const nameElem = doc.querySelector(".hero_full");
+                if (!nameElem || nameElem.getElementsByClassName("wodSeason").length) return;
                 seasonElem.style.fontSize = "120%";
                 seasonElem.style.position = "absolute";
                 seasonElem.style.top = "0px";
                 seasonElem.style.right = "0px";
                 seasonElem.style.zIndex = "100";
+                nameElem.style.position = "relative";
                 nameElem.parentElement.append(seasonElem);
             }
         }
